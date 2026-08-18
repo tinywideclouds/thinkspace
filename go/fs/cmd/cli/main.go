@@ -21,6 +21,7 @@ import (
 
 func main() {
 	chatName := flag.String("chat", "concept-test", "The name of the exploration thread")
+	engineType := flag.String("engine", "gogit", "State engine backend to use ('gogit' or 'exec')")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -34,7 +35,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	stateEngine := gitfs.NewNativeEngine()
+	// Dynamic Engine Selection
+	var stateEngine workspace.StateEngine
+	switch *engineType {
+	case "exec":
+		fmt.Println("⚙️  Engine: Git CLI (ExecEngine with Worktrees)")
+		stateEngine = gitfs.NewGoExecEngine()
+	case "gogit":
+		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
+		stateEngine = gitfs.NewGoGitEngine()
+	default:
+		logger.Warn("Unknown engine type specified, falling back to gogit")
+		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
+		stateEngine = gitfs.NewGoGitEngine()
+	}
+
 	llmMgr := llm.NewManager(client)
 
 	homeDir, err := os.UserHomeDir()
@@ -43,7 +58,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	repoRoot := filepath.Join(homeDir, "Documents", "thinkspace", "sandboxB")
+	repoRoot := filepath.Join(homeDir, "Documents", "thinkspace", "sandboxA")
 	if err := os.MkdirAll(repoRoot, 0755); err != nil {
 		logger.Error("Failed to create workspace directory", "error", err)
 		os.Exit(1)
@@ -51,7 +66,7 @@ func main() {
 
 	fmt.Printf("📂 Using workspace root: %s\n", repoRoot)
 
-	svc := workspace.NewService(logger, stateEngine, repoRoot)
+	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
 	var thread *workspace.Thread
 	var history []*genai.Content
@@ -59,9 +74,10 @@ func main() {
 	threadDir := filepath.Join(repoRoot, "chats", *chatName)
 	ledgerPath := filepath.Join(threadDir, "conversation.jsonl")
 
+	// Thread Initialization / Resumption
 	if _, err := os.Stat(threadDir); os.IsNotExist(err) {
 		fmt.Printf("🌱 Creating new exploration thread: %s\n", *chatName)
-		thread, err = svc.StartThread(ctx, *chatName)
+		thread, err = workspaceService.StartThread(ctx, *chatName)
 		if err != nil {
 			logger.Error("Failed to start thread", "error", err)
 			os.Exit(1)
@@ -70,7 +86,7 @@ func main() {
 		initialPrompt := "Create a file called `math.go` with a function that adds two integers."
 		fmt.Printf("💬 Initial Prompt: %s\n", initialPrompt)
 
-		if err := svc.LogUserPrompt(ctx, thread, initialPrompt); err != nil {
+		if err := workspaceService.LogUserPrompt(ctx, thread, initialPrompt); err != nil {
 			logger.Error("Failed to log prompt", "error", err)
 		}
 		history = append(history, &genai.Content{Role: "user", Parts: []*genai.Part{{Text: initialPrompt}}})
@@ -84,7 +100,7 @@ func main() {
 			Dir:        threadDir,
 		}
 
-		events, err := svc.LoadEvents(ctx, thread)
+		events, err := workspaceService.LoadEvents(ctx, thread)
 		if err != nil {
 			logger.Error("Failed to load history from ledger", "error", err)
 			os.Exit(1)
@@ -103,7 +119,7 @@ func main() {
 			return
 		}
 
-		if err := svc.LogUserPrompt(ctx, thread, input); err != nil {
+		if err := workspaceService.LogUserPrompt(ctx, thread, input); err != nil {
 			logger.Error("Failed to log prompt", "error", err)
 		}
 		history = append(history, &genai.Content{Role: "user", Parts: []*genai.Part{{Text: input}}})
@@ -111,6 +127,7 @@ func main() {
 
 	fmt.Println("\n🤖 Generating...")
 
+	// LLM Streaming Loop
 	stream := llmMgr.GenerateStream(ctx, "gemini-3.5-flash", history)
 
 	var fullModelResponse strings.Builder
@@ -138,11 +155,12 @@ func main() {
 	fmt.Println()
 
 	if fullModelResponse.Len() > 0 {
-		if err := svc.LogModelResponse(ctx, thread, fullModelResponse.String()); err != nil {
+		if err := workspaceService.LogModelResponse(ctx, thread, fullModelResponse.String()); err != nil {
 			logger.Error("Failed to log model response", "error", err)
 		}
 	}
 
+	// Tool Resolution Loop
 	for _, call := range interceptedTools {
 		fmt.Printf("\n🛠️  Tool Call Detected: Proposing %s\n", call.FilePath)
 		fmt.Printf("   Reasoning: %s\n", call.Reasoning)
@@ -151,33 +169,37 @@ func main() {
 			call.FilePath: []byte(call.NewContent + call.Patch),
 		}
 
-		candidate, err := svc.ProposeCandidate(ctx, thread, "propose_change", files)
+		candidate, err := workspaceService.ProposeCandidate(ctx, thread, "propose_change", files)
 		if err != nil {
 			logger.Error("Failed to propose candidate", "error", err)
 			continue
 		}
 
-		// RESTORED: Tell the user exactly what is happening
-		fmt.Printf("   👀 Candidate branch '%s' is checked out and ready for inspection.\n", candidate.Branch)
+		fmt.Printf("   👀 Candidate branch '%s' has been previewed in your working directory.\n", candidate.Branch)
 		fmt.Print("   Inspect the files in your editor. Accept candidate? (y/n): ")
 
 		reader := bufio.NewReader(os.Stdin)
 		decision, _ := reader.ReadString('\n')
 		accept := strings.ToLower(strings.TrimSpace(decision)) == "y"
 
-		if err := svc.ResolveCandidate(ctx, thread, candidate, accept); err != nil {
+		reason := "User manually rejected via CLI"
+		if accept {
+			reason = "User manually accepted via CLI"
+		}
+
+		if err := workspaceService.ResolveCandidate(ctx, thread, candidate, accept, reason); err != nil {
 			logger.Error("Resolution failed", "error", err)
 		}
 
 		if accept {
 			fmt.Println("   ✅ Candidate accepted and merged into the Thread.")
 		} else {
-			fmt.Println("   ❌ Candidate rejected. Thread remains unmodified.")
+			fmt.Println("   ❌ Candidate rejected. Sandbox destroyed. Working directory restored.")
 		}
 	}
 
 	fmt.Println("\n💾 Checkpointing ledger...")
-	if _, err := svc.Checkpoint(ctx, thread, "End of CLI turn"); err != nil {
+	if _, err := workspaceService.Checkpoint(ctx, thread, "End of CLI turn"); err != nil {
 		logger.Error("Failed to checkpoint ledger", "error", err)
 	}
 	fmt.Println("Done.")
