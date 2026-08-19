@@ -36,4 +36,6 @@ type StateEngine interface {
 
 	// Reject cleans up the candidate branch from the active workspace, leaving an annotated tag with the reason.
 	Reject(ctx context.Context, mainDir string, threadID string, candidateID string, reason string) error
+
+	ReadCandidateDiff(ctx context.Context, repoRoot, threadID, candidateID string) (string, error)
 }

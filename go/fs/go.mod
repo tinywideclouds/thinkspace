@@ -2,7 +2,10 @@ module github.com/tinywideclouds.com/thinkspace
 
 go 1.26
 
-require google.golang.org/genai v1.68.0
+require (
+	google.golang.org/genai v1.68.0
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

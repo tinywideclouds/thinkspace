@@ -27,6 +27,30 @@ func NewService(logger *slog.Logger, state StateEngine, workspaceRoot string) *S
 	}
 }
 
+// PreviewCandidate exposes the state engine's preview functionality to the orchestrator.
+func (s *Service) PreviewCandidate(ctx context.Context, thread *Thread, candidateID string) error {
+	return s.state.PreviewCandidate(ctx, s.workspaceRoot, thread.ID, candidateID)
+}
+
+// ResolveCandidate processes the human decision and explicitly records the reason.
+func (s *Service) ResolveCandidate(ctx context.Context, thread *Thread, candidateID string, accept bool, reason string) error {
+	if accept {
+		if err := s.state.Accept(ctx, s.workspaceRoot, thread.ID, candidateID, reason); err != nil {
+			return fmt.Errorf("accepting candidate: %w", err)
+		}
+	} else {
+		if err := s.state.Reject(ctx, s.workspaceRoot, thread.ID, candidateID, reason); err != nil {
+			return fmt.Errorf("rejecting candidate: %w", err)
+		}
+	}
+
+	if err := s.LogResolution(ctx, thread, candidateID, accept, reason); err != nil {
+		s.logger.ErrorContext(ctx, "failed to log resolution to ledger", "error", err)
+	}
+
+	return nil
+}
+
 // StartThread initializes a new logical workspace and establishes its state.
 func (s *Service) StartThread(ctx context.Context, id string) (*Thread, error) {
 	threadDir := filepath.Join(s.workspaceRoot, "chats", id)
@@ -118,25 +142,6 @@ func (s *Service) ProposeCandidate(ctx context.Context, thread *Thread, toolName
 		Status:    StatusPending,
 		CreatedAt: now,
 	}, nil
-}
-
-// ResolveCandidate processes the human decision and explicitly records the reason.
-func (s *Service) ResolveCandidate(ctx context.Context, thread *Thread, candidate *Candidate, accept bool, reason string) error {
-	if accept {
-		if err := s.state.Accept(ctx, s.workspaceRoot, thread.ID, candidate.ID, reason); err != nil {
-			return fmt.Errorf("accepting candidate: %w", err)
-		}
-	} else {
-		if err := s.state.Reject(ctx, s.workspaceRoot, thread.ID, candidate.ID, reason); err != nil {
-			return fmt.Errorf("rejecting candidate: %w", err)
-		}
-	}
-
-	if err := s.LogResolution(ctx, thread, candidate.ID, accept, reason); err != nil {
-		s.logger.ErrorContext(ctx, "failed to log resolution to ledger", "error", err)
-	}
-
-	return nil
 }
 
 // AppendEvent writes an interaction to the append-only ledger on disk.
@@ -259,4 +264,18 @@ func (s *Service) LogResolution(ctx context.Context, thread *Thread, candidateID
 		},
 	}
 	return s.AppendEvent(ctx, thread, ev)
+}
+
+// ReadCandidate fetches the changes made in a specific candidate branch
+// so the Manager LLM can review the sub-agent's work.
+func (s *Service) ReadCandidate(ctx context.Context, thread *Thread, candidateID string) (string, error) {
+	s.logger.DebugContext(ctx, "reading candidate contents", slog.String("candidate_id", candidateID))
+
+	// We delegate the actual diff/file reading to the StateEngine
+	diff, err := s.state.ReadCandidateDiff(ctx, s.workspaceRoot, thread.ID, candidateID)
+	if err != nil {
+		return "", fmt.Errorf("reading candidate diff: %w", err)
+	}
+
+	return diff, nil
 }

@@ -11,17 +11,70 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
+	"google.golang.org/genai"
+	"gopkg.in/yaml.v3"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-
-	"google.golang.org/genai"
 )
 
+// TerminalUI implements session.UserInterface for the CLI binary.
+type TerminalUI struct {
+	reader *bufio.Reader
+}
+
+func (ui *TerminalUI) OnTextChunk(text string) {
+	fmt.Print(text)
+}
+
+func (ui *TerminalUI) OnDelegationStart(count int, instructions string) {
+	fmt.Printf("\n\n🚀 Delegating task to %d agent(s): %s\n", count, instructions)
+}
+
+func (ui *TerminalUI) OnDelegationComplete(summary string) {
+	fmt.Println("\n✅ Delegation Flow Complete:\n" + summary)
+}
+
+func (ui *TerminalUI) WantToReview() bool {
+	fmt.Print("\nReview candidates manually? (y/n): ")
+	decision, _ := ui.reader.ReadString('\n')
+	return strings.ToLower(strings.TrimSpace(decision)) == "y"
+}
+
+func (ui *TerminalUI) ReviewCandidate(branch string) bool {
+	fmt.Printf("\n👀 Previewing %s...\n", branch)
+	fmt.Println("--------------------------------------------------")
+	fmt.Printf("📂 Files have been successfully checked out.\n")
+	fmt.Printf("💻 Open your IDE to inspect the code for %s.\n", branch)
+	fmt.Println("--------------------------------------------------")
+
+	fmt.Print("Accept candidate? (y/n): ")
+	accept, _ := ui.reader.ReadString('\n')
+	return strings.ToLower(strings.TrimSpace(accept)) == "y"
+}
+
+func loadThinkSpaceConfig(path string) workspace.ThinkSpaceConfig {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("⚠️ Configuration not found at %s. Application requires a domain configuration to start.\n", path)
+		os.Exit(1)
+	}
+	var cfg workspace.ThinkSpaceConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		fmt.Printf("⚠️ Invalid YAML at %s: %v\n", path, err)
+		os.Exit(1)
+	}
+	// Delegate verification and defaults to the domain logic
+	cfg.ApplyDefaults()
+	return cfg
+}
+
 func main() {
-	chatName := flag.String("chat", "concept-test", "The name of the exploration thread")
+	chatName := flag.String("chat", "unit-circle-test", "The name of the exploration thread")
 	engineType := flag.String("engine", "gogit", "State engine backend to use ('gogit' or 'exec')")
+	spaceName := flag.String("space", "sandbox", "The think space to use")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -35,46 +88,56 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Dynamic Engine Selection
-	var stateEngine workspace.StateEngine
-	switch *engineType {
-	case "exec":
-		fmt.Println("⚙️  Engine: Git CLI (ExecEngine with Worktrees)")
-		stateEngine = gitfs.NewGoExecEngine()
-	case "gogit":
-		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
-		stateEngine = gitfs.NewGoGitEngine()
-	default:
-		logger.Warn("Unknown engine type specified, falling back to gogit")
-		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
-		stateEngine = gitfs.NewGoGitEngine()
-	}
-
-	llmMgr := llm.NewManager(client)
-
+	// 1. Establish Well-Known Paths
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error("Failed to get user home directory", "error", err)
 		os.Exit(1)
 	}
 
-	repoRoot := filepath.Join(homeDir, "Documents", "thinkspace", "sandboxA")
+	repoRoot := filepath.Join(homeDir, "Documents", "thinkspace", *spaceName)
+	configPath := filepath.Join(homeDir, "Documents", "thinkspace", "configs", "golang.yaml")
+
 	if err := os.MkdirAll(repoRoot, 0755); err != nil {
 		logger.Error("Failed to create workspace directory", "error", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("📂 Using workspace root: %s\n", repoRoot)
+	// 2. Dynamic Engine Selection
+	var stateEngine workspace.StateEngine
+	switch *engineType {
+	case "exec":
+		fmt.Println("⚙️  Engine: Git CLI (ExecEngine with Worktrees)")
+		stateEngine = gitfs.NewGoExecEngine()
+	case "gogit":
+		fallthrough
+	default:
+		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
+		stateEngine = gitfs.NewGoGitEngine()
+	}
 
+	// 3. Initialize Domain & Orchestration Wiring
+	tsConfig := loadThinkSpaceConfig(configPath)
+	activeThinkSpace := workspace.NewGoThinkSpace(tsConfig)
+	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
+
+	llmMgr := llm.NewManager(client)
+	subAgentExecutor := llm.SubAgentFactory(client, workerModel)
+	fanOutFlow := workspace.NewFanOutFlow(logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
+	ui := &TerminalUI{reader: bufio.NewReader(os.Stdin)}
+	coordinator := session.NewCoordinator(logger, workspaceService, llmMgr, subAgentExecutor, fanOutFlow)
+
+	fmt.Printf("📂 Workspace root: %s\n", repoRoot)
+	fmt.Printf("📄 Config loaded from: %s\n", configPath)
+
+	// 4. Thread Initialization / Resumption
+	threadDir := filepath.Join(repoRoot, "chats", *chatName)
+	ledgerPath := filepath.Join(threadDir, "conversation.jsonl")
 	var thread *workspace.Thread
 	var history []*genai.Content
 
-	threadDir := filepath.Join(repoRoot, "chats", *chatName)
-	ledgerPath := filepath.Join(threadDir, "conversation.jsonl")
-
-	// Thread Initialization / Resumption
 	if _, err := os.Stat(threadDir); os.IsNotExist(err) {
 		fmt.Printf("🌱 Creating new exploration thread: %s\n", *chatName)
 		thread, err = workspaceService.StartThread(ctx, *chatName)
@@ -83,12 +146,10 @@ func main() {
 			os.Exit(1)
 		}
 
-		initialPrompt := "Create a file called `math.go` with a function that adds two integers."
+		initialPrompt := "Generate a function to check if a point is in a unit circle. Fan this out to 2 agents using different mathematical approaches, and require unit tests."
 		fmt.Printf("💬 Initial Prompt: %s\n", initialPrompt)
 
-		if err := workspaceService.LogUserPrompt(ctx, thread, initialPrompt); err != nil {
-			logger.Error("Failed to log prompt", "error", err)
-		}
+		_ = workspaceService.LogUserPrompt(ctx, thread, initialPrompt)
 		history = append(history, &genai.Content{Role: "user", Parts: []*genai.Part{{Text: initialPrompt}}})
 
 	} else {
@@ -102,16 +163,15 @@ func main() {
 
 		events, err := workspaceService.LoadEvents(ctx, thread)
 		if err != nil {
-			logger.Error("Failed to load history from ledger", "error", err)
+			logger.Error("Failed to load history", "error", err)
 			os.Exit(1)
 		}
 
 		history = llmMgr.BuildHistory(events)
-		fmt.Printf("Loaded %d historical turns from ledger.\n", len(history))
+		fmt.Printf("Loaded %d historical turns.\n", len(history))
 
 		fmt.Print("\n> ")
-		reader := bufio.NewReader(os.Stdin)
-		input, _ := reader.ReadString('\n')
+		input, _ := ui.reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
 		if input == "" {
@@ -119,88 +179,17 @@ func main() {
 			return
 		}
 
-		if err := workspaceService.LogUserPrompt(ctx, thread, input); err != nil {
-			logger.Error("Failed to log prompt", "error", err)
-		}
+		_ = workspaceService.LogUserPrompt(ctx, thread, input)
 		history = append(history, &genai.Content{Role: "user", Parts: []*genai.Part{{Text: input}}})
 	}
 
-	fmt.Println("\n🤖 Generating...")
+	fmt.Println("\n🤖 Main Session Thinking...")
 
-	// LLM Streaming Loop
-	stream := llmMgr.GenerateStream(ctx, "gemini-3.5-flash", history)
-
-	var fullModelResponse strings.Builder
-	var interceptedTools []llm.ToolCall
-
-	for chunk, err := range stream {
-		if err != nil {
-			logger.Error("Stream generation failed", "error", err)
-			os.Exit(1)
-		}
-
-		if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
-			for _, part := range chunk.Candidates[0].Content.Parts {
-				if part.Text != "" {
-					fmt.Print(part.Text)
-					fullModelResponse.WriteString(part.Text)
-				}
-			}
-		}
-
-		calls := llmMgr.InterceptToolCalls(chunk)
-		interceptedTools = append(interceptedTools, calls...)
+	// 5. Hand off to the Session Engine
+	if err := coordinator.ExecuteTurn(ctx, thread, activeThinkSpace, history, ui); err != nil {
+		logger.Error("Execution turn failed", "error", err)
+		os.Exit(1)
 	}
 
-	fmt.Println()
-
-	if fullModelResponse.Len() > 0 {
-		if err := workspaceService.LogModelResponse(ctx, thread, fullModelResponse.String()); err != nil {
-			logger.Error("Failed to log model response", "error", err)
-		}
-	}
-
-	// Tool Resolution Loop
-	for _, call := range interceptedTools {
-		fmt.Printf("\n🛠️  Tool Call Detected: Proposing %s\n", call.FilePath)
-		fmt.Printf("   Reasoning: %s\n", call.Reasoning)
-
-		files := map[string][]byte{
-			call.FilePath: []byte(call.NewContent + call.Patch),
-		}
-
-		candidate, err := workspaceService.ProposeCandidate(ctx, thread, "propose_change", files)
-		if err != nil {
-			logger.Error("Failed to propose candidate", "error", err)
-			continue
-		}
-
-		fmt.Printf("   👀 Candidate branch '%s' has been previewed in your working directory.\n", candidate.Branch)
-		fmt.Print("   Inspect the files in your editor. Accept candidate? (y/n): ")
-
-		reader := bufio.NewReader(os.Stdin)
-		decision, _ := reader.ReadString('\n')
-		accept := strings.ToLower(strings.TrimSpace(decision)) == "y"
-
-		reason := "User manually rejected via CLI"
-		if accept {
-			reason = "User manually accepted via CLI"
-		}
-
-		if err := workspaceService.ResolveCandidate(ctx, thread, candidate, accept, reason); err != nil {
-			logger.Error("Resolution failed", "error", err)
-		}
-
-		if accept {
-			fmt.Println("   ✅ Candidate accepted and merged into the Thread.")
-		} else {
-			fmt.Println("   ❌ Candidate rejected. Sandbox destroyed. Working directory restored.")
-		}
-	}
-
-	fmt.Println("\n💾 Checkpointing ledger...")
-	if _, err := workspaceService.Checkpoint(ctx, thread, "End of CLI turn"); err != nil {
-		logger.Error("Failed to checkpoint ledger", "error", err)
-	}
-	fmt.Println("Done.")
+	fmt.Println("\nDone.")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-git/go-git/v5"
@@ -30,6 +31,43 @@ func setupAgentTestEnvironment(t *testing.T) (context.Context, string, *gitfs.Go
 	}
 
 	return ctx, mainDir, engine, threadID, candidateID
+}
+
+func TestGoGitEngine_ReadCandidateDiff(t *testing.T) {
+	ctx, mainDir, engine, threadID, candidateID := setupAgentTestEnvironment(t)
+
+	// 1. SPAWN
+	sandboxDir, err := engine.SpawnSandbox(ctx, mainDir, threadID, candidateID)
+	if err != nil {
+		t.Fatalf("SpawnSandbox failed: %v", err)
+	}
+
+	// 2. COMMIT new file
+	testFilePath := filepath.Join(sandboxDir, "chats", threadID, "docs", "feature.go")
+	os.MkdirAll(filepath.Dir(testFilePath), 0755)
+	expectedContent := "package feature\n\nfunc Run() {}\n"
+	os.WriteFile(testFilePath, []byte(expectedContent), 0644)
+
+	_, err = engine.CommitSandbox(ctx, sandboxDir, "feat: add feature")
+	if err != nil {
+		t.Fatalf("CommitSandbox failed: %v", err)
+	}
+
+	// 3. SUBMIT
+	if err := engine.SubmitSandbox(ctx, sandboxDir, mainDir, candidateID); err != nil {
+		t.Fatalf("SubmitSandbox failed: %v", err)
+	}
+
+	// 4. READ DIFF
+	diffStr, err := engine.ReadCandidateDiff(ctx, mainDir, threadID, candidateID)
+	if err != nil {
+		t.Fatalf("ReadCandidateDiff failed: %v", err)
+	}
+
+	// Verify diff contains the code we wrote
+	if !strings.Contains(diffStr, "func Run() {}") {
+		t.Errorf("Diff did not contain expected added text. Got:\n%s", diffStr)
+	}
 }
 
 func TestGoGitEngine_AgentSandbox_Lifecycle_Reject(t *testing.T) {

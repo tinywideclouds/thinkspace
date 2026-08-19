@@ -214,6 +214,53 @@ func (e *GoGitEngine) CloseSandbox(ctx context.Context, sandboxDir string) error
 
 // --- Main Session / User Review ---
 
+func (e *GoGitEngine) ReadCandidateDiff(ctx context.Context, mainDir string, threadID string, candidateID string) (string, error) {
+	repository, err := git.PlainOpen(mainDir)
+	if err != nil {
+		return "", fmt.Errorf("opening repository: %w", err)
+	}
+
+	threadBranch := plumbing.NewBranchReferenceName(fmt.Sprintf("chat/%s", threadID))
+	candidateBranch := plumbing.NewBranchReferenceName(fmt.Sprintf("candidate/%s", candidateID))
+
+	threadRef, err := repository.Reference(threadBranch, true)
+	if err != nil {
+		return "", fmt.Errorf("resolving thread branch: %w", err)
+	}
+
+	candidateRef, err := repository.Reference(candidateBranch, true)
+	if err != nil {
+		return "", fmt.Errorf("resolving candidate branch: %w", err)
+	}
+
+	threadCommit, err := repository.CommitObject(threadRef.Hash())
+	if err != nil {
+		return "", fmt.Errorf("getting thread commit: %w", err)
+	}
+
+	candidateCommit, err := repository.CommitObject(candidateRef.Hash())
+	if err != nil {
+		return "", fmt.Errorf("getting candidate commit: %w", err)
+	}
+
+	threadTree, err := threadCommit.Tree()
+	if err != nil {
+		return "", fmt.Errorf("getting thread tree: %w", err)
+	}
+
+	candidateTree, err := candidateCommit.Tree()
+	if err != nil {
+		return "", fmt.Errorf("getting candidate tree: %w", err)
+	}
+
+	patch, err := threadTree.Patch(candidateTree)
+	if err != nil {
+		return "", fmt.Errorf("generating patch: %w", err)
+	}
+
+	return patch.String(), nil
+}
+
 func (e *GoGitEngine) PreviewCandidate(ctx context.Context, mainDir string, threadID string, candidateID string) error {
 	repository, err := git.PlainOpen(mainDir)
 	if err != nil {
@@ -257,13 +304,11 @@ func (e *GoGitEngine) createAnnotatedTag(repository *git.Repository, targetHash 
 		return err
 	}
 
-	// FIXED: Capture the returned plumbing.Hash alongside the error
 	tagHash, err := repository.Storer.SetEncodedObject(obj)
 	if err != nil {
 		return err
 	}
 
-	// Use the returned tagHash to create the reference
 	refName := plumbing.ReferenceName(fmt.Sprintf("refs/tags/%s", tagName))
 	ref := plumbing.NewHashReference(refName, tagHash)
 

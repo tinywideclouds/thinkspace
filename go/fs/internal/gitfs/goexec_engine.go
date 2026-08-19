@@ -122,6 +122,17 @@ func (e *GoExecEngine) CloseSandbox(ctx context.Context, sandboxDir string) erro
 
 // --- Main Session / User Review ---
 
+func (e *GoExecEngine) ReadCandidateDiff(ctx context.Context, mainDir string, threadID string, candidateID string) (string, error) {
+	threadBranch := fmt.Sprintf("chat/%s", threadID)
+	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
+
+	diff, err := e.runGit(ctx, mainDir, "diff", threadBranch+"..."+candidateBranch)
+	if err != nil {
+		return "", fmt.Errorf("generating git diff: %w", err)
+	}
+	return diff, nil
+}
+
 func (e *GoExecEngine) PreviewCandidate(ctx context.Context, mainDir string, threadID string, candidateID string) error {
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	_, err := e.runGit(ctx, mainDir, "switch", candidateBranch)

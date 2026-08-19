@@ -3,17 +3,16 @@ package llm
 import (
 	"context"
 	"fmt"
-	"google.golang.org/genai"
 	"iter"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"google.golang.org/genai"
 )
 
+// ToolCall now generically captures ANY function call requested by the LLM.
 type ToolCall struct {
-	FilePath   string
-	Patch      string
-	NewContent string
-	Reasoning  string
+	Name string
+	Args map[string]any
 }
 
 type Manager struct {
@@ -24,14 +23,17 @@ func NewManager(client *genai.Client) *Manager {
 	return &Manager{client: client}
 }
 
-func (m *Manager) GenerateStream(ctx context.Context, model string, history []*genai.Content) iter.Seq2[*genai.GenerateContentResponse, error] {
+// GenerateStream dynamically accepts tools and the system prompt from the active ThinkSpace.
+func (m *Manager) GenerateStream(ctx context.Context, model string, systemPrompt string, tools []*genai.Tool, history []*genai.Content) iter.Seq2[*genai.GenerateContentResponse, error] {
 	config := &genai.GenerateContentConfig{
-		Tools:       GetWorkspaceTools(),
-		Temperature: genai.Ptr(float32(0.2)),
+		Tools:             tools,
+		Temperature:       genai.Ptr(float32(0.2)),
+		SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: systemPrompt}}},
 	}
 	return m.client.Models.GenerateContentStream(ctx, model, history, config)
 }
 
+// InterceptToolCalls is now completely domain-agnostic.
 func (m *Manager) InterceptToolCalls(chunk *genai.GenerateContentResponse) []ToolCall {
 	var calls []ToolCall
 	if len(chunk.Candidates) == 0 || chunk.Candidates[0].Content == nil {
@@ -39,20 +41,16 @@ func (m *Manager) InterceptToolCalls(chunk *genai.GenerateContentResponse) []Too
 	}
 
 	for _, part := range chunk.Candidates[0].Content.Parts {
-		if part.FunctionCall != nil && part.FunctionCall.Name == "propose_change" {
-			args := part.FunctionCall.Args
+		if part.FunctionCall != nil {
 			calls = append(calls, ToolCall{
-				FilePath:   args["file_path"].(string),
-				Patch:      safeString(args["patch"]),
-				NewContent: safeString(args["new_content"]),
-				Reasoning:  safeString(args["reasoning"]),
+				Name: part.FunctionCall.Name,
+				Args: part.FunctionCall.Args,
 			})
 		}
 	}
 	return calls
 }
 
-// BuildHistory translates our domain events into the Google GenAI Content schema.
 // BuildHistory translates our domain events into the Google GenAI Content schema.
 func (m *Manager) BuildHistory(events []workspace.Event) []*genai.Content {
 	var history []*genai.Content
