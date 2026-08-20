@@ -11,11 +11,20 @@ import (
 	"google.golang.org/genai"
 )
 
+type DelegationStrategy int
+
+const (
+	StrategySkip DelegationStrategy = iota
+	StrategyManual
+	StrategyReview
+	StrategyRefine
+)
+
 type UserInterface interface {
 	OnTextChunk(text string)
 	OnDelegationStart(agentCount int, instructions string)
 	OnDelegationComplete(summary string)
-	WantToReview() bool
+	ChooseNextStep() DelegationStrategy
 	ReviewCandidate(branch string) (accepted bool)
 }
 
@@ -65,7 +74,7 @@ func (c *Coordinator) ExecuteTurn(
 
 	for chunk, err := range stream {
 		if err != nil {
-			return fmt.Errorf("stream failed: %w", err)
+			return fmt.Errorf("initial stream failed: %w", err)
 		}
 
 		if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
@@ -85,15 +94,19 @@ func (c *Coordinator) ExecuteTurn(
 		if err := c.service.LogModelResponse(ctx, thread, fullModelResponse.String()); err != nil {
 			c.logger.ErrorContext(ctx, "failed to log response", "error", err)
 		}
+		history = append(history, &genai.Content{
+			Role:  "model",
+			Parts: []*genai.Part{{Text: fullModelResponse.String()}},
+		})
 	}
 
 	for _, call := range interceptedTools {
 		if call.Name == "propose_change" {
 			countFloat, _ := call.Args["agent_count"].(float64)
-			instructions, _ := call.Args["instructions"].(string)
 			agentCount := int(countFloat)
 
-			ui.OnDelegationStart(agentCount, instructions)
+			instructionStr := fmt.Sprintf("Spawning %d agents to propose implementations.", agentCount)
+			ui.OnDelegationStart(agentCount, instructionStr)
 
 			result, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, call.Args, c.executor)
 			if err != nil {
@@ -106,34 +119,50 @@ func (c *Coordinator) ExecuteTurn(
 				continue
 			}
 
-			if !ui.WantToReview() {
+			branchesToReview := result.Branches
+
+			// Dynamically ask the user what to do next based on the agents' output
+			strategy := ui.ChooseNextStep()
+
+			// If the user wants to abort right now, clean up all branches immediately.
+			if strategy == StrategySkip {
+				for _, branch := range branchesToReview {
+					candidateID := strings.TrimPrefix(branch, "candidate/")
+					_ = c.service.ResolveCandidate(ctx, thread, candidateID, false, "Auto-rejected (Review Skipped)")
+				}
 				continue
 			}
 
-			// CORRECTED SEQUENCE: Check out FIRST, then Review
-			for _, branch := range result.Branches {
+			if strategy == StrategyReview || strategy == StrategyRefine {
+				branchesToReview = c.executeLLMReviewPhase(ctx, thread, thinkSpace, history, ui, strategy, result.Branches)
+			}
+
+			hasAcceptedAny := false
+			for _, branch := range branchesToReview {
 				candidateID := strings.TrimPrefix(branch, "candidate/")
 
-				// 1. Physically switch the Git working tree
-				if err := c.service.PreviewCandidate(ctx, thread, candidateID); err != nil {
-					c.logger.ErrorContext(ctx, "preview checkout failed", "error", err)
+				if hasAcceptedAny {
+					// Cleanup: We already accepted one, so auto-reject the runners-up
+					_ = c.service.ResolveCandidate(ctx, thread, candidateID, false, "Auto-rejected (Another candidate was accepted)")
 					continue
 				}
 
-				// 2. Now ask the user to look at it
+				if err := c.service.PreviewCandidate(ctx, thread, candidateID); err != nil {
+					c.logger.ErrorContext(ctx, "preview checkout failed", "error", err)
+					_ = c.service.ResolveCandidate(ctx, thread, candidateID, false, "Auto-rejected (Preview checkout failed)")
+					continue
+				}
+
 				accept := ui.ReviewCandidate(branch)
 
 				reason := "Rejected via triage"
 				if accept {
 					reason = "Accepted via triage"
+					hasAcceptedAny = true
 				}
 
 				if err := c.service.ResolveCandidate(ctx, thread, candidateID, accept, reason); err != nil {
 					c.logger.ErrorContext(ctx, "failed to resolve candidate", "error", err)
-				}
-
-				if accept {
-					break // Stop reviewing if they accepted one
 				}
 			}
 		}
@@ -141,4 +170,103 @@ func (c *Coordinator) ExecuteTurn(
 
 	_, err := c.service.Checkpoint(ctx, thread, "End of session turn")
 	return err
+}
+
+func (c *Coordinator) executeLLMReviewPhase(
+	ctx context.Context,
+	thread *workspace.Thread,
+	thinkSpace workspace.ThinkSpace,
+	history []*genai.Content,
+	ui UserInterface,
+	strategy DelegationStrategy,
+	candidateBranches []string,
+) []string {
+	var ledgerPromptBuilder strings.Builder
+	ledgerPromptBuilder.WriteString("The automated sub-agents have completed their proposals. Please evaluate the following candidate diffs. ")
+
+	if strategy == StrategyRefine {
+		ledgerPromptBuilder.WriteString("Write a detailed comparative summary. Based on your evaluation, your entire response will then be used as the architectural instruction for a single, final sub-agent to synthesize the ultimate best version.\n\n")
+	} else {
+		ledgerPromptBuilder.WriteString("Write a comparative summary and recommend the best approach to the human user.\n\n")
+	}
+
+	ledgerPromptBuilder.WriteString("### Candidate Branches\n\n")
+
+	var diffsBuilder strings.Builder
+	for _, branch := range candidateBranches {
+		candidateID := strings.TrimPrefix(branch, "candidate/")
+
+		ledgerPromptBuilder.WriteString(fmt.Sprintf("* [`%s`](#branch:%s)\n", branch, branch))
+
+		diff, err := c.service.ReadCandidate(ctx, thread, candidateID)
+		if err != nil || diff == "" {
+			diff = "// No readable diff generated or error fetching diff."
+		}
+
+		diffsBuilder.WriteString(fmt.Sprintf("#### %s\n```diff\n%s\n```\n\n", branch, diff))
+	}
+
+	ledgerPrompt := ledgerPromptBuilder.String()
+	llmPrompt := ledgerPrompt + "\n\n### Code Diffs\n\n" + diffsBuilder.String()
+
+	if err := c.service.LogUserMessage(ctx, thread, ledgerPrompt); err != nil {
+		c.logger.ErrorContext(ctx, "failed to log evaluation prompt to ledger", "error", err)
+	}
+
+	evalHistory := make([]*genai.Content, len(history))
+	copy(evalHistory, history)
+	evalHistory = append(evalHistory, &genai.Content{
+		Role:  "user",
+		Parts: []*genai.Part{{Text: llmPrompt}},
+	})
+
+	ui.OnTextChunk("\n\n🤖 Manager evaluating candidates...\n")
+
+	managerModel := thinkSpace.Model(workspace.ModelCategoryManager)
+	evalStream := c.llmMgr.GenerateStream(ctx, managerModel, thinkSpace.SystemPrompt(), nil, evalHistory)
+
+	var evaluationResponse strings.Builder
+	for chunk, err := range evalStream {
+		if err != nil {
+			c.logger.ErrorContext(ctx, "evaluation stream failed", "error", err)
+			return candidateBranches
+		}
+		if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
+			for _, part := range chunk.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					ui.OnTextChunk(part.Text)
+					evaluationResponse.WriteString(part.Text)
+				}
+			}
+		}
+	}
+
+	if evaluationResponse.Len() > 0 {
+		_ = c.service.LogModelResponse(ctx, thread, evaluationResponse.String())
+	}
+
+	if strategy == StrategyReview {
+		return candidateBranches
+	}
+
+	ui.OnTextChunk("\n\n🚀 Synthesizing final candidate based on evaluation...\n")
+
+	refineArgs := map[string]any{
+		"agent_count": float64(1),
+		"agent_instructions": []any{
+			fmt.Sprintf("Synthesize a final implementation based on this architectural evaluation:\n\n%s", evaluationResponse.String()),
+		},
+	}
+
+	refineResult, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, refineArgs, c.executor)
+	if err != nil {
+		c.logger.ErrorContext(ctx, "refinement flow failed", "error", err)
+		ui.OnTextChunk("\n\n⚠️ Refinement orchestration failed. Falling back to original candidates.\n")
+		return candidateBranches
+	}
+
+	ui.OnDelegationComplete(refineResult.Summary)
+
+	finalBranches := append(refineResult.Branches, candidateBranches...)
+	return finalBranches
 }

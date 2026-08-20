@@ -220,6 +220,17 @@ func (s *Service) LogUserPrompt(ctx context.Context, thread *Thread, content str
 	return s.AppendEvent(ctx, thread, ev)
 }
 
+// LogUserMessage explicitly records an injected system or evaluation prompt into the ledger.
+func (s *Service) LogUserMessage(ctx context.Context, thread *Thread, content string) error {
+	ev := Event{
+		ID:        fmt.Sprintf("usr-%d", time.Now().UnixNano()),
+		Timestamp: time.Now().UTC(),
+		Type:      EventPrompt,
+		Content:   content,
+	}
+	return s.AppendEvent(ctx, thread, ev)
+}
+
 // LogModelResponse creates and appends a model output event to the ledger.
 func (s *Service) LogModelResponse(ctx context.Context, thread *Thread, content string) error {
 	ev := Event{

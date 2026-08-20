@@ -37,10 +37,27 @@ func (ui *TerminalUI) OnDelegationComplete(summary string) {
 	fmt.Println("\n✅ Delegation Flow Complete:\n" + summary)
 }
 
-func (ui *TerminalUI) WantToReview() bool {
-	fmt.Print("\nReview candidates manually? (y/n): ")
-	decision, _ := ui.reader.ReadString('\n')
-	return strings.ToLower(strings.TrimSpace(decision)) == "y"
+func (ui *TerminalUI) ChooseNextStep() session.DelegationStrategy {
+	fmt.Println("\nSelect Next Step:")
+	fmt.Println("[1] Manual Review (I will read the generated code)")
+	fmt.Println("[2] Assisted Review (Manager evaluates diffs, I decide)")
+	fmt.Println("[3] Auto-Refine (Manager evaluates, synthesizes a final branch, I approve)")
+	fmt.Println("[0] Skip / Abort (Reject all and continue)")
+	fmt.Print("Choice [1]: ")
+
+	input, _ := ui.reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	switch input {
+	case "0":
+		return session.StrategySkip
+	case "2":
+		return session.StrategyReview
+	case "3":
+		return session.StrategyRefine
+	default:
+		return session.StrategyManual
+	}
 }
 
 func (ui *TerminalUI) ReviewCandidate(branch string) bool {
@@ -123,7 +140,7 @@ func main() {
 
 	llmMgr := llm.NewManager(client)
 	subAgentExecutor := llm.SubAgentFactory(client, workerModel)
-	fanOutFlow := workspace.NewFanOutFlow(logger)
+	fanOutFlow := workspace.NewFanOutFlow("FanOut", logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
 	ui := &TerminalUI{reader: bufio.NewReader(os.Stdin)}
@@ -185,7 +202,7 @@ func main() {
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	// 5. Hand off to the Session Engine
+	// 5. Hand off to the Session Engine (strategy is no longer passed here)
 	if err := coordinator.ExecuteTurn(ctx, thread, activeThinkSpace, history, ui); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)

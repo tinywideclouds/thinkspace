@@ -10,18 +10,20 @@ import (
 	"time"
 )
 
-// FanOutFlow implements the Flow interface for parallel, multi-agent code generation.
 type FanOutFlow struct {
 	logger *slog.Logger
+	name   string
 }
 
-func NewFanOutFlow(logger *slog.Logger) *FanOutFlow {
-	return &FanOutFlow{logger: logger}
+func NewFanOutFlow(name string, logger *slog.Logger) *FanOutFlow {
+	return &FanOutFlow{
+		name:   name,
+		logger: logger,
+	}
 }
 
-// Name now maps to our unified tool name.
 func (f *FanOutFlow) Name() string {
-	return "propose_change"
+	return f.name
 }
 
 func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, space ThinkSpace, args map[string]any, executor SubAgentExecutor) (*FlowResult, error) {
@@ -38,6 +40,7 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 
 	f.logger.InfoContext(ctx, "executing FanOut flow", slog.Int("agent_count", count))
 
+	// RESTORED: Log the exact instructions being sent to each agent
 	for i, inst := range rawInstructions {
 		f.logger.InfoContext(ctx, "sub-agent instruction payload",
 			slog.Int("agent_index", i+1),
@@ -67,7 +70,6 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 			continue
 		}
 
-		// ALIGNMENT FIX: Target the specific thread's docs folder
 		targetDir := filepath.Join(sandboxDir, "chats", thread.ID, "docs")
 		if err := os.MkdirAll(targetDir, 0755); err != nil {
 			f.logger.ErrorContext(ctx, "failed to create thread docs directory", "error", err)
@@ -82,7 +84,6 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			fmt.Printf("   [Agent %d] Writing code (Attempt %d/%d)...\n", i, attempt, maxRetries)
 
-			// Pass targetDir so files write safely inside the chat context
 			if err := executor(ctx, currentInstructions, targetDir); err != nil {
 				break
 			}
@@ -99,23 +100,28 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 			break
 		}
 
-		if success {
-			commitMsg := fmt.Sprintf("auto(candidate): proposal %s", candidateID)
-			if _, err := svc.state.CommitSandbox(ctx, sandboxDir, commitMsg); err != nil {
-				f.logger.ErrorContext(ctx, "failed to commit sandbox", "error", err)
-				success = false
-			} else if err := svc.state.SubmitSandbox(ctx, sandboxDir, svc.workspaceRoot, candidateID); err != nil {
-				f.logger.ErrorContext(ctx, "failed to submit sandbox", "error", err)
-				success = false
-			}
+		// ALWAYS commit and push the sandbox, even if domain verification failed.
+		commitMsg := fmt.Sprintf("auto(candidate): proposal %s", candidateID)
+		commitSuccess := true
+
+		if _, err := svc.state.CommitSandbox(ctx, sandboxDir, commitMsg); err != nil {
+			f.logger.ErrorContext(ctx, "failed to commit sandbox", "error", err)
+			commitSuccess = false
+		} else if err := svc.state.SubmitSandbox(ctx, sandboxDir, svc.workspaceRoot, candidateID); err != nil {
+			f.logger.ErrorContext(ctx, "failed to submit sandbox", "error", err)
+			commitSuccess = false
 		}
 
-		if success {
+		if commitSuccess {
 			branchName := "candidate/" + candidateID
 			branches = append(branches, branchName)
-			fmt.Fprintf(&summaryBuilder, "- %s (Verified: %t)\n", branchName, success)
+			if success {
+				fmt.Fprintf(&summaryBuilder, "- %s (Verified: true)\n", branchName)
+			} else {
+				fmt.Fprintf(&summaryBuilder, "- %s (Verified: false - Failed Domain Constraints)\n", branchName)
+			}
 		} else {
-			fmt.Fprintf(&summaryBuilder, "- %s (Failed)\n", candidateID)
+			fmt.Fprintf(&summaryBuilder, "- %s (Git Submission Failed)\n", candidateID)
 		}
 
 		_ = svc.state.CloseSandbox(ctx, sandboxDir)
