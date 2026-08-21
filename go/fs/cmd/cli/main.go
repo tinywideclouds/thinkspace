@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bufio" // Needed if you want to keep the final prompt blocking inside main
 	"context"
 	"flag"
 	"fmt"
@@ -12,91 +12,20 @@ import (
 
 	"github.com/joho/godotenv"
 	"google.golang.org/genai"
-	"gopkg.in/yaml.v3"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/cli"
+	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// TerminalUI implements session.UserInterface for the CLI binary.
-type TerminalUI struct {
-	reader *bufio.Reader
-}
-
-func (ui *TerminalUI) OnTextChunk(text string) {
-	fmt.Print(text)
-}
-
-func (ui *TerminalUI) OnDelegationStart(count int, instructions string) {
-	fmt.Printf("\n\n🚀 Delegating task to %d agent(s): %s\n", count, instructions)
-}
-
-func (ui *TerminalUI) OnDelegationComplete(summary string) {
-	fmt.Println("\n✅ Delegation Flow Complete:\n" + summary)
-}
-
-func (ui *TerminalUI) ChooseNextStep() session.DelegationStrategy {
-	fmt.Println("\nSelect Next Step:")
-	fmt.Println("[1] Manual Review (I will read the generated code)")
-	fmt.Println("[2] Assisted Review (Manager evaluates diffs, I decide)")
-	fmt.Println("[3] Auto-Refine (Manager evaluates, synthesizes a final branch, I approve)")
-	fmt.Println("[0] Skip / Abort (Reject all and continue)")
-	fmt.Print("Choice [1]: ")
-
-	input, _ := ui.reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-
-	switch input {
-	case "0":
-		return session.StrategySkip
-	case "2":
-		return session.StrategyReview
-	case "3":
-		return session.StrategyRefine
-	default:
-		return session.StrategyManual
-	}
-}
-
-func (ui *TerminalUI) ReviewCandidate(branch string) bool {
-	fmt.Printf("\n👀 Previewing %s...\n", branch)
-	fmt.Println("--------------------------------------------------")
-	fmt.Printf("📂 Files have been successfully checked out.\n")
-	fmt.Printf("💻 Open your IDE to inspect the code for %s.\n", branch)
-	fmt.Println("--------------------------------------------------")
-
-	fmt.Print("Accept candidate? (y/n): ")
-	accept, _ := ui.reader.ReadString('\n')
-	return strings.ToLower(strings.TrimSpace(accept)) == "y"
-}
-
-func (ui *TerminalUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
-	// The CLI doesn't multiplex agent tokens, so we return nil.
-	// The SubAgentExecutor handles this safely.
-	return nil
-}
-
-func loadThinkSpaceConfig(path string) workspace.ThinkSpaceConfig {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Printf("⚠️ Configuration not found at %s. Application requires a domain configuration to start.\n", path)
-		os.Exit(1)
-	}
-	var cfg workspace.ThinkSpaceConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		fmt.Printf("⚠️ Invalid YAML at %s: %v\n", path, err)
-		os.Exit(1)
-	}
-	cfg.ApplyDefaults()
-	return cfg
-}
-
 func main() {
 	chatName := flag.String("chat", "unit-circle-test", "The name of the exploration thread")
 	engineType := flag.String("engine", "gogit", "State engine backend to use ('gogit' or 'exec')")
 	spaceName := flag.String("space", "sandbox", "The think space to use")
+	domainName := flag.String("domain", "golang", "The domain configuration to load")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -117,7 +46,7 @@ func main() {
 	}
 
 	repoRoot := filepath.Join(homeDir, "Documents", "thinkspace", *spaceName)
-	configPath := filepath.Join(homeDir, "Documents", "thinkspace", "configs", "golang.yaml")
+	configsDir := filepath.Join(homeDir, "Documents", "thinkspace", "configs")
 
 	if err := os.MkdirAll(repoRoot, 0755); err != nil {
 		logger.Error("Failed to create workspace directory", "error", err)
@@ -136,20 +65,31 @@ func main() {
 		stateEngine = gitfs.NewGoGitEngine()
 	}
 
-	tsConfig := loadThinkSpaceConfig(configPath)
-	activeThinkSpace := workspace.NewGoThinkSpace(tsConfig)
-	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
+	// 1. Initialize Registry and dynamically load the requested domain
+	registry := config.NewRegistry()
+	if err := registry.LoadDirectory(configsDir); err != nil {
+		logger.Error("Failed to load configs", "error", err)
+		os.Exit(1)
+	}
 
+	activeThinkSpace, ok := registry.GetSpace(*domainName)
+	if !ok {
+		fmt.Printf("⚠️ Domain config '%s.yaml' not found in %s\n", *domainName, configsDir)
+		os.Exit(1)
+	}
+
+	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
 	llmMgr := llm.NewManager(client)
 	subAgentExecutor := llm.SubAgentFactory(client, workerModel)
 	fanOutFlow := workspace.NewFanOutFlow("FanOut", logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
-	ui := &TerminalUI{reader: bufio.NewReader(os.Stdin)}
+	// Inject the newly extracted Terminal UI
+	ui := cli.NewTerminalUI()
 	coordinator := session.NewCoordinator(logger, workspaceService, llmMgr, subAgentExecutor, fanOutFlow)
 
 	fmt.Printf("📂 Workspace root: %s\n", repoRoot)
-	fmt.Printf("📄 Config loaded from: %s\n", configPath)
+	fmt.Printf("📄 Active Domain: %s\n", *domainName)
 
 	threadDir := filepath.Join(repoRoot, "chats", *chatName)
 	ledgerPath := filepath.Join(threadDir, "conversation.jsonl")
@@ -189,7 +129,8 @@ func main() {
 		fmt.Printf("Loaded %d historical turns.\n", len(history))
 
 		fmt.Print("\n> ")
-		input, _ := ui.reader.ReadString('\n')
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
 		if input == "" {

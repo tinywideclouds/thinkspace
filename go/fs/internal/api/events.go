@@ -1,7 +1,10 @@
-package net
+package api
 
-import "encoding/json"
-import "github.com/tinywideclouds.com/thinkspace/internal/session"
+import (
+	"encoding/json"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/session"
+)
 
 // EventType defines the strict string constants for our JSON protocol routing
 type EventType string
@@ -17,6 +20,7 @@ const (
 	EventTypeAgentComplete      EventType = "agent_complete"
 	EventTypeRequestStrategy    EventType = "request_strategy"
 	EventTypeRequestReview      EventType = "request_review"
+	EventTypeAvailableSpaces    EventType = "available_spaces" // NEW: Handshake event
 
 	// Client-to-Server (Inbound)
 	EventTypeSubmitPrompt   EventType = "submit_prompt"
@@ -67,7 +71,6 @@ type AgentCompletePayload struct {
 }
 
 type RequestStrategyPayload struct {
-	// Tells the UI to render the routing choice buttons
 	Active bool `json:"active"`
 }
 
@@ -75,10 +78,21 @@ type RequestReviewPayload struct {
 	Branch string `json:"branch"`
 }
 
+// NEW: Tells the UI what domain plugins are loaded
+type SpaceInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"` // Assuming ThinkSpaceConfig will eventually have a 'Name' or we derive it
+}
+
+type AvailableSpacesPayload struct {
+	Spaces []SpaceInfo `json:"spaces"`
+}
+
 // --- Inbound Payload Structs ---
 
 type SubmitPromptPayload struct {
-	Text string `json:"text"`
+	Text    string `json:"text"`
+	SpaceID string `json:"space_id"` // NEW: The UI tells the server which domain to use
 }
 
 type SelectStrategyPayload struct {
