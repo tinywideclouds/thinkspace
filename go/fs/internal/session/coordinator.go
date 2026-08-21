@@ -26,6 +26,7 @@ type UserInterface interface {
 	OnDelegationComplete(summary string)
 	ChooseNextStep() DelegationStrategy
 	ReviewCandidate(branch string) (accepted bool)
+	GetAgentTokenChannel() chan<- workspace.AgentToken
 }
 
 type Coordinator struct {
@@ -108,7 +109,8 @@ func (c *Coordinator) ExecuteTurn(
 			instructionStr := fmt.Sprintf("Spawning %d agents to propose implementations.", agentCount)
 			ui.OnDelegationStart(agentCount, instructionStr)
 
-			result, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, call.Args, c.executor)
+			// PROPER PLUMBING: Pass the channel provided by the UI
+			result, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, call.Args, c.executor, ui.GetAgentTokenChannel())
 			if err != nil {
 				c.logger.ErrorContext(ctx, "delegation flow failed", "error", err)
 				continue
@@ -121,10 +123,8 @@ func (c *Coordinator) ExecuteTurn(
 
 			branchesToReview := result.Branches
 
-			// Dynamically ask the user what to do next based on the agents' output
 			strategy := ui.ChooseNextStep()
 
-			// If the user wants to abort right now, clean up all branches immediately.
 			if strategy == StrategySkip {
 				for _, branch := range branchesToReview {
 					candidateID := strings.TrimPrefix(branch, "candidate/")
@@ -142,7 +142,6 @@ func (c *Coordinator) ExecuteTurn(
 				candidateID := strings.TrimPrefix(branch, "candidate/")
 
 				if hasAcceptedAny {
-					// Cleanup: We already accepted one, so auto-reject the runners-up
 					_ = c.service.ResolveCandidate(ctx, thread, candidateID, false, "Auto-rejected (Another candidate was accepted)")
 					continue
 				}
@@ -258,7 +257,8 @@ func (c *Coordinator) executeLLMReviewPhase(
 		},
 	}
 
-	refineResult, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, refineArgs, c.executor)
+	// PROPER PLUMBING: Pass the channel provided by the UI
+	refineResult, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, refineArgs, c.executor, ui.GetAgentTokenChannel())
 	if err != nil {
 		c.logger.ErrorContext(ctx, "refinement flow failed", "error", err)
 		ui.OnTextChunk("\n\n⚠️ Refinement orchestration failed. Falling back to original candidates.\n")

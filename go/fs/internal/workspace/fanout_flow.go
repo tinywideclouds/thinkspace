@@ -36,7 +36,7 @@ type agentResult struct {
 	skipped       bool
 }
 
-func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, space ThinkSpace, args map[string]any, executor SubAgentExecutor) (*FlowResult, error) {
+func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, space ThinkSpace, args map[string]any, executor SubAgentExecutor, tokenChan chan<- AgentToken) (*FlowResult, error) {
 	countFloat, ok := args["agent_count"].(float64)
 	if !ok {
 		return nil, fmt.Errorf("missing or invalid 'agent_count' argument")
@@ -61,7 +61,7 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 
 	results := make([]agentResult, count)
 	var wg sync.WaitGroup
-	var gitMu sync.Mutex // Protects Git operations on the main repository
+	var stateMu sync.Mutex // Protects State operations on the main repository
 
 	// Launch all agents concurrently
 	for i := 1; i <= count; i++ {
@@ -77,12 +77,12 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 
 			fmt.Printf("   [Agent %d] Spawning sandbox...\n", agentIdx)
 
-			// Mutex: Prevent Git lock collisions when creating worktrees/clones
-			fmt.Printf("   [Agent %d] 🔒 Requesting Git lock to spawn sandbox...\n", agentIdx)
-			gitMu.Lock()
+			// Mutex: Prevent lock collisions when creating sandboxes
+			fmt.Printf("   [Agent %d] 🔒 Requesting workspace state lock to spawn sandbox...\n", agentIdx)
+			stateMu.Lock()
 			sandboxDir, err := svc.state.SpawnSandbox(ctx, svc.workspaceRoot, thread.ID, candidateID)
-			gitMu.Unlock()
-			fmt.Printf("   [Agent %d] 🔓 Git lock released (Sandbox spawned).\n", agentIdx)
+			stateMu.Unlock()
+			fmt.Printf("   [Agent %d] 🔓 Workspace state lock released (Sandbox spawned).\n", agentIdx)
 
 			if err != nil {
 				f.logger.ErrorContext(ctx, "failed to spawn sandbox", "error", err, "agent", agentIdx)
@@ -92,9 +92,9 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 
 			// Ensure cleanup happens, also protected by mutex
 			defer func() {
-				gitMu.Lock()
+				stateMu.Lock()
 				_ = svc.state.CloseSandbox(ctx, sandboxDir)
-				gitMu.Unlock()
+				stateMu.Unlock()
 			}()
 
 			targetDir := filepath.Join(sandboxDir, "chats", thread.ID, "docs")
@@ -112,7 +112,8 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 			for attempt := 1; attempt <= maxRetries; attempt++ {
 				fmt.Printf("   [Agent %d] Writing code (Attempt %d/%d)...\n", agentIdx, attempt, maxRetries)
 
-				if err := executor(ctx, currentInstructions, targetDir); err != nil {
+				// Pass the multiplexing channel into the executor
+				if err := executor(ctx, currentInstructions, targetDir, agentIdx, tokenChan); err != nil {
 					break
 				}
 
@@ -131,8 +132,9 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 			commitMsg := fmt.Sprintf("auto(candidate): proposal %s", candidateID)
 			commitSuccess := true
 
-			// Mutex: Prevent Git lock collisions when pushing branches back to the main repo
-			gitMu.Lock()
+			// Mutex: Prevent lock collisions when submitting back to the main repo
+			fmt.Printf("   [Agent %d] 🔒 Requesting workspace state lock to submit candidate...\n", agentIdx)
+			stateMu.Lock()
 			if _, err := svc.state.CommitSandbox(ctx, sandboxDir, commitMsg); err != nil {
 				f.logger.ErrorContext(ctx, "failed to commit sandbox", "error", err, "agent", agentIdx)
 				commitSuccess = false
@@ -140,7 +142,8 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 				f.logger.ErrorContext(ctx, "failed to submit sandbox", "error", err, "agent", agentIdx)
 				commitSuccess = false
 			}
-			gitMu.Unlock()
+			stateMu.Unlock()
+			fmt.Printf("   [Agent %d] 🔓 Workspace state lock released (Candidate submitted).\n", agentIdx)
 
 			results[agentIdx-1] = agentResult{
 				candidateID:   candidateID,
@@ -152,10 +155,8 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 		}(i)
 	}
 
-	// Wait for all concurrent agents to finish
 	wg.Wait()
 
-	// Sequentially build the summary output so it remains ordered
 	var branches []string
 	var summaryBuilder strings.Builder
 	fmt.Fprintf(&summaryBuilder, "Delegation Results (%d Agents):\n\n", count)

@@ -22,7 +22,7 @@ type TraceEvent struct {
 // SubAgentFactory creates a SubAgentExecutor linked to a specific model.
 func SubAgentFactory(client *genai.Client, modelName string) workspace.SubAgentExecutor {
 	// The signature now strictly matches workspace.SubAgentExecutor
-	return func(ctx context.Context, instructions string, sandboxDir string) error {
+	return func(ctx context.Context, instructions string, sandboxDir string, agentID int, tokenChan chan<- workspace.AgentToken) error {
 
 		config := &genai.GenerateContentConfig{
 			ResponseMIMEType: "application/json",
@@ -33,18 +33,36 @@ func SubAgentFactory(client *genai.Client, modelName string) workspace.SubAgentE
 			Parts: []*genai.Part{{Text: instructions}},
 		}}
 
-		resp, err := client.Models.GenerateContent(ctx, modelName, contents, config)
-		if err != nil {
-			return fmt.Errorf("sub-agent generation failed: %w", err)
-		}
-
-		if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
-			return fmt.Errorf("empty response from sub-agent")
-		}
+		// Upgraded to a streaming call
+		stream := client.Models.GenerateContentStream(ctx, modelName, contents, config)
 
 		rawJSON := ""
-		for _, part := range resp.Candidates[0].Content.Parts {
-			rawJSON += part.Text
+
+		// Consume the stream and multiplex it out
+		for chunk, err := range stream {
+			if err != nil {
+				return fmt.Errorf("sub-agent generation stream failed: %w", err)
+			}
+
+			if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
+				for _, part := range chunk.Candidates[0].Content.Parts {
+					if part.Text != "" {
+						rawJSON += part.Text
+
+						// Push the token to the multiplex channel (if connected)
+						if tokenChan != nil {
+							tokenChan <- workspace.AgentToken{
+								AgentID: agentID,
+								Text:    part.Text,
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if rawJSON == "" {
+			return fmt.Errorf("empty response from sub-agent")
 		}
 
 		var files map[string]string

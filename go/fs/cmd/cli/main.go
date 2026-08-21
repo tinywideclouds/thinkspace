@@ -72,6 +72,12 @@ func (ui *TerminalUI) ReviewCandidate(branch string) bool {
 	return strings.ToLower(strings.TrimSpace(accept)) == "y"
 }
 
+func (ui *TerminalUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
+	// The CLI doesn't multiplex agent tokens, so we return nil.
+	// The SubAgentExecutor handles this safely.
+	return nil
+}
+
 func loadThinkSpaceConfig(path string) workspace.ThinkSpaceConfig {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -83,7 +89,6 @@ func loadThinkSpaceConfig(path string) workspace.ThinkSpaceConfig {
 		fmt.Printf("⚠️ Invalid YAML at %s: %v\n", path, err)
 		os.Exit(1)
 	}
-	// Delegate verification and defaults to the domain logic
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -105,7 +110,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 1. Establish Well-Known Paths
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error("Failed to get user home directory", "error", err)
@@ -120,7 +124,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 2. Dynamic Engine Selection
 	var stateEngine workspace.StateEngine
 	switch *engineType {
 	case "exec":
@@ -133,7 +136,6 @@ func main() {
 		stateEngine = gitfs.NewGoGitEngine()
 	}
 
-	// 3. Initialize Domain & Orchestration Wiring
 	tsConfig := loadThinkSpaceConfig(configPath)
 	activeThinkSpace := workspace.NewGoThinkSpace(tsConfig)
 	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
@@ -149,7 +151,6 @@ func main() {
 	fmt.Printf("📂 Workspace root: %s\n", repoRoot)
 	fmt.Printf("📄 Config loaded from: %s\n", configPath)
 
-	// 4. Thread Initialization / Resumption
 	threadDir := filepath.Join(repoRoot, "chats", *chatName)
 	ledgerPath := filepath.Join(threadDir, "conversation.jsonl")
 	var thread *workspace.Thread
@@ -202,7 +203,6 @@ func main() {
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	// 5. Hand off to the Session Engine (strategy is no longer passed here)
 	if err := coordinator.ExecuteTurn(ctx, thread, activeThinkSpace, history, ui); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)
