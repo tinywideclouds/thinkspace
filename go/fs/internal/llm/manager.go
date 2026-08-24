@@ -16,10 +16,10 @@ type ToolCall struct {
 }
 
 type Manager struct {
-	client *genai.Client
+	client ModelClient
 }
 
-func NewManager(client *genai.Client) *Manager {
+func NewManager(client ModelClient) *Manager {
 	return &Manager{client: client}
 }
 
@@ -30,7 +30,7 @@ func (m *Manager) GenerateStream(ctx context.Context, model string, systemPrompt
 		Temperature:       genai.Ptr(float32(0.2)),
 		SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: systemPrompt}}},
 	}
-	return m.client.Models.GenerateContentStream(ctx, model, history, config)
+	return m.client.GenerateContentStream(ctx, model, history, config)
 }
 
 // InterceptToolCalls is now completely domain-agnostic.

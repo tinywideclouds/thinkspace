@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"google.golang.org/genai"
 )
@@ -40,6 +41,18 @@ func (s *GoThinkSpace) SubAgentSystemPrompt() string {
 
 func (s *GoThinkSpace) Model(category ModelCategory) string {
 	return s.config.Models[category]
+}
+
+func (s *GoThinkSpace) TurnTimeout() time.Duration {
+	return time.Duration(s.config.TurnTimeoutSeconds) * time.Second
+}
+
+func (s *GoThinkSpace) AgentTimeout() time.Duration {
+	return time.Duration(s.config.AgentTimeoutSeconds) * time.Second
+}
+
+func (s *GoThinkSpace) VerifyTimeout() time.Duration {
+	return time.Duration(s.config.VerifyTimeoutSeconds) * time.Second
 }
 
 func (s *GoThinkSpace) Tools() []*genai.Tool {
@@ -113,8 +126,11 @@ func (s *GoThinkSpace) Verify(ctx context.Context, dir string) error {
 		return fmt.Errorf("verification failed: no 'go.mod' file found. You must generate a go.mod file in the src/ directory")
 	}
 
+	verifyCtx, cancel := context.WithTimeout(ctx, s.VerifyTimeout())
+	defer cancel()
+
 	// 3. Run 'go build' from the directory containing go.mod
-	buildCmd := exec.CommandContext(ctx, "go", "build", "./...")
+	buildCmd := exec.CommandContext(verifyCtx, "go", "build", "./...")
 	buildCmd.Dir = goModDir
 
 	var buildStdout, buildStderr bytes.Buffer
@@ -122,11 +138,14 @@ func (s *GoThinkSpace) Verify(ctx context.Context, dir string) error {
 	buildCmd.Stderr = &buildStderr
 
 	if err := buildCmd.Run(); err != nil {
+		if verifyCtx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("compilation timed out after %s", s.VerifyTimeout())
+		}
 		return fmt.Errorf("compilation failed: %w\n%s", err, buildStderr.String())
 	}
 
 	// 4. Run 'go test' to ensure the requested unit tests actually pass
-	testCmd := exec.CommandContext(ctx, "go", "test", "./...")
+	testCmd := exec.CommandContext(verifyCtx, "go", "test", "./...")
 	testCmd.Dir = goModDir
 
 	var testStdout, testStderr bytes.Buffer
@@ -134,6 +153,9 @@ func (s *GoThinkSpace) Verify(ctx context.Context, dir string) error {
 	testCmd.Stderr = &testStderr
 
 	if err := testCmd.Run(); err != nil {
+		if verifyCtx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("unit tests timed out (possible infinite loop) after %s", s.VerifyTimeout())
+		}
 		return fmt.Errorf("unit tests failed: %w\n%s\n%s", err, testStderr.String(), testStdout.String())
 	}
 
