@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio" // Needed if you want to keep the final prompt blocking inside main
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -38,6 +38,7 @@ func main() {
 		logger.Error("Failed to initialize GenAI client", "error", err)
 		os.Exit(1)
 	}
+	modelClient := llm.NewGenAIClient(client)
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -79,8 +80,8 @@ func main() {
 	}
 
 	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
-	llmMgr := llm.NewManager(client)
-	subAgentExecutor := llm.SubAgentFactory(client, workerModel)
+	llmMgr := llm.NewManager(modelClient)
+	subAgentExecutor := llm.SubAgentFactory(modelClient, workerModel)
 	fanOutFlow := workspace.NewFanOutFlow("FanOut", logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 

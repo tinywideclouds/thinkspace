@@ -35,6 +35,7 @@ func main() {
 		logger.Error("Failed to initialize GenAI client", "error", err)
 		os.Exit(1)
 	}
+	modelClient := llm.NewGenAIClient(client)
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -61,12 +62,12 @@ func main() {
 	}
 
 	// 2. Wire up shared dependencies
-	llmMgr := llm.NewManager(client)
+	llmMgr := llm.NewManager(modelClient)
 	fanOutFlow := workspace.NewFanOutFlow("FanOut", logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
 	// 3. Initialize the new API Server
-	srv := api.NewServer(logger, registry, workspaceService, llmMgr, fanOutFlow, client)
+	srv := api.NewServer(logger, registry, workspaceService, llmMgr, fanOutFlow, modelClient)
 
 	serverAddr := fmt.Sprintf(":%d", *port)
 	logger.Info("🚀 ThinkSpace Server listening", "addr", serverAddr)

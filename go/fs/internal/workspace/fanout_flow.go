@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -92,6 +93,13 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 
 			// Ensure cleanup happens, also protected by mutex
 			defer func() {
+				// Safely extract the trace ledger before destroying the physical sandbox
+				sourceTrace := filepath.Join(sandboxDir, "trace.jsonl")
+				if _, statErr := os.Stat(sourceTrace); statErr == nil {
+					targetTrace := filepath.Join(svc.workspaceRoot, "chats", thread.ID, fmt.Sprintf("trace-%s.jsonl", candidateID))
+					_ = copyFile(sourceTrace, targetTrace)
+				}
+
 				stateMu.Lock()
 				_ = svc.state.CloseSandbox(ctx, sandboxDir)
 				stateMu.Unlock()
@@ -112,8 +120,15 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 			for attempt := 1; attempt <= maxRetries; attempt++ {
 				fmt.Printf("   [Agent %d] Writing code (Attempt %d/%d)...\n", agentIdx, attempt, maxRetries)
 
-				// Pass the multiplexing channel into the executor
-				if err := executor(ctx, currentInstructions, targetDir, agentIdx, tokenChan); err != nil {
+				// Pass the multiplexing channel into the executor with strict local timeouts
+				agentCtx, agentCancel := context.WithTimeout(ctx, space.AgentTimeout())
+				err := executor(agentCtx, currentInstructions, targetDir, agentIdx, tokenChan)
+				agentCancel()
+
+				if err != nil {
+					if agentCtx.Err() == context.DeadlineExceeded {
+						fmt.Printf("   [Agent %d] ⚠️ Generation timed out.\n", agentIdx)
+					}
 					break
 				}
 
@@ -178,4 +193,24 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 	}
 
 	return &FlowResult{Branches: branches, Summary: summaryBuilder.String()}, nil
+}
+
+// copyFile is a utility to safely duplicate the trace log before deletion
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
 }

@@ -20,7 +20,7 @@ type TraceEvent struct {
 }
 
 // SubAgentFactory creates a SubAgentExecutor linked to a specific model.
-func SubAgentFactory(client *genai.Client, modelName string) workspace.SubAgentExecutor {
+func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExecutor {
 	// The signature now strictly matches workspace.SubAgentExecutor
 	return func(ctx context.Context, instructions string, sandboxDir string, agentID int, tokenChan chan<- workspace.AgentToken) error {
 
@@ -33,8 +33,8 @@ func SubAgentFactory(client *genai.Client, modelName string) workspace.SubAgentE
 			Parts: []*genai.Part{{Text: instructions}},
 		}}
 
-		// Upgraded to a streaming call
-		stream := client.Models.GenerateContentStream(ctx, modelName, contents, config)
+		// Upgraded to a streaming call using the abstracted interface
+		stream := client.GenerateContentStream(ctx, modelName, contents, config)
 
 		rawJSON := ""
 

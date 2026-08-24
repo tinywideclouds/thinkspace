@@ -60,10 +60,13 @@ func (c *Coordinator) ExecuteTurn(
 	history []*genai.Content,
 	ui UserInterface,
 ) error {
+	turnCtx, cancel := context.WithTimeout(ctx, thinkSpace.TurnTimeout())
+	defer cancel()
+
 	managerModel := thinkSpace.Model(workspace.ModelCategoryManager)
 
 	stream := c.llmMgr.GenerateStream(
-		ctx,
+		turnCtx,
 		managerModel,
 		thinkSpace.SystemPrompt(),
 		thinkSpace.Tools(),
@@ -92,8 +95,8 @@ func (c *Coordinator) ExecuteTurn(
 	}
 
 	if fullModelResponse.Len() > 0 {
-		if err := c.service.LogModelResponse(ctx, thread, fullModelResponse.String()); err != nil {
-			c.logger.ErrorContext(ctx, "failed to log response", "error", err)
+		if err := c.service.LogModelResponse(turnCtx, thread, fullModelResponse.String()); err != nil {
+			c.logger.ErrorContext(turnCtx, "failed to log response", "error", err)
 		}
 		history = append(history, &genai.Content{
 			Role:  "model",
@@ -109,10 +112,9 @@ func (c *Coordinator) ExecuteTurn(
 			instructionStr := fmt.Sprintf("Spawning %d agents to propose implementations.", agentCount)
 			ui.OnDelegationStart(agentCount, instructionStr)
 
-			// PROPER PLUMBING: Pass the channel provided by the UI
-			result, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, call.Args, c.executor, ui.GetAgentTokenChannel())
+			result, err := c.fanOutFlow.Execute(turnCtx, c.service, thread, thinkSpace, call.Args, c.executor, ui.GetAgentTokenChannel())
 			if err != nil {
-				c.logger.ErrorContext(ctx, "delegation flow failed", "error", err)
+				c.logger.ErrorContext(turnCtx, "delegation flow failed", "error", err)
 				continue
 			}
 
@@ -128,13 +130,13 @@ func (c *Coordinator) ExecuteTurn(
 			if strategy == StrategySkip {
 				for _, branch := range branchesToReview {
 					candidateID := strings.TrimPrefix(branch, "candidate/")
-					_ = c.service.ResolveCandidate(ctx, thread, candidateID, false, "Auto-rejected (Review Skipped)")
+					_ = c.service.ResolveCandidate(turnCtx, thread, candidateID, false, "Auto-rejected (Review Skipped)")
 				}
 				continue
 			}
 
 			if strategy == StrategyReview || strategy == StrategyRefine {
-				branchesToReview = c.executeLLMReviewPhase(ctx, thread, thinkSpace, history, ui, strategy, result.Branches)
+				branchesToReview = c.executeLLMReviewPhase(turnCtx, thread, thinkSpace, history, ui, strategy, result.Branches)
 			}
 
 			hasAcceptedAny := false
@@ -142,13 +144,13 @@ func (c *Coordinator) ExecuteTurn(
 				candidateID := strings.TrimPrefix(branch, "candidate/")
 
 				if hasAcceptedAny {
-					_ = c.service.ResolveCandidate(ctx, thread, candidateID, false, "Auto-rejected (Another candidate was accepted)")
+					_ = c.service.ResolveCandidate(turnCtx, thread, candidateID, false, "Auto-rejected (Another candidate was accepted)")
 					continue
 				}
 
-				if err := c.service.PreviewCandidate(ctx, thread, candidateID); err != nil {
-					c.logger.ErrorContext(ctx, "preview checkout failed", "error", err)
-					_ = c.service.ResolveCandidate(ctx, thread, candidateID, false, "Auto-rejected (Preview checkout failed)")
+				if err := c.service.PreviewCandidate(turnCtx, thread, candidateID); err != nil {
+					c.logger.ErrorContext(turnCtx, "preview checkout failed", "error", err)
+					_ = c.service.ResolveCandidate(turnCtx, thread, candidateID, false, "Auto-rejected (Preview checkout failed)")
 					continue
 				}
 
@@ -160,14 +162,14 @@ func (c *Coordinator) ExecuteTurn(
 					hasAcceptedAny = true
 				}
 
-				if err := c.service.ResolveCandidate(ctx, thread, candidateID, accept, reason); err != nil {
-					c.logger.ErrorContext(ctx, "failed to resolve candidate", "error", err)
+				if err := c.service.ResolveCandidate(turnCtx, thread, candidateID, accept, reason); err != nil {
+					c.logger.ErrorContext(turnCtx, "failed to resolve candidate", "error", err)
 				}
 			}
 		}
 	}
 
-	_, err := c.service.Checkpoint(ctx, thread, "End of session turn")
+	_, err := c.service.Checkpoint(turnCtx, thread, "End of session turn")
 	return err
 }
 
@@ -257,7 +259,6 @@ func (c *Coordinator) executeLLMReviewPhase(
 		},
 	}
 
-	// PROPER PLUMBING: Pass the channel provided by the UI
 	refineResult, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, refineArgs, c.executor, ui.GetAgentTokenChannel())
 	if err != nil {
 		c.logger.ErrorContext(ctx, "refinement flow failed", "error", err)

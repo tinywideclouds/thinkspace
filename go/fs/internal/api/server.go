@@ -22,7 +22,7 @@ type Server struct {
 	service  *workspace.Service
 	llmMgr   *llm.Manager
 	flow     workspace.Flow
-	client   *genai.Client
+	client   llm.ModelClient
 }
 
 func NewServer(
@@ -31,7 +31,7 @@ func NewServer(
 	service *workspace.Service,
 	llmMgr *llm.Manager,
 	flow workspace.Flow,
-	client *genai.Client,
+	client llm.ModelClient,
 ) *Server {
 	return &Server{
 		logger:   logger,
