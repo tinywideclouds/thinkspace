@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
@@ -33,23 +32,28 @@ func TestServer_WebSocketHandshake(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	var event api.WSEvent
-	err = wsjson.Read(ctx, conn, &event)
+	// Read raw bytes instead of using wsjson
+	_, data, err := conn.Read(ctx)
 	if err != nil {
 		t.Fatalf("failed to read handshake event: %v", err)
 	}
 
-	if event.Type != api.EventTypeAvailableSpaces {
-		t.Errorf("expected event type %s, got %s", api.EventTypeAvailableSpaces, event.Type)
+	// Mirror the @bufbuild/protobuf JSON output for AvailableSpaces
+	var payload struct {
+		AvailableSpaces struct {
+			Spaces []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"spaces"`
+		} `json:"availableSpaces"`
 	}
 
-	var payload api.AvailableSpacesPayload
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		t.Fatalf("failed to unmarshal payload: %v", err)
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("failed to unmarshal payload: %v (data: %s)", err, string(data))
 	}
 
-	if len(payload.Spaces) != 1 || payload.Spaces[0].ID != expectedSpaceID {
-		t.Errorf("expected 1 space with ID %s, got %+v", expectedSpaceID, payload.Spaces)
+	if len(payload.AvailableSpaces.Spaces) != 1 || payload.AvailableSpaces.Spaces[0].ID != expectedSpaceID {
+		t.Errorf("expected 1 space with ID %s, got %+v", expectedSpaceID, payload.AvailableSpaces.Spaces)
 	}
 }
 
@@ -93,21 +97,23 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		ui.OnTextChunk("hello world")
 	}()
 
-	var event api.WSEvent
-	if err := wsjson.Read(ctx, conn, &event); err != nil {
+	_, data, err := conn.Read(ctx)
+	if err != nil {
 		t.Fatalf("failed to read event: %v", err)
 	}
 
-	if event.Type != api.EventTypeChatStream {
-		t.Errorf("expected event type %s, got %s", api.EventTypeChatStream, event.Type)
+	// Mirror the @bufbuild/protobuf JSON output for ChatStream
+	var chatPayload struct {
+		ChatStream struct {
+			Text string `json:"text"`
+		} `json:"chatStream"`
 	}
 
-	var chatPayload api.ChatStreamPayload
-	if err := json.Unmarshal(event.Payload, &chatPayload); err != nil {
-		t.Fatalf("failed to unmarshal payload: %v", err)
+	if err := json.Unmarshal(data, &chatPayload); err != nil {
+		t.Fatalf("failed to unmarshal payload: %v (data: %s)", err, string(data))
 	}
-	if chatPayload.Text != "hello world" {
-		t.Errorf("expected text 'hello world', got '%s'", chatPayload.Text)
+	if chatPayload.ChatStream.Text != "hello world" {
+		t.Errorf("expected text 'hello world', got '%s'", chatPayload.ChatStream.Text)
 	}
 
 	// 3. Test Inbound Routing & Channel Blocking (Client -> Server)
@@ -118,11 +124,23 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	}()
 
 	// Read the outbound request event
-	if err := wsjson.Read(ctx, conn, &event); err != nil {
+	_, data, err = conn.Read(ctx)
+	if err != nil {
 		t.Fatalf("failed to read strategy request: %v", err)
 	}
-	if event.Type != api.EventTypeRequestStrategy {
-		t.Errorf("expected event type %s, got %s", api.EventTypeRequestStrategy, event.Type)
+
+	// Mirror the @bufbuild/protobuf JSON output for RequestStrategy
+	var reqPayload struct {
+		RequestStrategy struct {
+			Active bool `json:"active"`
+		} `json:"requestStrategy"`
+	}
+
+	if err := json.Unmarshal(data, &reqPayload); err != nil {
+		t.Fatalf("failed to unmarshal strategy request: %v (data: %s)", err, string(data))
+	}
+	if !reqPayload.RequestStrategy.Active {
+		t.Errorf("expected active true, got false")
 	}
 
 	// Simulate receiving the inbound choice from the web router

@@ -1,0 +1,10 @@
+version: v1
+plugins:
+  - plugin: es
+    opt:
+      - target=ts
+    out: src/generated
+  - plugin: go
+    opt:
+      - module=github.com/tinywideclouds/thinkspace/api/v1
+    out: ../../../../../../go/api/v1

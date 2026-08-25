@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package thinkspace.api.v1;
+option go_package = "github.com/tinywideclouds/thinkspace/api/v1;api_v1";
+
+// --- Enums ---
+enum DelegationStrategy {
+  DELEGATION_STRATEGY_UNSPECIFIED = 0;
+  DELEGATION_STRATEGY_SKIP = 1;
+  DELEGATION_STRATEGY_MANUAL = 2;
+  DELEGATION_STRATEGY_REVIEW = 3;
+  DELEGATION_STRATEGY_REFINE = 4;
+}
+
+// --- Shared Types ---
+message SpaceInfo {
+  string id = 1;
+  string name = 2;
+}
+
+// --- Outbound Payloads (Server -> Client) ---
+message ChatStreamPayload {
+  string text = 1;
+}
+
+message LogMessagePayload {
+  string level = 1;
+  string message = 2;
+}
+
+message DelegationStartPayload {
+  int32 agent_count = 1;
+  string instructions = 2;
+}
+
+message DelegationCompletePayload {
+  string summary = 1;
+}
+
+message AgentStartPayload {
+  int32 agent_id = 1;
+  string instructions = 2;
+}
+
+message AgentStreamPayload {
+  int32 agent_id = 1;
+  string text = 2;
+}
+
+message AgentCompletePayload {
+  int32 agent_id = 1;
+  string branch = 2;
+  bool verified = 3;
+}
+
+message RequestStrategyPayload {
+  bool active = 1;
+}
+
+message RequestReviewPayload {
+  string branch = 1;
+}
+
+message AvailableSpacesPayload {
+  repeated SpaceInfo spaces = 1;
+}
+
+// --- Inbound Payloads (Client -> Server) ---
+message SubmitPromptPayload {
+  string text = 1;
+  string space_id = 2;
+}
+
+message SelectStrategyPayload {
+  DelegationStrategy strategy_id = 1;
+}
+
+message ReviewDecisionPayload {
+  string branch = 1;
+  bool accepted = 2;
+}
+
+// --- The Master Envelope ---
+message WSEvent {
+  oneof payload {
+    // Outbound
+    ChatStreamPayload chat_stream = 1;
+    LogMessagePayload log_message = 2;
+    DelegationStartPayload delegation_start = 3;
+    DelegationCompletePayload delegation_complete = 4;
+    AgentStartPayload agent_start = 5;
+    AgentStreamPayload agent_stream = 6;
+    AgentCompletePayload agent_complete = 7;
+    RequestStrategyPayload request_strategy = 8;
+    RequestReviewPayload request_review = 9;
+    AvailableSpacesPayload available_spaces = 10;
+
+    // Inbound
+    SubmitPromptPayload submit_prompt = 11;
+    SelectStrategyPayload select_strategy = 12;
+    ReviewDecisionPayload review_decision = 13;
+  }
+}

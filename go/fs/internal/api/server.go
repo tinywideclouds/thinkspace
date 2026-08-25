@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 	"google.golang.org/genai"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
@@ -69,90 +68,76 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	wsCtx := r.Context()
 	tokenChan := make(chan workspace.AgentToken, 100)
 
-	// Accessed directly within the api package
 	ui := NewWebSocketUI(wsCtx, conn, tokenChan)
+	facade := NewEventFacade()
 
-	// Handshake: Emit Available Spaces
+	// Handshake: Emit Available Spaces safely using the Facade
 	var availableSpaces []SpaceInfo
 	for _, space := range s.registry.GetAvailableSpaces() {
 		availableSpaces = append(availableSpaces, SpaceInfo{ID: space.ID, Name: space.Name})
 	}
 
-	_ = wsjson.Write(wsCtx, conn, WSEvent{
-		Type:    EventTypeAvailableSpaces,
-		Payload: mustMarshal(AvailableSpacesPayload{Spaces: availableSpaces}),
-	})
+	if handshakeBytes, err := facade.MarshalAvailableSpaces(availableSpaces); err == nil {
+		_ = conn.Write(wsCtx, websocket.MessageText, handshakeBytes)
+	}
 
-	// Multiplexing Goroutine
+	// Multiplexing Goroutine safely using the Facade
 	go func() {
 		for token := range tokenChan {
-			_ = wsjson.Write(wsCtx, conn, WSEvent{
-				Type: EventTypeAgentStream,
-				Payload: mustMarshal(AgentStreamPayload{
-					AgentID: token.AgentID,
-					Text:    token.Text,
-				}),
-			})
+			if streamBytes, err := facade.MarshalAgentStream(token.AgentID, token.Text); err == nil {
+				_ = conn.Write(wsCtx, websocket.MessageText, streamBytes)
+			}
 		}
 	}()
 
 	// Inbound Message Loop
 	for {
-		var event WSEvent
-		err := wsjson.Read(wsCtx, conn, &event)
+		_, data, err := conn.Read(wsCtx)
 		if err != nil {
 			s.logger.Info("WebSocket client disconnected")
 			break
 		}
 
-		switch event.Type {
-		case EventTypeSubmitPrompt:
-			var payload SubmitPromptPayload
-			if err := json.Unmarshal(event.Payload, &payload); err == nil {
+		inboundEvent, err := facade.UnmarshalInbound(data)
+		if err != nil {
+			s.logger.Error("Failed to unmarshal inbound message", "error", err)
+			continue
+		}
 
-				activeSpace, ok := s.registry.GetSpace(payload.SpaceID)
-				if !ok {
-					ui.OnTextChunk(fmt.Sprintf("⚠️ Server error: Space '%s' not found.", payload.SpaceID))
-					continue
+		switch inboundEvent.Type {
+		case "submit_prompt":
+			payload := inboundEvent.SubmitPrompt
+			activeSpace, ok := s.registry.GetSpace(payload.SpaceID)
+			if !ok {
+				ui.OnTextChunk(fmt.Sprintf("⚠️ Server error: Space '%s' not found.", payload.SpaceID))
+				continue
+			}
+
+			go func(promptText string, space workspace.ThinkSpace) {
+				chatName := "unit-circle-test"
+				thread, err := s.service.StartThread(wsCtx, chatName)
+				if err != nil {
+					s.logger.Error("Failed to start thread", "error", err)
+					return
 				}
 
-				go func(promptText string, space workspace.ThinkSpace) {
-					chatName := "unit-circle-test"
-					thread, err := s.service.StartThread(wsCtx, chatName)
-					if err != nil {
-						s.logger.Error("Failed to start thread", "error", err)
-						return
-					}
+				_ = s.service.LogUserPrompt(wsCtx, thread, promptText)
+				history := []*genai.Content{
+					{Role: "user", Parts: []*genai.Part{{Text: promptText}}},
+				}
 
-					_ = s.service.LogUserPrompt(wsCtx, thread, promptText)
-					history := []*genai.Content{
-						{Role: "user", Parts: []*genai.Part{{Text: promptText}}},
-					}
+				workerModel := space.Model(workspace.ModelCategoryWorker)
+				executor := llm.SubAgentFactory(s.client, workerModel)
+				coordinator := session.NewCoordinator(s.logger, s.service, s.llmMgr, executor, s.flow)
 
-					workerModel := space.Model(workspace.ModelCategoryWorker)
-					executor := llm.SubAgentFactory(s.client, workerModel)
-					coordinator := session.NewCoordinator(s.logger, s.service, s.llmMgr, executor, s.flow)
+				_ = coordinator.ExecuteTurn(wsCtx, thread, space, history, ui)
+			}(payload.Text, activeSpace)
 
-					_ = coordinator.ExecuteTurn(wsCtx, thread, space, history, ui)
-				}(payload.Text, activeSpace)
-			}
+		case "select_strategy":
+			ui.PushStrategy(inboundEvent.SelectStrategy.StrategyID)
 
-		case EventTypeSelectStrategy:
-			var payload SelectStrategyPayload
-			if err := json.Unmarshal(event.Payload, &payload); err == nil {
-				ui.PushStrategy(payload.StrategyID)
-			}
-
-		case EventTypeReviewDecision:
-			var payload ReviewDecisionPayload
-			if err := json.Unmarshal(event.Payload, &payload); err == nil {
-				ui.PushReviewDecision(payload.Accepted)
-			}
+		case "review_decision":
+			ui.PushReviewDecision(inboundEvent.ReviewDecision.Accepted)
 		}
 	}
-}
-
-func mustMarshal(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
-	return b
 }
