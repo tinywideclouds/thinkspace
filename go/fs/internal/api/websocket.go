@@ -2,11 +2,9 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -15,6 +13,7 @@ import (
 type WebSocketUI struct {
 	ctx          context.Context
 	conn         *websocket.Conn
+	facade       *EventFacade
 	writeMu      sync.Mutex
 	strategyChan chan session.DelegationStrategy
 	reviewChan   chan bool
@@ -25,54 +24,50 @@ func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- 
 	return &WebSocketUI{
 		ctx:          ctx,
 		conn:         conn,
+		facade:       NewEventFacade(),
 		strategyChan: make(chan session.DelegationStrategy),
 		reviewChan:   make(chan bool),
 		tokenChan:    tokenChan,
 	}
 }
 
-// sendEvent safely marshals and writes a JSON event to the WebSocket.
-func (ui *WebSocketUI) sendEvent(eventType EventType, payload any) {
+// sendBytes safely writes raw JSON bytes to the WebSocket.
+func (ui *WebSocketUI) sendBytes(data []byte) {
 	ui.writeMu.Lock()
 	defer ui.writeMu.Unlock()
 
-	rawPayload, err := json.Marshal(payload)
-	if err != nil {
-		return // Silently drop failed marshals to avoid crashing the orchestrator
-	}
-
-	event := WSEvent{
-		Type:    eventType,
-		Payload: rawPayload,
-	}
-
-	_ = wsjson.Write(ui.ctx, ui.conn, event)
+	_ = ui.conn.Write(ui.ctx, websocket.MessageText, data)
 }
 
 func (ui *WebSocketUI) OnTextChunk(text string) {
-	ui.sendEvent(EventTypeChatStream, ChatStreamPayload{Text: text})
+	if data, err := ui.facade.MarshalChatStream(text); err == nil {
+		ui.sendBytes(data)
+	}
 }
 
 func (ui *WebSocketUI) OnDelegationStart(count int, instructions string) {
-	ui.sendEvent(EventTypeDelegationStart, DelegationStartPayload{
-		AgentCount:   count,
-		Instructions: instructions,
-	})
+	if data, err := ui.facade.MarshalDelegationStart(count, instructions); err == nil {
+		ui.sendBytes(data)
+	}
 }
 
 func (ui *WebSocketUI) OnDelegationComplete(summary string) {
-	ui.sendEvent(EventTypeDelegationComplete, DelegationCompletePayload{
-		Summary: summary,
-	})
+	if data, err := ui.facade.MarshalDelegationComplete(summary); err == nil {
+		ui.sendBytes(data)
+	}
 }
 
 func (ui *WebSocketUI) ChooseNextStep() session.DelegationStrategy {
-	ui.sendEvent(EventTypeRequestStrategy, RequestStrategyPayload{Active: true})
+	if data, err := ui.facade.MarshalRequestStrategy(); err == nil {
+		ui.sendBytes(data)
+	}
 	return <-ui.strategyChan
 }
 
 func (ui *WebSocketUI) ReviewCandidate(branch string) bool {
-	ui.sendEvent(EventTypeRequestReview, RequestReviewPayload{Branch: branch})
+	if data, err := ui.facade.MarshalRequestReview(branch); err == nil {
+		ui.sendBytes(data)
+	}
 	return <-ui.reviewChan
 }
 
