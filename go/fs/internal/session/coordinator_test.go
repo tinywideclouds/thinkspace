@@ -12,6 +12,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 	"google.golang.org/genai"
 )
 
@@ -79,9 +80,9 @@ type mockFlow struct {
 }
 
 func (m *mockFlow) Name() string { return "MockFlow" }
-func (m *mockFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*workspace.FlowResult, error) {
+func (m *mockFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*flows.FlowResult, error) {
 	m.executeCalled = true
-	return &workspace.FlowResult{
+	return &flows.FlowResult{
 		Branches: []string{"candidate/mock-123"},
 		Summary:  "Mock delegation complete",
 	}, nil

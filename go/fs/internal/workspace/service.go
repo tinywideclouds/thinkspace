@@ -290,3 +290,31 @@ func (s *Service) ReadCandidate(ctx context.Context, thread *Thread, candidateID
 
 	return diff, nil
 }
+
+// We mirror state methods so flows don't try and reach in directly
+
+// SpawnSandbox encapsulates creating an isolated agent sandbox directory.
+func (s *Service) SpawnSandbox(ctx context.Context, threadID, candidateID string) (string, error) {
+	return s.state.SpawnSandbox(ctx, s.workspaceRoot, threadID, candidateID)
+}
+
+// CloseSandbox safely destroys the physical sandbox directory.
+func (s *Service) CloseSandbox(ctx context.Context, sandboxDir string) error {
+	return s.state.CloseSandbox(ctx, sandboxDir)
+}
+
+// SubmitSandbox commit-and-submits an agent's work back to the main thread repository.
+func (s *Service) SubmitSandbox(ctx context.Context, sandboxDir, candidateID, commitMsg string) error {
+	if _, err := s.state.CommitSandbox(ctx, sandboxDir, commitMsg); err != nil {
+		return fmt.Errorf("committing sandbox: %w", err)
+	}
+	if err := s.state.SubmitSandbox(ctx, sandboxDir, s.workspaceRoot, candidateID); err != nil {
+		return fmt.Errorf("submitting sandbox: %w", err)
+	}
+	return nil
+}
+
+// WorkspaceRoot returns the base path for relative path calculations.
+func (s *Service) WorkspaceRoot() string {
+	return s.workspaceRoot
+}

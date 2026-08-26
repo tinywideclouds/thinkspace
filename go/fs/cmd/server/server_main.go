@@ -17,10 +17,12 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 func main() {
 	port := flag.Int("port", 8080, "Port for the ThinkSpace WebServer")
+	rootName := flag.String("root", "thinkspace-root", "Root directory for the ThinkSpace repositories")
 	spaceName := flag.String("space", "sandbox", "The think space to use")
 	engineType := flag.String("engine", "gogit", "State engine backend ('gogit' or 'exec')")
 	flag.Parse()
@@ -43,7 +45,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	repoRoot := filepath.Join(homeDir, "Documents", "thinkspace", *spaceName)
+	repoRoot := filepath.Join(homeDir, "Documents", *rootName, *spaceName)
 	configsDir := filepath.Join(homeDir, "Documents", "thinkspace", "configs")
 	_ = os.MkdirAll(repoRoot, 0755)
 
@@ -63,7 +65,7 @@ func main() {
 
 	// 2. Wire up shared dependencies
 	llmMgr := llm.NewManager(modelClient)
-	fanOutFlow := workspace.NewFanOutFlow("FanOut", logger)
+	fanOutFlow := flows.NewFanOutFlow("FanOut", logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
 	// 3. Initialize the new API Server

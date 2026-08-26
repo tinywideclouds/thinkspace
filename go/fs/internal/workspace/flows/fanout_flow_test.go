@@ -1,4 +1,4 @@
-package workspace_test
+package flows_test
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 // mockThinkSpace provides a dummy domain configuration to bypass real LLM verification.
@@ -49,7 +50,7 @@ func TestFanOutFlow_Concurrency(t *testing.T) {
 		t.Fatalf("failed to start thread: %v", err)
 	}
 
-	flow := workspace.NewFanOutFlow("FanOut", logger)
+	flow := flows.NewFanOutFlow("FanOut", logger)
 	space := &mockThinkSpace{}
 
 	tokenChan := make(chan workspace.AgentToken, 100)

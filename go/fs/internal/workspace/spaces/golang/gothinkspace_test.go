@@ -1,4 +1,4 @@
-package workspace_test
+package golang_test
 
 import (
 	"context"
@@ -8,15 +8,16 @@ import (
 	"testing"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/spaces/golang"
 )
 
-func setupGoThinkSpace(t *testing.T, verifyTimeout int) *workspace.GoThinkSpace {
+func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
 	config := workspace.ThinkSpaceConfig{
 		Name:                 "golang",
 		VerifyTimeoutSeconds: verifyTimeout,
 	}
 	config.ApplyDefaults()
-	return workspace.NewGoThinkSpace(config)
+	return golang.NewGoThinkSpace(config)
 }
 
 func TestGoThinkSpace_Verify_ASTError(t *testing.T) {

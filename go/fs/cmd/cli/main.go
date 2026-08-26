@@ -19,10 +19,11 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 func main() {
-	chatName := flag.String("chat", "unit-circle-test", "The name of the exploration thread")
+	chatName := flag.String("chat", "unit-circle-test", "The name of the initial exploration thread")
 	engineType := flag.String("engine", "gogit", "State engine backend to use ('gogit' or 'exec')")
 	spaceName := flag.String("space", "sandbox", "The think space to use")
 	domainName := flag.String("domain", "golang", "The domain configuration to load")
@@ -82,7 +83,7 @@ func main() {
 	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
 	llmMgr := llm.NewManager(modelClient)
 	subAgentExecutor := llm.SubAgentFactory(modelClient, workerModel)
-	fanOutFlow := workspace.NewFanOutFlow("FanOut", logger)
+	fanOutFlow := flows.NewFanOutFlow("FanOut", logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
 	// Inject the newly extracted Terminal UI

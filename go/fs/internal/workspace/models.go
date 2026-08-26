@@ -1,8 +1,20 @@
 package workspace
 
 import (
+	"context"
 	"time"
 )
+
+// AgentToken wraps a text chunk with its source agent ID for UI multiplexing.
+type AgentToken struct {
+	AgentID int
+	Text    string
+}
+
+// SubAgentExecutor allows the Flow to trigger an LLM generation step without
+// knowing the implementation details of the LLM provider.
+// It now accepts a channel to stream tokens back to the UI.
+type SubAgentExecutor func(ctx context.Context, instructions string, sandboxDir string, agentID int, tokenChan chan<- AgentToken) error
 
 // Thread represents the "Slow" branch, our accepted ledger of reality.
 type Thread struct {

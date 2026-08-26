@@ -1,6 +1,6 @@
 module github.com/tinywideclouds.com/thinkspace
 
-go 1.26
+go 1.27
 
 require (
 	google.golang.org/genai v1.68.0

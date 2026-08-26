@@ -13,6 +13,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 type Server struct {
@@ -20,7 +21,7 @@ type Server struct {
 	registry *config.Registry
 	service  *workspace.Service
 	llmMgr   *llm.Manager
-	flow     workspace.Flow
+	flow     flows.Flow
 	client   llm.ModelClient
 }
 
@@ -29,7 +30,7 @@ func NewServer(
 	registry *config.Registry,
 	service *workspace.Service,
 	llmMgr *llm.Manager,
-	flow workspace.Flow,
+	flow flows.Flow,
 	client llm.ModelClient,
 ) *Server {
 	return &Server{

@@ -1,4 +1,4 @@
-package workspace
+package flows
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
 type FanOutFlow struct {
@@ -37,7 +39,7 @@ type agentResult struct {
 	skipped       bool
 }
 
-func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, space ThinkSpace, args map[string]any, executor SubAgentExecutor, tokenChan chan<- AgentToken) (*FlowResult, error) {
+func (f *FanOutFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*FlowResult, error) {
 	countFloat, ok := args["agent_count"].(float64)
 	if !ok {
 		return nil, fmt.Errorf("missing or invalid 'agent_count' argument")
@@ -81,7 +83,8 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 			// Mutex: Prevent lock collisions when creating sandboxes
 			fmt.Printf("   [Agent %d] 🔒 Requesting workspace state lock to spawn sandbox...\n", agentIdx)
 			stateMu.Lock()
-			sandboxDir, err := svc.state.SpawnSandbox(ctx, svc.workspaceRoot, thread.ID, candidateID)
+			// FIXED: Use the clean public wrapper which injects WorkspaceRoot internally
+			sandboxDir, err := svc.SpawnSandbox(ctx, thread.ID, candidateID)
 			stateMu.Unlock()
 			fmt.Printf("   [Agent %d] 🔓 Workspace state lock released (Sandbox spawned).\n", agentIdx)
 
@@ -96,12 +99,12 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 				// Safely extract the trace ledger before destroying the physical sandbox
 				sourceTrace := filepath.Join(sandboxDir, "trace.jsonl")
 				if _, statErr := os.Stat(sourceTrace); statErr == nil {
-					targetTrace := filepath.Join(svc.workspaceRoot, "chats", thread.ID, fmt.Sprintf("trace-%s.jsonl", candidateID))
+					targetTrace := filepath.Join(svc.WorkspaceRoot(), "chats", thread.ID, fmt.Sprintf("trace-%s.jsonl", candidateID))
 					_ = copyFile(sourceTrace, targetTrace)
 				}
 
 				stateMu.Lock()
-				_ = svc.state.CloseSandbox(ctx, sandboxDir)
+				_ = svc.CloseSandbox(ctx, sandboxDir)
 				stateMu.Unlock()
 			}()
 
@@ -150,11 +153,9 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *Service, thread *Thread, 
 			// Mutex: Prevent lock collisions when submitting back to the main repo
 			fmt.Printf("   [Agent %d] 🔒 Requesting workspace state lock to submit candidate...\n", agentIdx)
 			stateMu.Lock()
-			if _, err := svc.state.CommitSandbox(ctx, sandboxDir, commitMsg); err != nil {
-				f.logger.ErrorContext(ctx, "failed to commit sandbox", "error", err, "agent", agentIdx)
-				commitSuccess = false
-			} else if err := svc.state.SubmitSandbox(ctx, sandboxDir, svc.workspaceRoot, candidateID); err != nil {
-				f.logger.ErrorContext(ctx, "failed to submit sandbox", "error", err, "agent", agentIdx)
+			// FIXED: Use the single combined SubmitSandbox wrapper method
+			if err := svc.SubmitSandbox(ctx, sandboxDir, candidateID, commitMsg); err != nil {
+				f.logger.ErrorContext(ctx, "failed to submit candidate sandbox", "error", err, "agent", agentIdx)
 				commitSuccess = false
 			}
 			stateMu.Unlock()

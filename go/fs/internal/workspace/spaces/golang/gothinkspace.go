@@ -1,4 +1,4 @@
-package workspace
+package golang
 
 import (
 	"bytes"
@@ -12,16 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
 
 // GoThinkSpace implements ThinkSpace for the Go programming language.
 type GoThinkSpace struct {
-	config ThinkSpaceConfig
+	config workspace.ThinkSpaceConfig
 }
 
 // NewGoThinkSpace injects the externalized YAML configuration.
-func NewGoThinkSpace(cfg ThinkSpaceConfig) *GoThinkSpace {
+func NewGoThinkSpace(cfg workspace.ThinkSpaceConfig) *GoThinkSpace {
 	return &GoThinkSpace{
 		config: cfg,
 	}
@@ -39,7 +40,7 @@ func (s *GoThinkSpace) SubAgentSystemPrompt() string {
 	return s.config.SubAgentSystemPrompt
 }
 
-func (s *GoThinkSpace) Model(category ModelCategory) string {
+func (s *GoThinkSpace) Model(category workspace.ModelCategory) string {
 	return s.config.Models[category]
 }
 

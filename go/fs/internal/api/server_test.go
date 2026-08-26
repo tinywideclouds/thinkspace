@@ -18,6 +18,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 // mockModelClient implements llm.ModelClient for testing
@@ -31,8 +32,8 @@ func (m *mockModelClient) GenerateContentStream(ctx context.Context, model strin
 type dummyFlow struct{}
 
 func (f *dummyFlow) Name() string { return "dummy" }
-func (f *dummyFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*workspace.FlowResult, error) {
-	return &workspace.FlowResult{}, nil
+func (f *dummyFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*flows.FlowResult, error) {
+	return &flows.FlowResult{}, nil
 }
 
 func setupTestServer(t *testing.T) (*api.Server, string) {

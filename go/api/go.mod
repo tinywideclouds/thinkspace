@@ -1,6 +1,6 @@
 module github.com/tinywideclouds.com/thinkspace/api
 
-go 1.26
+go 1.27
 
 require google.golang.org/protobuf v1.34.2
 

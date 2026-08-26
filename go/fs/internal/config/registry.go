@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/spaces/golang"
 )
 
 // Registry holds all loaded ThinkSpace configurations and their initialized interfaces.
@@ -54,7 +55,7 @@ func (r *Registry) LoadDirectory(dir string) error {
 		// The ID is simply the filename without the extension (e.g., "golang")
 		id := strings.TrimSuffix(entry.Name(), ".yaml")
 
-		r.spaces[id] = workspace.NewGoThinkSpace(cfg)
+		r.spaces[id] = golang.NewGoThinkSpace(cfg)
 		r.configs[id] = cfg
 	}
 

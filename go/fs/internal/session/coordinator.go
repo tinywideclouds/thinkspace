@@ -8,6 +8,7 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 	"google.golang.org/genai"
 )
 
@@ -34,7 +35,7 @@ type Coordinator struct {
 	service    *workspace.Service
 	llmMgr     *llm.Manager
 	executor   workspace.SubAgentExecutor
-	fanOutFlow workspace.Flow
+	fanOutFlow flows.Flow
 }
 
 func NewCoordinator(
@@ -42,7 +43,7 @@ func NewCoordinator(
 	service *workspace.Service,
 	llmMgr *llm.Manager,
 	executor workspace.SubAgentExecutor,
-	fanOutFlow workspace.Flow,
+	fanOutFlow flows.Flow,
 ) *Coordinator {
 	return &Coordinator{
 		logger:     logger,
