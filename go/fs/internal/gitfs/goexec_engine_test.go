@@ -172,3 +172,40 @@ func TestGoExecEngine_AgentSandbox_Lifecycle_Accept(t *testing.T) {
 		t.Errorf("Proposed file %s was missing after acceptance", apiCheck)
 	}
 }
+
+func TestGoExecEngine_PreviewCandidate_FloatsLedger(t *testing.T) {
+	ctx, mainDir, engine, threadID, candidateID := setupExecAgentTestEnvironment(t)
+
+	ledgerPath := filepath.Join(mainDir, "chats", threadID, "conversation.jsonl")
+
+	// 1. Create and commit the ledger so it is a TRACKED file
+	os.WriteFile(ledgerPath, []byte("initial baseline\n"), 0644)
+	if _, err := engine.Snapshot(ctx, mainDir, threadID, "chore: initial checkpoint"); err != nil {
+		t.Fatalf("Snapshot failed: %v", err)
+	}
+
+	// 2. Propose a candidate
+	sandboxDir, _ := engine.SpawnSandbox(ctx, mainDir, threadID, candidateID)
+	testFilePath := filepath.Join(sandboxDir, "chats", threadID, "docs", "test.go")
+	os.MkdirAll(filepath.Dir(testFilePath), 0755)
+	os.WriteFile(testFilePath, []byte("package test\n"), 0644)
+
+	engine.CommitSandbox(ctx, sandboxDir, "feat: candidate code")
+	engine.SubmitSandbox(ctx, sandboxDir, mainDir, candidateID)
+	engine.CloseSandbox(ctx, sandboxDir)
+
+	// 3. Modify the tracked ledger (creating UNSTAGED modifications)
+	modifiedText := "initial baseline\nuser: check this preview\n"
+	os.WriteFile(ledgerPath, []byte(modifiedText), 0644)
+
+	// 4. Trigger the Preview (This should safely float the unstaged modifications)
+	if err := engine.PreviewCandidate(ctx, mainDir, threadID, candidateID); err != nil {
+		t.Fatalf("PreviewCandidate failed to float uncommitted ledger: %v", err)
+	}
+
+	// 5. Verify the unstaged modifications survived the branch switch
+	content, _ := os.ReadFile(ledgerPath)
+	if string(content) != modifiedText {
+		t.Errorf("Ledger content was overwritten! Expected %q, got %q", modifiedText, string(content))
+	}
+}
