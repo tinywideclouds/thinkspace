@@ -55,16 +55,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	var stateEngine workspace.StateEngine
+	// FIXED: Using the new ChatEngine interface and stateful constructors
+	var stateEngine workspace.ChatEngine
 	switch *engineType {
 	case "exec":
 		fmt.Println("⚙️  Engine: Git CLI (ExecEngine with Worktrees)")
-		stateEngine = gitfs.NewGoExecEngine()
+		stateEngine = gitfs.NewGoExecChat(repoRoot, true)
 	case "gogit":
 		fallthrough
 	default:
 		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
-		stateEngine = gitfs.NewGoGitEngine()
+		stateEngine = gitfs.NewGoGitChat(repoRoot, true)
 	}
 
 	// 1. Initialize Registry and dynamically load the requested domain

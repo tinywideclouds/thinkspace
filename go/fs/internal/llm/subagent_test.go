@@ -2,8 +2,6 @@ package llm_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,9 +10,37 @@ import (
 	"google.golang.org/genai"
 )
 
+type mockSandbox struct {
+	files map[string][]byte
+}
+
+func newMockSandbox() *mockSandbox {
+	return &mockSandbox{files: make(map[string][]byte)}
+}
+
+func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
+	m.files[path] = data
+	return nil
+}
+
+func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if data, ok := m.files[path]; ok {
+		return data, nil
+	}
+	return nil, nil // Return nil safely if file doesn't exist yet
+}
+
+func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
+	return "", nil
+}
+
+func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error { return nil }
+func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { return nil }
+func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
+
 func TestSubAgentFactory_Execution(t *testing.T) {
 	ctx := context.Background()
-	sandboxDir := t.TempDir()
+	sandbox := newMockSandbox()
 
 	jsonPayload := `{"main.go": "package main\n"}`
 
@@ -37,7 +63,7 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 	executor := llm.SubAgentFactory(mockClient, "test-worker")
 	tokenChan := make(chan workspace.AgentToken, 10)
 
-	err := executor(ctx, "write a main file", sandboxDir, 1, tokenChan)
+	err := executor(ctx, "write a main file", sandbox, 1, tokenChan)
 	if err != nil {
 		t.Fatalf("executor failed: %v", err)
 	}
@@ -55,19 +81,17 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 		t.Errorf("expected streamed text to be '%s', got '%s'", jsonPayload, streamedText.String())
 	}
 
-	mainGoPath := filepath.Join(sandboxDir, "main.go")
-	content, err := os.ReadFile(mainGoPath)
-	if err != nil {
-		t.Fatalf("failed to read generated file: %v", err)
+	content, exists := sandbox.files["main.go"]
+	if !exists {
+		t.Fatalf("expected main.go to be generated in sandbox")
 	}
 	if string(content) != "package main\n" {
 		t.Errorf("unexpected file content: %s", string(content))
 	}
 
-	tracePath := filepath.Join(sandboxDir, "trace.jsonl")
-	traceContent, err := os.ReadFile(tracePath)
-	if err != nil {
-		t.Fatalf("failed to read trace.jsonl: %v", err)
+	traceContent, exists := sandbox.files["trace.jsonl"]
+	if !exists {
+		t.Fatalf("expected trace.jsonl to be generated in sandbox")
 	}
 	if !strings.Contains(string(traceContent), "write a main file") {
 		t.Errorf("trace.jsonl missing prompt: %s", string(traceContent))
@@ -79,7 +103,7 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 
 func TestSubAgentFactory_InvalidJSON(t *testing.T) {
 	ctx := context.Background()
-	sandboxDir := t.TempDir()
+	sandbox := newMockSandbox()
 
 	invalidPayload := `{"main.go": ` // missing closing brackets/quotes
 
@@ -102,7 +126,7 @@ func TestSubAgentFactory_InvalidJSON(t *testing.T) {
 	executor := llm.SubAgentFactory(mockClient, "test-worker")
 	tokenChan := make(chan workspace.AgentToken, 10)
 
-	err := executor(ctx, "write bad json", sandboxDir, 1, tokenChan)
+	err := executor(ctx, "write bad json", sandbox, 1, tokenChan)
 	if err == nil {
 		t.Fatalf("expected executor to fail on invalid json")
 	}

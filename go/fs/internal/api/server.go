@@ -17,12 +17,13 @@ import (
 )
 
 type Server struct {
-	logger   *slog.Logger
-	registry *config.Registry
-	service  *workspace.Service
-	llmMgr   *llm.Manager
-	flow     flows.Flow
-	client   llm.ModelClient
+	logger      *slog.Logger
+	registry    *config.Registry
+	service     *workspace.Service
+	llmMgr      *llm.Manager
+	flow        flows.Flow
+	client      llm.ModelClient
+	initialChat string
 }
 
 func NewServer(
@@ -32,14 +33,16 @@ func NewServer(
 	llmMgr *llm.Manager,
 	flow flows.Flow,
 	client llm.ModelClient,
+	initialChat string,
 ) *Server {
 	return &Server{
-		logger:   logger,
-		registry: registry,
-		service:  service,
-		llmMgr:   llmMgr,
-		flow:     flow,
-		client:   client,
+		logger:      logger,
+		registry:    registry,
+		service:     service,
+		llmMgr:      llmMgr,
+		flow:        flow,
+		client:      client,
+		initialChat: initialChat,
 	}
 }
 
@@ -115,7 +118,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 			go func(promptText string, space workspace.ThinkSpace) {
-				chatName := "unit-circle-test"
+				chatName := s.initialChat
 				thread, err := s.service.StartThread(wsCtx, chatName)
 				if err != nil {
 					s.logger.Error("Failed to start thread", "error", err)

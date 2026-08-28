@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -21,8 +20,8 @@ type TraceEvent struct {
 
 // SubAgentFactory creates a SubAgentExecutor linked to a specific model.
 func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExecutor {
-	// The signature now strictly matches workspace.SubAgentExecutor
-	return func(ctx context.Context, instructions string, sandboxDir string, agentID int, tokenChan chan<- workspace.AgentToken) error {
+	// The signature now strictly matches workspace.SubAgentExecutor using the virtual sandbox
+	return func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
 
 		config := &genai.GenerateContentConfig{
 			ResponseMIMEType: "application/json",
@@ -33,12 +32,10 @@ func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExe
 			Parts: []*genai.Part{{Text: instructions}},
 		}}
 
-		// Upgraded to a streaming call using the abstracted interface
 		stream := client.GenerateContentStream(ctx, modelName, contents, config)
 
 		rawJSON := ""
 
-		// Consume the stream and multiplex it out
 		for chunk, err := range stream {
 			if err != nil {
 				return fmt.Errorf("sub-agent generation stream failed: %w", err)
@@ -49,7 +46,6 @@ func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExe
 					if part.Text != "" {
 						rawJSON += part.Text
 
-						// Push the token to the multiplex channel (if connected)
 						if tokenChan != nil {
 							tokenChan <- workspace.AgentToken{
 								AgentID: agentID,
@@ -70,24 +66,16 @@ func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExe
 			return fmt.Errorf("failed to parse sub-agent json: %w\nOutput was: %s", err, rawJSON)
 		}
 
-		// Write the generated files into the sandbox
+		// Write the generated files into the virtual sandbox environment
 		for relPath, content := range files {
-			absPath := filepath.Join(sandboxDir, filepath.Clean(relPath))
-			if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
-				return fmt.Errorf("creating dir for %s: %w", relPath, err)
-			}
-			if err := os.WriteFile(absPath, []byte(content), 0644); err != nil {
+			cleanPath := filepath.Clean(relPath)
+			if err := sandbox.WriteFile(ctx, cleanPath, []byte(content)); err != nil {
 				return fmt.Errorf("writing file %s: %w", relPath, err)
 			}
 		}
 
-		// Write the shadow ledger directly to the root of the sandbox
-		tracePath := filepath.Join(sandboxDir, "trace.jsonl")
-		traceFile, err := os.OpenFile(tracePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to open trace file: %w", err)
-		}
-		defer traceFile.Close()
+		// Read the existing trace ledger (if any) and append the new event
+		traceData, _ := sandbox.ReadFile(ctx, "trace.jsonl")
 
 		event := TraceEvent{
 			Timestamp: time.Now().UTC(),
@@ -97,7 +85,9 @@ func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExe
 
 		b, err := json.Marshal(event)
 		if err == nil {
-			_, _ = traceFile.Write(append(b, '\n'))
+			traceData = append(traceData, b...)
+			traceData = append(traceData, '\n')
+			_ = sandbox.WriteFile(ctx, "trace.jsonl", traceData)
 		}
 
 		return nil

@@ -62,13 +62,16 @@ models:
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	stateEngine := gitfs.NewGoExecEngine()
+
+	// FIXED: Replaced NewGoExecEngine with NewGoExecChat
+	stateEngine := gitfs.NewGoExecChat(workspaceRoot, true)
+
 	svc := workspace.NewService(logger, stateEngine, workspaceRoot)
 	mockClient := &mockModelClient{}
 	llmMgr := llm.NewManager(mockClient)
 	flow := &dummyFlow{}
 
-	srv := api.NewServer(logger, registry, svc, llmMgr, flow, mockClient)
+	srv := api.NewServer(logger, registry, svc, llmMgr, flow, mockClient, "test-chat")
 
 	return srv, "golang"
 }

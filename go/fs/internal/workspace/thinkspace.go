@@ -59,7 +59,9 @@ type ThinkSpace interface {
 	SubAgentSystemPrompt() string
 	Model(category ModelCategory) string
 	Tools() []*genai.Tool
-	Verify(ctx context.Context, dir string) error
+
+	// Verify runs domain-specific validation constraints inside the provided sandbox environment.
+	Verify(ctx context.Context, sandbox CandidateSandbox) error
 
 	TurnTimeout() time.Duration
 	AgentTimeout() time.Duration

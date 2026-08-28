@@ -1,77 +1,62 @@
 # GitFS State Engine
 
-The `gitfs` package provides the `NativeEngine`, which implements the `workspace.StateEngine` interface using pure Go via the `[github.com/go-git/go-git/v5](https://github.com/go-git/go-git/v5)` library.
+The `gitfs` package provides file state and version control management for ThinkSpace. 
 
-This implementation is specifically designed to leverage native Git behaviors to manage file state without interfering with the active, uncommitted chat ledger.
+Instead of hardcoding a single Git strategy, the architecture is built around a pluggable `workspace.ChatEngine` interface. This interface defines the strict lifecycle contract (Spawn, Preview, Accept, Reject) required to orchestrate isolated agents, while allowing the underlying Git implementation to be swapped dynamically based on environment or performance requirements.
 
-## Implementation Mechanics
+## Supported Engines
 
-The engine relies on standard, safe Git checkouts to manage the application's "Two-Speed" architecture.
+The package currently provides two concrete implementations of the `workspace.ChatEngine` interface:
 
-### The "Floating" Ledger
+### 1. GoExec Engine (`GoExecChat`)
+This implementation shells out to the native OS-level Git CLI via `os/exec`. 
+* **Mechanics:** It heavily leverages native `git worktree` commands to instantly provision sandboxes linked to the main repository database. 
+* **Strengths:** It is the "gold standard" implementation. It handles complex worktree operations, untracked folder staging, and "floating" uncommitted ledgers seamlessly because it relies on the highly optimized, native Git binary.
 
-The core requirement of this engine is that uncommitted modifications to the `conversation.jsonl` file must never be destroyed during tool execution.
+### 2. GoGit Engine (`GoGitChat`)
+This implementation uses the pure Go `github.com/go-git/go-git/v5` library.
+* **Mechanics:** It relies on in-memory object traversal and traditional `git clone` commands to provision sandboxes.
+* **Strengths:** It is highly portable and requires no external system dependencies (like an installed Git binary). 
+* **Limitations:** Because `go-git` lacks native support for floating unstaged changes during complex branch checkouts, this engine relies on an in-memory stashing mechanism (`withFloatingLedger`) to safely carry the `conversation.jsonl` file across branch transitions.
 
-* To achieve this, the engine strictly avoids the use of `Keep: true` or `Force: true` flags during branch transitions.[cite: 4]
-* By using standard checkouts (`worktree.Checkout(&git.CheckoutOptions{Branch: target})`), Git natively "floats" uncommitted changes to tracked files across branches, provided those files do not have underlying commit conflicts.[cite: 4]
+---
 
+## Sandbox Execution Modes
 
+Regardless of which engine is used, the system supports two distinct execution models for how agents interact with the repository. This is governed by the `SharedCodebase` flag passed during engine initialization:
 
-### Atomic Branching (`git switch -c`)
+*   **Shared Codebase Mode (Same Developer):** The sandbox targets the repository root. Agents edit the shared application code directly (e.g., `/src`). Git handles conflict resolution naturally when the chat branch is eventually merged back to `main`.
+*   **Jailed Mode (Separate Developer):** The sandbox intercepts file paths and traps them inside the metadata folder (e.g., `/chats/<chat-id>/src`). Agents believe they are writing to the root, but the engine physically isolates the code to prevent all structural collisions.
 
-* When isolating a new proposal, the engine replicates the terminal command `git switch -c` by passing the starting commit hash alongside `Create: true` within the `CheckoutOptions`.[cite: 4]
-
-
-* This atomically creates the new branch reference and switches the working directory to it, safely carrying the uncommitted ledger along.[cite: 4]
-
-
+*Note:* In both modes, the `conversation.jsonl` ledger is strictly stored in the `chats/<chat-id>/` directory to prevent metadata conflicts.
 
 ## The Lifecycle Methods
 
-### 1. Propose (`Propose`)
+Both engines strictly adhere to the following lifecycle:
 
-* The engine creates a candidate branch and strictly stages only the newly proposed files in the `docs/` directory.[cite: 4]
-
-
-* After committing, it attaches a permanent lightweight tag (e.g., `refs/tags/proposal-<id>`) so the code survives even if the branch is later deleted.[cite: 4]
-
-
-* **Crucially:** The engine intentionally leaves the working tree checked out on the candidate branch. This allows external tools (like a user's IDE) to inspect the files before a decision is made.[cite: 4]
+### 1. Propose (`SpawnCandidateSandbox` & `ApplyDraft`)
+* The engine creates a candidate branch and spawns an isolated execution sandbox.
+* The agent writes files to this sandbox, and `ApplyDraft` commits them to the candidate branch.
+* **Crucially:** The sandbox allows external tools (like a user's IDE) or test runners to inspect and verify the files before a final decision is made.
 
 ### 2. Read Candidate Context (`ReadCandidateDiff`)
-
 * This method allows the LLM Manager to review the agent's proposed changes by generating a triple-dot diff (`git diff main...candidate`).
 * By comparing the target thread branch tree against the candidate branch tree, it outputs a standard Unified Format Patch showing exact additions (`+`) and deletions (`-`), which is ideal for LLM context processing.
 
 ### 3. Accept (`Accept`)
-
-Accepting a candidate executes a fast-forward merge using a three-step pointer manipulation:
-
-1. **Checkout Thread:** The engine safely checks out the main thread branch, which natively floats the ledger and temporarily removes the candidate's files from disk.[cite: 4]
-
-
-2. **Fast-Forward:** The thread's branch reference is manually updated in the storer to point to the candidate's commit hash.[cite: 4]
-
-
-3. **Sync Worktree:** A second checkout of the thread branch forces Git to recognize the advanced HEAD pointer, extracting the accepted files permanently to the disk while continuing to float the ledger.[cite: 4]
-
-
-4. **Cleanup:** The candidate branch reference is destroyed.[cite: 4]
-
-
+Accepting a candidate executes a fast-forward merge:
+1. **Checkout Thread:** The engine safely checks out the main thread branch, natively floating the ledger.
+2. **Fast-Forward:** The thread's branch reference is updated to point to the candidate's commit hash.
+3. **Sync Worktree:** The working directory is synced to extract the accepted files permanently to the disk.
+4. **Tagging:** An annotated tag (`refs/tags/proposal-<id>`) is created permanently marking the accepted code.
+5. **Cleanup:** The candidate branch reference is destroyed.
 
 ### 4. Reject (`Reject`)
-
-* Rejection is handled with a single, safe checkout back to the main thread branch.[cite: 4]
-
-
-* Because the rejected files (e.g., `math.go`) do not exist on the target thread branch, Git natively deletes them from the working directory during the switch.[cite: 4]
-
-
-* The candidate branch reference is then cleanly deleted from the storer, leaving no trace except the permanent tag.[cite: 4]
-
-
+* Rejection is handled with a single, safe checkout back to the main thread branch.
+* Because the rejected files do not exist on the target thread branch, Git natively deletes them from the working directory.
+* An annotated tag is created permanently recording the rejection reason.
+* The candidate branch reference is cleanly deleted from the storer.
 
 ## Verification
 
-The engine's behaviors are validated by a comprehensive black-box test suite (`engine_test.go`). The tests simulate a real-world application state by writing an uncommitted ledger to disk and verifying that it successfully survives both the `Accept` and `Reject` lifecycles without data loss. Furthermore, the tests guarantee that rejected files are completely erased from the disk, while accepted files persist.[cite: 4]
+The engines are validated by a shared, black-box contract test suite (`engine_contract_test.go`). The suite iterates over both `GoGitChat` and `GoExecChat` factories, passing them through identical lifecycle simulations. This ensures that regardless of the underlying Git mechanics, both engines perfectly respect the `SharedCodebase` routing flag, float uncommitted ledgers without data loss, and enforce the exact same filesystem state upon acceptance or rejection.

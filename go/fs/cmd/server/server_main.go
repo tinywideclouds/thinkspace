@@ -24,8 +24,11 @@ func main() {
 	port := flag.Int("port", 8080, "Port for the ThinkSpace WebServer")
 	rootName := flag.String("root", "thinkspace-root", "Root directory for the ThinkSpace repositories")
 	spaceName := flag.String("space", "sandbox", "The think space to use")
+	chatName := flag.String("chat", "default-chat", "Initial chat thread to use")
 	engineType := flag.String("engine", "gogit", "State engine backend ('gogit' or 'exec')")
 	flag.Parse()
+
+	rootMode := true
 
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -49,12 +52,13 @@ func main() {
 	configsDir := filepath.Join(homeDir, "Documents", "thinkspace", "configs")
 	_ = os.MkdirAll(repoRoot, 0755)
 
-	var stateEngine workspace.StateEngine
+	// FIXED: Using the new ChatEngine interface and stateful constructors
+	var stateEngine workspace.ChatEngine
 	switch *engineType {
 	case "exec":
-		stateEngine = gitfs.NewGoExecEngine()
+		stateEngine = gitfs.NewGoExecChat(repoRoot, rootMode)
 	default:
-		stateEngine = gitfs.NewGoGitEngine()
+		stateEngine = gitfs.NewGoGitChat(repoRoot, rootMode)
 	}
 
 	// 1. Initialize Registry and load domains
@@ -69,7 +73,7 @@ func main() {
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
 	// 3. Initialize the new API Server
-	srv := api.NewServer(logger, registry, workspaceService, llmMgr, fanOutFlow, modelClient)
+	srv := api.NewServer(logger, registry, workspaceService, llmMgr, fanOutFlow, modelClient, *chatName)
 
 	serverAddr := fmt.Sprintf(":%d", *port)
 	logger.Info("🚀 ThinkSpace Server listening", "addr", serverAddr)

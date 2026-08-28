@@ -8,21 +8,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// GoExecEngine implements the workspace.StateEngine interface by wrapping the standard git CLI.
-type GoExecEngine struct{}
-
-func NewGoExecEngine() *GoExecEngine {
-	return &GoExecEngine{}
+// GoExecChat implements the workspace.ChatEngine interface using the native Git CLI.
+type GoExecChat struct {
+	workspaceRoot  string
+	sharedCodebase bool
 }
 
-// runGit is a helper to execute git commands with the correct environment and directory.
-func (e *GoExecEngine) runGit(ctx context.Context, dir string, args ...string) (string, error) {
+func NewGoExecChat(workspaceRoot string, sharedCodebase bool) *GoExecChat {
+	return &GoExecChat{
+		workspaceRoot:  workspaceRoot,
+		sharedCodebase: sharedCodebase,
+	}
+}
+
+// runGit is a shared internal helper to execute git commands with the correct environment.
+func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
-	// Ensure Git doesn't block waiting for identity configuration
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=Workspace Engine",
 		"GIT_AUTHOR_EMAIL=engine@local.workspace",
@@ -41,145 +48,194 @@ func (e *GoExecEngine) runGit(ctx context.Context, dir string, args ...string) (
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func (e *GoExecEngine) InitThread(ctx context.Context, mainDir string, threadID string) error {
-	if _, err := e.runGit(ctx, mainDir, "rev-parse", "--git-dir"); err != nil {
-		if _, err := e.runGit(ctx, mainDir, "init"); err != nil {
+func (c *GoExecChat) InitChat(ctx context.Context, chatID string) error {
+	if _, err := runGit(ctx, c.workspaceRoot, "rev-parse", "--git-dir"); err != nil {
+		if _, err := runGit(ctx, c.workspaceRoot, "init"); err != nil {
 			return err
 		}
-		if _, err := e.runGit(ctx, mainDir, "commit", "--allow-empty", "-m", "chore: initialize workspace"); err != nil {
+		if _, err := runGit(ctx, c.workspaceRoot, "commit", "--allow-empty", "-m", "chore: initialize workspace"); err != nil {
 			return err
 		}
 	}
 
-	threadBranch := fmt.Sprintf("chat/%s", threadID)
+	threadBranch := fmt.Sprintf("chat/%s", chatID)
 
-	// Check if branch exists
-	if _, err := e.runGit(ctx, mainDir, "show-ref", "--verify", "--quiet", "refs/heads/"+threadBranch); err != nil {
-		// Create and switch
-		if _, err := e.runGit(ctx, mainDir, "switch", "-c", threadBranch); err != nil {
+	if _, err := runGit(ctx, c.workspaceRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+threadBranch); err != nil {
+		if _, err := runGit(ctx, c.workspaceRoot, "switch", "-c", threadBranch); err != nil {
 			return err
 		}
 	} else {
-		// Just switch
-		if _, err := e.runGit(ctx, mainDir, "switch", threadBranch); err != nil {
-			return err
+		// Short-circuit if already on the branch
+		currentBranch, _ := runGit(ctx, c.workspaceRoot, "branch", "--show-current")
+		if currentBranch != threadBranch {
+			if _, err := runGit(ctx, c.workspaceRoot, "switch", threadBranch); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (e *GoExecEngine) Snapshot(ctx context.Context, mainDir string, threadID string, message string) (string, error) {
-	if _, err := e.runGit(ctx, mainDir, "add", "--all"); err != nil {
+func (c *GoExecChat) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+	if _, err := runGit(ctx, c.workspaceRoot, "add", "--all"); err != nil {
 		return "", err
 	}
-	if _, err := e.runGit(ctx, mainDir, "commit", "--allow-empty", "-m", message); err != nil {
+	if _, err := runGit(ctx, c.workspaceRoot, "commit", "--allow-empty", "-m", message); err != nil {
 		return "", err
 	}
-	return e.runGit(ctx, mainDir, "rev-parse", "HEAD")
+	return runGit(ctx, c.workspaceRoot, "rev-parse", "HEAD")
 }
 
-// --- Agentic Sandbox Management ---
-
-func (e *GoExecEngine) SpawnSandbox(ctx context.Context, mainDir string, threadID string, candidateID string) (string, error) {
-	// Generate a unique path in the OS temp directory
-	sandboxDir := filepath.Join(os.TempDir(), fmt.Sprintf("sandbox-%s-%d", candidateID, os.Getpid()))
+func (c *GoExecChat) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+	sandboxDirectory, err := os.MkdirTemp("", fmt.Sprintf("sandbox-%s-*", candidateID))
+	if err != nil {
+		return nil, fmt.Errorf("creating temp sandbox dir: %w", err)
+	}
 
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
-	threadBranch := fmt.Sprintf("chat/%s", threadID)
+	threadBranch := fmt.Sprintf("chat/%s", chatID)
 
-	// git worktree add creates the directory, branches off the threadBranch, and checks it out.
-	if _, err := e.runGit(ctx, mainDir, "worktree", "add", "-b", candidateBranch, sandboxDir, threadBranch); err != nil {
-		return "", err
+	if _, err := runGit(ctx, c.workspaceRoot, "worktree", "add", "-b", candidateBranch, sandboxDirectory, threadBranch); err != nil {
+		return nil, err
 	}
 
-	return sandboxDir, nil
+	return &execSandbox{
+		mainRepoDirectory: c.workspaceRoot,
+		sandboxDirectory:  sandboxDirectory,
+		chatDirectory:     filepath.Join(sandboxDirectory, "chats", chatID),
+		candidateID:       candidateID,
+		sharedCodebase:    c.sharedCodebase,
+	}, nil
 }
 
-func (e *GoExecEngine) CommitSandbox(ctx context.Context, sandboxDir string, message string) (string, error) {
-	if _, err := e.runGit(ctx, sandboxDir, "add", "--all"); err != nil {
-		return "", err
-	}
-	if _, err := e.runGit(ctx, sandboxDir, "commit", "--allow-empty", "-m", message); err != nil {
-		return "", err
-	}
-	return e.runGit(ctx, sandboxDir, "rev-parse", "HEAD")
-}
-
-func (e *GoExecEngine) SubmitSandbox(ctx context.Context, sandboxDir string, mainDir string, candidateID string) error {
-	// No-op for CLI Worktrees.
-	// The sandbox is physically linked to the main repository's database.
-	// Any commits made in the sandbox are instantly available in the main repository.
-	return nil
-}
-
-func (e *GoExecEngine) CloseSandbox(ctx context.Context, sandboxDir string) error {
-	// We run the remove command from the sandbox dir's parent to be safe, or mainDir.
-	// We use --force to discard any uncommitted files left in the sandbox.
-	_, err := e.runGit(ctx, filepath.Dir(sandboxDir), "worktree", "remove", "--force", sandboxDir)
+func (c *GoExecChat) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
+	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
+	_, err := runGit(ctx, c.workspaceRoot, "switch", candidateBranch)
 	return err
 }
 
-// --- Main Session / User Review ---
-
-func (e *GoExecEngine) ReadCandidateDiff(ctx context.Context, mainDir string, threadID string, candidateID string) (string, error) {
-	threadBranch := fmt.Sprintf("chat/%s", threadID)
+func (c *GoExecChat) ReadCandidateDiff(ctx context.Context, chatID string, candidateID string) (string, error) {
+	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 
-	diff, err := e.runGit(ctx, mainDir, "diff", threadBranch+"..."+candidateBranch)
+	diff, err := runGit(ctx, c.workspaceRoot, "diff", threadBranch+"..."+candidateBranch)
 	if err != nil {
 		return "", fmt.Errorf("generating git diff: %w", err)
 	}
 	return diff, nil
 }
 
-func (e *GoExecEngine) PreviewCandidate(ctx context.Context, mainDir string, threadID string, candidateID string) error {
-	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
-	_, err := e.runGit(ctx, mainDir, "switch", candidateBranch)
-	return err
-}
-
-func (e *GoExecEngine) Accept(ctx context.Context, mainDir string, threadID string, candidateID string, reason string) error {
-	threadBranch := fmt.Sprintf("chat/%s", threadID)
+func (c *GoExecChat) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
+	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	tagName := fmt.Sprintf("proposal-%s", candidateID)
 	tagMsg := fmt.Sprintf("ACCEPTED: %s", reason)
 
-	if _, err := e.runGit(ctx, mainDir, "switch", threadBranch); err != nil {
+	if _, err := runGit(ctx, c.workspaceRoot, "switch", threadBranch); err != nil {
 		return err
 	}
-
-	// Fast-forward merge
-	if _, err := e.runGit(ctx, mainDir, "merge", "--ff-only", candidateBranch); err != nil {
+	if _, err := runGit(ctx, c.workspaceRoot, "merge", "--ff-only", candidateBranch); err != nil {
 		return err
 	}
-
-	// Create annotated tag
-	if _, err := e.runGit(ctx, mainDir, "tag", "-a", tagName, "-m", tagMsg, candidateBranch); err != nil {
+	if _, err := runGit(ctx, c.workspaceRoot, "tag", "-a", tagName, "-m", tagMsg, candidateBranch); err != nil {
 		return err
 	}
-
-	// Delete branch
-	_, err := e.runGit(ctx, mainDir, "branch", "-d", candidateBranch)
+	_, err := runGit(ctx, c.workspaceRoot, "branch", "-d", candidateBranch)
 	return err
 }
 
-func (e *GoExecEngine) Reject(ctx context.Context, mainDir string, threadID string, candidateID string, reason string) error {
-	threadBranch := fmt.Sprintf("chat/%s", threadID)
+func (c *GoExecChat) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
+	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	tagName := fmt.Sprintf("proposal-%s", candidateID)
 	tagMsg := fmt.Sprintf("REJECTED: %s", reason)
 
-	if _, err := e.runGit(ctx, mainDir, "switch", threadBranch); err != nil {
+	if _, err := runGit(ctx, c.workspaceRoot, "switch", threadBranch); err != nil {
 		return err
 	}
-
-	// Create annotated tag
-	if _, err := e.runGit(ctx, mainDir, "tag", "-a", tagName, "-m", tagMsg, candidateBranch); err != nil {
+	if _, err := runGit(ctx, c.workspaceRoot, "tag", "-a", tagName, "-m", tagMsg, candidateBranch); err != nil {
 		return err
 	}
+	_, err := runGit(ctx, c.workspaceRoot, "branch", "-D", candidateBranch)
+	return err
+}
 
-	// Force delete branch since it was not merged
-	_, err := e.runGit(ctx, mainDir, "branch", "-D", candidateBranch)
+// --- Sandbox Virtual Environment ---
+
+// execSandbox implements the workspace.CandidateSandbox interface.
+type execSandbox struct {
+	mainRepoDirectory string
+	sandboxDirectory  string
+	chatDirectory     string
+	candidateID       string
+	sharedCodebase    bool
+}
+
+// normalizePath safely forces incoming paths into the configured execution root,
+// stripping out redundant prefixes if the test or prompt already supplied them.
+func (s *execSandbox) normalizePath(targetPath string) string {
+	slashPath := filepath.ToSlash(filepath.Clean(targetPath))
+	chatID := filepath.Base(s.chatDirectory)
+	slashPrefix := fmt.Sprintf("chats/%s", chatID)
+
+	if strings.HasPrefix(slashPath, slashPrefix) {
+		slashPath = strings.TrimPrefix(slashPath, slashPrefix)
+		slashPath = strings.TrimPrefix(slashPath, "/")
+	}
+
+	if s.sharedCodebase {
+		return filepath.Join(s.sandboxDirectory, filepath.FromSlash(slashPath))
+	}
+	return filepath.Join(s.chatDirectory, filepath.FromSlash(slashPath))
+}
+
+func (s *execSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
+	fullPath := s.normalizePath(path)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(fullPath, data, 0644)
+}
+
+func (s *execSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	return os.ReadFile(s.normalizePath(path))
+}
+
+func (s *execSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	if s.sharedCodebase {
+		cmd.Dir = s.sandboxDirectory
+	} else {
+		cmd.Dir = s.chatDirectory
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("exec %s failed: %w - %s", command, err, stderr.String())
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+func (s *execSandbox) ApplyDraft(ctx context.Context, message string) error {
+	if _, err := runGit(ctx, s.sandboxDirectory, "add", "--all"); err != nil {
+		return err
+	}
+	_, err := runGit(ctx, s.sandboxDirectory, "commit", "--allow-empty", "-m", message)
+	return err
+}
+
+func (s *execSandbox) DeliverForReview(ctx context.Context) error {
+	// Native worktrees are physically linked to the main database.
+	// Commits are instantly available to the factory without pushing.
+	return nil
+}
+
+func (s *execSandbox) TearDown(ctx context.Context) error {
+	// The sandbox is self-aware; it runs the command from its parent context securely.
+	_, err := runGit(ctx, s.mainRepoDirectory, "worktree", "remove", "--force", s.sandboxDirectory)
 	return err
 }

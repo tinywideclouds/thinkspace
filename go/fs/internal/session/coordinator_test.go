@@ -32,34 +32,25 @@ func (m *mockModelClient) GenerateContentStream(ctx context.Context, model strin
 	}
 }
 
-type mockStateEngine struct{}
+type mockChatEngine struct{}
 
-func (m *mockStateEngine) InitThread(ctx context.Context, mainDir string, threadID string) error {
-	return nil
-}
-func (m *mockStateEngine) Snapshot(ctx context.Context, mainDir string, threadID string, message string) (string, error) {
+func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
+func (m *mockChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
 	return "mock-sha", nil
 }
-func (m *mockStateEngine) SpawnSandbox(ctx context.Context, mainDir string, threadID string, candidateID string) (string, error) {
-	return "", nil
+func (m *mockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+	return nil, nil
 }
-func (m *mockStateEngine) CommitSandbox(ctx context.Context, sandboxDir string, message string) (string, error) {
-	return "mock-sha", nil
-}
-func (m *mockStateEngine) SubmitSandbox(ctx context.Context, sandboxDir string, mainDir string, candidateID string) error {
+func (m *mockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
 	return nil
 }
-func (m *mockStateEngine) CloseSandbox(ctx context.Context, sandboxDir string) error { return nil }
-func (m *mockStateEngine) PreviewCandidate(ctx context.Context, mainDir string, threadID string, candidateID string) error {
+func (m *mockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
-func (m *mockStateEngine) Accept(ctx context.Context, mainDir string, threadID string, candidateID string, reason string) error {
+func (m *mockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
-func (m *mockStateEngine) Reject(ctx context.Context, mainDir string, threadID string, candidateID string, reason string) error {
-	return nil
-}
-func (m *mockStateEngine) ReadCandidateDiff(ctx context.Context, repoRoot, threadID, candidateID string) (string, error) {
+func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
 	return "+ mock diff", nil
 }
 
@@ -73,7 +64,9 @@ func (m *mockThinkSpace) Tools() []*genai.Tool                          { return
 func (m *mockThinkSpace) TurnTimeout() time.Duration                    { return 5 * time.Minute }
 func (m *mockThinkSpace) AgentTimeout() time.Duration                   { return 1 * time.Minute }
 func (m *mockThinkSpace) VerifyTimeout() time.Duration                  { return 15 * time.Second }
-func (m *mockThinkSpace) Verify(ctx context.Context, dir string) error  { return nil }
+func (m *mockThinkSpace) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
+	return nil
+}
 
 type mockFlow struct {
 	executeCalled bool
@@ -117,17 +110,18 @@ func (u *mockUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
 // --- Tests ---
 
 func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
-	ctx := context.Background()
+	// FAIL FAST: 2-second timeout to prevent deadlocks
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	workspaceRoot := t.TempDir()
-	svc := workspace.NewService(logger, &mockStateEngine{}, workspaceRoot)
+	svc := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot)
 	thread, _ := svc.StartThread(ctx, "test-thread")
 
-	// Create the thread directories so the ledger can be saved
 	os.MkdirAll(filepath.Join(workspaceRoot, "chats", "test-thread"), 0755)
 
-	// Simulate an LLM response containing a tool call
 	client := &mockModelClient{
 		responses: []*genai.GenerateContentResponse{
 			{
@@ -155,13 +149,12 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 
 	llmMgr := llm.NewManager(client)
 	flow := &mockFlow{}
-	executor := func(ctx context.Context, instructions string, sandboxDir string, agentID int, tokenChan chan<- workspace.AgentToken) error {
+	executor := func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
 		return nil
 	}
 
 	coordinator := session.NewCoordinator(logger, svc, llmMgr, executor, flow)
 
-	// Script the UI to pick StrategyManual and accept the candidate
 	ui := &mockUI{
 		strategyToReturn: session.StrategyManual,
 		reviewToReturn:   true,
@@ -193,11 +186,14 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 }
 
 func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
-	ctx := context.Background()
+	// FAIL FAST: 2-second timeout to prevent deadlocks
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	workspaceRoot := t.TempDir()
-	svc := workspace.NewService(logger, &mockStateEngine{}, workspaceRoot)
+	svc := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot)
 	thread, _ := svc.StartThread(ctx, "test-thread-skip")
 
 	client := &mockModelClient{
@@ -226,7 +222,6 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 
 	coordinator := session.NewCoordinator(logger, svc, llm.NewManager(client), nil, &mockFlow{})
 
-	// Script the UI to skip review entirely
 	ui := &mockUI{
 		strategyToReturn: session.StrategySkip,
 	}
@@ -236,7 +231,6 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
 
-	// Because we chose Skip, the UI should never be asked to review a specific candidate
 	if ui.reviewedBranch != "" {
 		t.Errorf("Expected UI review step to be skipped, but got review for: %s", ui.reviewedBranch)
 	}

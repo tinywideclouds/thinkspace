@@ -4,74 +4,104 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type mockStateEngine struct {
+type mockSandbox struct {
+	writeCalled    bool
+	readCalled     bool
+	execCalled     bool
+	applyCalled    bool
+	deliverCalled  bool
+	tearDownCalled bool
+	files          map[string][]byte
+}
+
+func newMockSandbox() *mockSandbox {
+	return &mockSandbox{
+		files: make(map[string][]byte),
+	}
+}
+
+func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
+	m.writeCalled = true
+	m.files[path] = data
+	return nil
+}
+
+func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	m.readCalled = true
+	return m.files[path], nil
+}
+
+func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
+	m.execCalled = true
+	return "mock output", nil
+}
+
+func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error {
+	m.applyCalled = true
+	return nil
+}
+
+func (m *mockSandbox) DeliverForReview(ctx context.Context) error {
+	m.deliverCalled = true
+	return nil
+}
+
+func (m *mockSandbox) TearDown(ctx context.Context) error {
+	m.tearDownCalled = true
+	return nil
+}
+
+type mockChatEngine struct {
 	initCalled    bool
 	spawnCalled   bool
-	commitCalled  bool
-	submitCalled  bool
 	previewCalled bool
 	acceptCalled  bool
 	rejectCalled  bool
-	closeCalled   bool
+	lastSandbox   *mockSandbox
 }
 
-func (m *mockStateEngine) InitThread(ctx context.Context, mainDir string, threadID string) error {
+func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error {
 	m.initCalled = true
 	return nil
 }
 
-func (m *mockStateEngine) Snapshot(ctx context.Context, mainDir string, threadID string, message string) (string, error) {
+func (m *mockChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
 	return "mock-sha", nil
 }
 
-func (m *mockStateEngine) SpawnSandbox(ctx context.Context, mainDir string, threadID string, candidateID string) (string, error) {
+func (m *mockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
 	m.spawnCalled = true
-	return filepath.Join(mainDir, "mock-sandbox"), nil
+	m.lastSandbox = newMockSandbox()
+	return m.lastSandbox, nil
 }
 
-func (m *mockStateEngine) CommitSandbox(ctx context.Context, sandboxDir string, message string) (string, error) {
-	m.commitCalled = true
-	return "mock-commit-sha", nil
-}
-
-func (m *mockStateEngine) SubmitSandbox(ctx context.Context, sandboxDir string, mainDir string, candidateID string) error {
-	m.submitCalled = true
-	return nil
-}
-
-func (m *mockStateEngine) CloseSandbox(ctx context.Context, sandboxDir string) error {
-	m.closeCalled = true
-	return nil
-}
-
-func (m *mockStateEngine) PreviewCandidate(ctx context.Context, mainDir string, threadID string, candidateID string) error {
+func (m *mockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
 	m.previewCalled = true
 	return nil
 }
 
-func (m *mockStateEngine) Accept(ctx context.Context, mainDir string, threadID string, candidateID string, reason string) error {
+func (m *mockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	m.acceptCalled = true
 	return nil
 }
 
-func (m *mockStateEngine) Reject(ctx context.Context, mainDir string, threadID string, candidateID string, reason string) error {
+func (m *mockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
 	m.rejectCalled = true
 	return nil
 }
 
-func (m *mockStateEngine) ReadCandidateDiff(ctx context.Context, repoRoot, threadID, candidateID string) (string, error) {
+func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
 	return "+ mock diff", nil
 }
 
-func setupServiceTest(t *testing.T) (*workspace.Service, *mockStateEngine, string) {
+func setupServiceTest(t *testing.T) (*workspace.Service, *mockChatEngine, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	mockEngine := &mockStateEngine{}
+	mockEngine := &mockChatEngine{}
 	workspaceRoot := t.TempDir()
 	svc := workspace.NewService(logger, mockEngine, workspaceRoot)
 	return svc, mockEngine, workspaceRoot
@@ -87,7 +117,7 @@ func TestService_StartThread(t *testing.T) {
 	}
 
 	if !mockEngine.initCalled {
-		t.Errorf("Expected StateEngine.InitThread to be called")
+		t.Errorf("Expected ChatEngine.InitChat to be called")
 	}
 
 	if thread.ID != "test-thread" {
@@ -114,8 +144,12 @@ func TestService_ProposeAndResolveCandidate(t *testing.T) {
 		t.Fatalf("ProposeCandidate failed: %v", err)
 	}
 
-	if !mockEngine.spawnCalled || !mockEngine.commitCalled || !mockEngine.submitCalled || !mockEngine.previewCalled || !mockEngine.closeCalled {
-		t.Errorf("Expected StateEngine lifecycle methods to be called during proposal")
+	if !mockEngine.spawnCalled || !mockEngine.previewCalled {
+		t.Errorf("Expected ChatEngine lifecycle methods to be called during proposal")
+	}
+
+	if mockEngine.lastSandbox == nil || !mockEngine.lastSandbox.writeCalled || !mockEngine.lastSandbox.applyCalled || !mockEngine.lastSandbox.deliverCalled || !mockEngine.lastSandbox.tearDownCalled {
+		t.Errorf("Expected CandidateSandbox virtual file I/O and lifecycle methods to be called")
 	}
 
 	if candidate.Status != workspace.StatusPending {
@@ -128,7 +162,7 @@ func TestService_ProposeAndResolveCandidate(t *testing.T) {
 	}
 
 	if !mockEngine.acceptCalled {
-		t.Errorf("Expected StateEngine.Accept to be called")
+		t.Errorf("Expected ChatEngine.Accept to be called")
 	}
 
 	err = svc.ResolveCandidate(ctx, thread, candidate.ID, false, "Needs work")
@@ -137,6 +171,6 @@ func TestService_ProposeAndResolveCandidate(t *testing.T) {
 	}
 
 	if !mockEngine.rejectCalled {
-		t.Errorf("Expected StateEngine.Reject to be called")
+		t.Errorf("Expected ChatEngine.Reject to be called")
 	}
 }

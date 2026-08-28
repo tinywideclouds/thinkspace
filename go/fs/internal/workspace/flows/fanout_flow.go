@@ -3,7 +3,6 @@ package flows
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -30,7 +29,6 @@ func (f *FanOutFlow) Name() string {
 	return f.name
 }
 
-// agentResult holds the outcome of a single concurrent agent execution
 type agentResult struct {
 	candidateID   string
 	branchName    string
@@ -64,9 +62,8 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *workspace.Service, thread
 
 	results := make([]agentResult, count)
 	var wg sync.WaitGroup
-	var stateMu sync.Mutex // Protects State operations on the main repository
+	var stateMu sync.Mutex
 
-	// Launch all agents concurrently
 	for i := 1; i <= count; i++ {
 		wg.Add(1)
 		go func(agentIdx int) {
@@ -80,13 +77,9 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *workspace.Service, thread
 
 			fmt.Printf("   [Agent %d] Spawning sandbox...\n", agentIdx)
 
-			// Mutex: Prevent lock collisions when creating sandboxes
-			fmt.Printf("   [Agent %d] 🔒 Requesting workspace state lock to spawn sandbox...\n", agentIdx)
 			stateMu.Lock()
-			// FIXED: Use the clean public wrapper which injects WorkspaceRoot internally
-			sandboxDir, err := svc.SpawnSandbox(ctx, thread.ID, candidateID)
+			sandbox, err := svc.SpawnSandbox(ctx, thread.ID, candidateID)
 			stateMu.Unlock()
-			fmt.Printf("   [Agent %d] 🔓 Workspace state lock released (Sandbox spawned).\n", agentIdx)
 
 			if err != nil {
 				f.logger.ErrorContext(ctx, "failed to spawn sandbox", "error", err, "agent", agentIdx)
@@ -94,38 +87,28 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *workspace.Service, thread
 				return
 			}
 
-			// Ensure cleanup happens, also protected by mutex
 			defer func() {
-				// Safely extract the trace ledger before destroying the physical sandbox
-				sourceTrace := filepath.Join(sandboxDir, "trace.jsonl")
-				if _, statErr := os.Stat(sourceTrace); statErr == nil {
+				// Safely extract the trace ledger via the virtual environment before tearing down
+				if traceData, err := sandbox.ReadFile(ctx, "trace.jsonl"); err == nil {
 					targetTrace := filepath.Join(svc.WorkspaceRoot(), "chats", thread.ID, fmt.Sprintf("trace-%s.jsonl", candidateID))
-					_ = copyFile(sourceTrace, targetTrace)
+					_ = os.WriteFile(targetTrace, traceData, 0644)
 				}
 
 				stateMu.Lock()
-				_ = svc.CloseSandbox(ctx, sandboxDir)
+				_ = sandbox.TearDown(ctx)
 				stateMu.Unlock()
 			}()
-
-			targetDir := filepath.Join(sandboxDir, "chats", thread.ID, "docs")
-			if err := os.MkdirAll(targetDir, 0755); err != nil {
-				f.logger.ErrorContext(ctx, "failed to create thread docs directory", "error", err, "agent", agentIdx)
-				results[agentIdx-1] = agentResult{skipped: true}
-				return
-			}
 
 			maxRetries := 2
 			success := false
 			currentInstructions := fmt.Sprintf("%s\n\n%s", space.SubAgentSystemPrompt(), specificInstruction)
 
-			// CONCURRENT: The LLM network call and domain verification run entirely in parallel
 			for attempt := 1; attempt <= maxRetries; attempt++ {
 				fmt.Printf("   [Agent %d] Writing code (Attempt %d/%d)...\n", agentIdx, attempt, maxRetries)
 
-				// Pass the multiplexing channel into the executor with strict local timeouts
 				agentCtx, agentCancel := context.WithTimeout(ctx, space.AgentTimeout())
-				err := executor(agentCtx, currentInstructions, targetDir, agentIdx, tokenChan)
+				// Pass the pure CandidateSandbox interface to the executor
+				err := executor(agentCtx, currentInstructions, sandbox, agentIdx, tokenChan)
 				agentCancel()
 
 				if err != nil {
@@ -136,7 +119,8 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *workspace.Service, thread
 				}
 
 				fmt.Printf("   [Agent %d] Verifying domain constraints...\n", agentIdx)
-				if err := space.Verify(ctx, targetDir); err != nil {
+				// Pass the pure CandidateSandbox interface to the verifier
+				if err := space.Verify(ctx, sandbox); err != nil {
 					fmt.Printf("   [Agent %d] ⚠️ Verification failed: %v\n", agentIdx, err)
 					currentInstructions = fmt.Sprintf("%s\n\nVerification failed:\n%s\nPlease fix.", specificInstruction, err.Error())
 					continue
@@ -150,16 +134,15 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *workspace.Service, thread
 			commitMsg := fmt.Sprintf("auto(candidate): proposal %s", candidateID)
 			commitSuccess := true
 
-			// Mutex: Prevent lock collisions when submitting back to the main repo
-			fmt.Printf("   [Agent %d] 🔒 Requesting workspace state lock to submit candidate...\n", agentIdx)
 			stateMu.Lock()
-			// FIXED: Use the single combined SubmitSandbox wrapper method
-			if err := svc.SubmitSandbox(ctx, sandboxDir, candidateID, commitMsg); err != nil {
-				f.logger.ErrorContext(ctx, "failed to submit candidate sandbox", "error", err, "agent", agentIdx)
+			if err := sandbox.ApplyDraft(ctx, commitMsg); err != nil {
+				f.logger.ErrorContext(ctx, "failed to apply sandbox draft", "error", err, "agent", agentIdx)
+				commitSuccess = false
+			} else if err := sandbox.DeliverForReview(ctx); err != nil {
+				f.logger.ErrorContext(ctx, "failed to deliver sandbox for review", "error", err, "agent", agentIdx)
 				commitSuccess = false
 			}
 			stateMu.Unlock()
-			fmt.Printf("   [Agent %d] 🔓 Workspace state lock released (Candidate submitted).\n", agentIdx)
 
 			results[agentIdx-1] = agentResult{
 				candidateID:   candidateID,
@@ -194,24 +177,4 @@ func (f *FanOutFlow) Execute(ctx context.Context, svc *workspace.Service, thread
 	}
 
 	return &FlowResult{Branches: branches, Summary: summaryBuilder.String()}, nil
-}
-
-// copyFile is a utility to safely duplicate the trace log before deletion
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	if _, err = io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Sync()
 }

@@ -2,14 +2,76 @@ package golang_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace/spaces/golang"
 )
+
+type mockSandbox struct {
+	files       map[string][]byte
+	shouldDelay bool
+}
+
+func newMockSandbox() *mockSandbox {
+	return &mockSandbox{
+		files: make(map[string][]byte),
+	}
+}
+
+func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
+	m.files[path] = data
+	return nil
+}
+
+func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	data, ok := m.files[path]
+	if !ok {
+		return nil, fmt.Errorf("file not found")
+	}
+	return data, nil
+}
+
+func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
+	cmdStr := command + " " + strings.Join(args, " ")
+
+	if m.shouldDelay && strings.Contains(cmdStr, "go test") {
+		select {
+		case <-time.After(5 * time.Second):
+			return "", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	if strings.Contains(cmdStr, "go build") {
+		// We expect the files map to simulate the src/ directory contract
+		if mainCode, ok := m.files["src/main.go"]; ok {
+			if strings.Contains(string(mainCode), "invalid") {
+				return "syntax error", fmt.Errorf("exit status 1")
+			}
+		}
+		return "", nil
+	}
+
+	if strings.Contains(cmdStr, "go test") {
+		if testCode, ok := m.files["src/main_test.go"]; ok {
+			if strings.Contains(string(testCode), "fail") {
+				return "test failed", fmt.Errorf("exit status 1")
+			}
+		}
+		return "ok", nil
+	}
+
+	return "", fmt.Errorf("unknown command: %s", cmdStr)
+}
+
+func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error { return nil }
+func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { return nil }
+func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
 
 func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
 	config := workspace.ThinkSpaceConfig{
@@ -21,30 +83,37 @@ func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
 }
 
 func TestGoThinkSpace_Verify_ASTError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	space := setupGoThinkSpace(t, 5)
-	dir := t.TempDir()
+	sandbox := newMockSandbox()
 
-	invalidGoCode := "package main\nfunc main() {\n"
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte(invalidGoCode), 0644)
+	// Update paths to include src/
+	sandbox.WriteFile(ctx, "src/go.mod", []byte("module test"))
+	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc invalid() {\n"))
 
-	err := space.Verify(context.Background(), dir)
+	err := space.Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected AST verification to fail on invalid code")
 	}
 
-	if !strings.Contains(err.Error(), "Syntax error") {
-		t.Errorf("Expected error to mention syntax error, got: %v", err)
+	if !strings.Contains(err.Error(), "AST syntax or compilation failed") {
+		t.Errorf("Expected error to mention syntax/compilation error, got: %v", err)
 	}
 }
 
 func TestGoThinkSpace_Verify_MissingGoMod(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	space := setupGoThinkSpace(t, 5)
-	dir := t.TempDir()
+	sandbox := newMockSandbox()
 
-	validGoCode := "package main\nfunc main() {}\n"
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte(validGoCode), 0644)
+	// Agent writes code but forgets go.mod
+	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
 
-	err := space.Verify(context.Background(), dir)
+	err := space.Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to missing go.mod")
 	}
@@ -55,45 +124,40 @@ func TestGoThinkSpace_Verify_MissingGoMod(t *testing.T) {
 }
 
 func TestGoThinkSpace_Verify_Success(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	space := setupGoThinkSpace(t, 15)
-	dir := t.TempDir()
+	sandbox := newMockSandbox()
 
-	goMod := "module testmod\n\ngo 1.21\n"
-	os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644)
+	// Everything properly inside src/
+	sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n"))
+	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
+	sandbox.WriteFile(ctx, "src/main_test.go", []byte("package main\nimport \"testing\"\nfunc TestMain(t *testing.T) {}\n"))
 
-	validGoCode := "package main\nfunc main() {}\n"
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte(validGoCode), 0644)
-
-	testCode := "package main\nimport \"testing\"\nfunc TestMain(t *testing.T) {}\n"
-	os.WriteFile(filepath.Join(dir, "main_test.go"), []byte(testCode), 0644)
-
-	err := space.Verify(context.Background(), dir)
+	err := space.Verify(ctx, sandbox)
 	if err != nil {
 		t.Fatalf("Expected successful verification, got: %v", err)
 	}
 }
 
 func TestGoThinkSpace_Verify_TimeoutLoop(t *testing.T) {
-	// 1 second timeout to quickly catch the infinite loop
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	space := setupGoThinkSpace(t, 1)
-	dir := t.TempDir()
+	sandbox := newMockSandbox()
+	sandbox.shouldDelay = true
 
-	goMod := "module testmod\n\ngo 1.21\n"
-	os.WriteFile(filepath.Join(dir, "go.mod"), []byte(goMod), 0644)
+	sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n"))
+	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
 
-	validGoCode := "package main\nfunc main() {}\n"
-	os.WriteFile(filepath.Join(dir, "main.go"), []byte(validGoCode), 0644)
-
-	// A test that sleeps for 5 seconds, deliberately violating the 1-second verify context
-	testCode := "package main\nimport (\"testing\"; \"time\")\nfunc TestInfiniteLoop(t *testing.T) { time.Sleep(5 * time.Second) }\n"
-	os.WriteFile(filepath.Join(dir, "main_test.go"), []byte(testCode), 0644)
-
-	err := space.Verify(context.Background(), dir)
+	err := space.Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to timeout")
 	}
 
-	if !strings.Contains(err.Error(), "timed out (possible infinite loop)") {
+	if !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("Expected timeout error, got: %v", err)
 	}
 }

@@ -11,10 +11,12 @@ type AgentToken struct {
 	Text    string
 }
 
+// internal/workspace/models.go
+
 // SubAgentExecutor allows the Flow to trigger an LLM generation step without
-// knowing the implementation details of the LLM provider.
-// It now accepts a channel to stream tokens back to the UI.
-type SubAgentExecutor func(ctx context.Context, instructions string, sandboxDir string, agentID int, tokenChan chan<- AgentToken) error
+// knowing the implementation details of the LLM provider or the physical filesystem.
+// It accepts the virtual CandidateSandbox for isolated file operations.
+type SubAgentExecutor func(ctx context.Context, instructions string, sandbox CandidateSandbox, agentID int, tokenChan chan<- AgentToken) error
 
 // Thread represents the "Slow" branch, our accepted ledger of reality.
 type Thread struct {
