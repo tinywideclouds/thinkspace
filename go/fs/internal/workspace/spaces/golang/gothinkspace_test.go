@@ -48,7 +48,6 @@ func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args .
 	}
 
 	if strings.Contains(cmdStr, "go build") {
-		// We expect the files map to simulate the src/ directory contract
 		if mainCode, ok := m.files["src/main.go"]; ok {
 			if strings.Contains(string(mainCode), "invalid") {
 				return "syntax error", fmt.Errorf("exit status 1")
@@ -89,11 +88,11 @@ func TestGoThinkSpace_Verify_ASTError(t *testing.T) {
 	space := setupGoThinkSpace(t, 5)
 	sandbox := newMockSandbox()
 
-	// Update paths to include src/
 	sandbox.WriteFile(ctx, "src/go.mod", []byte("module test"))
 	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc invalid() {\n"))
 
-	err := space.Verify(ctx, sandbox)
+	// Updated to use the factory method
+	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected AST verification to fail on invalid code")
 	}
@@ -110,10 +109,10 @@ func TestGoThinkSpace_Verify_MissingGoMod(t *testing.T) {
 	space := setupGoThinkSpace(t, 5)
 	sandbox := newMockSandbox()
 
-	// Agent writes code but forgets go.mod
 	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
 
-	err := space.Verify(ctx, sandbox)
+	// Updated to use the factory method
+	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to missing go.mod")
 	}
@@ -130,12 +129,12 @@ func TestGoThinkSpace_Verify_Success(t *testing.T) {
 	space := setupGoThinkSpace(t, 15)
 	sandbox := newMockSandbox()
 
-	// Everything properly inside src/
 	sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n"))
 	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
 	sandbox.WriteFile(ctx, "src/main_test.go", []byte("package main\nimport \"testing\"\nfunc TestMain(t *testing.T) {}\n"))
 
-	err := space.Verify(ctx, sandbox)
+	// Updated to use the factory method
+	err := space.Verifier().Verify(ctx, sandbox)
 	if err != nil {
 		t.Fatalf("Expected successful verification, got: %v", err)
 	}
@@ -152,7 +151,8 @@ func TestGoThinkSpace_Verify_TimeoutLoop(t *testing.T) {
 	sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n"))
 	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
 
-	err := space.Verify(ctx, sandbox)
+	// Updated to use the factory method
+	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to timeout")
 	}

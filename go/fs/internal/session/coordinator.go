@@ -27,15 +27,18 @@ type UserInterface interface {
 	OnDelegationComplete(summary string)
 	ChooseNextStep() DelegationStrategy
 	ReviewCandidate(branch string) (accepted bool)
-	GetAgentTokenChannel() chan<- workspace.AgentToken
 }
 
 type Coordinator struct {
-	logger     *slog.Logger
-	service    *workspace.Service
-	llmMgr     *llm.Manager
-	executor   workspace.SubAgentExecutor
-	fanOutFlow flows.Flow
+	logger         *slog.Logger
+	service        *workspace.Service
+	llmMgr         *llm.Manager
+	executor       workspace.SubAgentExecutor
+	fanOutFlow     flows.Flow
+	emitter        flows.FlowEmitter
+	spaceID        string
+	baseAgentRules string
+	flowCfg        flows.FlowConfig
 }
 
 func NewCoordinator(
@@ -44,13 +47,21 @@ func NewCoordinator(
 	llmMgr *llm.Manager,
 	executor workspace.SubAgentExecutor,
 	fanOutFlow flows.Flow,
+	emitter flows.FlowEmitter,
+	spaceID string,
+	baseAgentRules string,
+	flowCfg flows.FlowConfig,
 ) *Coordinator {
 	return &Coordinator{
-		logger:     logger,
-		service:    service,
-		llmMgr:     llmMgr,
-		executor:   executor,
-		fanOutFlow: fanOutFlow,
+		logger:         logger,
+		service:        service,
+		llmMgr:         llmMgr,
+		executor:       executor,
+		fanOutFlow:     fanOutFlow,
+		emitter:        emitter,
+		spaceID:        spaceID,
+		baseAgentRules: baseAgentRules,
+		flowCfg:        flowCfg,
 	}
 }
 
@@ -113,7 +124,25 @@ func (c *Coordinator) ExecuteTurn(
 			instructionStr := fmt.Sprintf("Spawning %d agents to propose implementations.", agentCount)
 			ui.OnDelegationStart(agentCount, instructionStr)
 
-			result, err := c.fanOutFlow.Execute(turnCtx, c.service, thread, thinkSpace, call.Args, c.executor, ui.GetAgentTokenChannel())
+			flowCtx := flows.FlowContext{
+				FlowID:         fmt.Sprintf("fanout-%s", thread.ID),
+				SpaceID:        c.spaceID,
+				BaseAgentRules: c.baseAgentRules,
+			}
+
+			result, err := c.fanOutFlow.Execute(
+				turnCtx,
+				c.service,
+				thread,
+				thinkSpace,
+				call.Args,
+				c.flowCfg,
+				flowCtx,
+				c.emitter,
+				c.executor,
+				thinkSpace.Verifier(),
+			)
+
 			if err != nil {
 				c.logger.ErrorContext(turnCtx, "delegation flow failed", "error", err)
 				continue
@@ -260,7 +289,25 @@ func (c *Coordinator) executeLLMReviewPhase(
 		},
 	}
 
-	refineResult, err := c.fanOutFlow.Execute(ctx, c.service, thread, thinkSpace, refineArgs, c.executor, ui.GetAgentTokenChannel())
+	flowCtx := flows.FlowContext{
+		FlowID:         fmt.Sprintf("refine-%s", thread.ID),
+		SpaceID:        c.spaceID,
+		BaseAgentRules: c.baseAgentRules,
+	}
+
+	refineResult, err := c.fanOutFlow.Execute(
+		ctx,
+		c.service,
+		thread,
+		thinkSpace,
+		refineArgs,
+		c.flowCfg,
+		flowCtx,
+		c.emitter,
+		c.executor,
+		thinkSpace.Verifier(),
+	)
+
 	if err != nil {
 		c.logger.ErrorContext(ctx, "refinement flow failed", "error", err)
 		ui.OnTextChunk("\n\n⚠️ Refinement orchestration failed. Falling back to original candidates.\n")

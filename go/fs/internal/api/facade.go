@@ -2,11 +2,13 @@ package api
 
 import (
 	"errors"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 // --- Domain Types ---
@@ -143,6 +145,29 @@ func (f *EventFacade) MarshalAgentStream(agentID int, text string) ([]byte, erro
 		},
 	}
 	return f.marshaler.Marshal(event)
+}
+
+func (f *EventFacade) MarshalFlowEvent(event flows.FlowEvent) ([]byte, error) {
+	pbEvent := &pb.WSEvent{
+		Payload: &pb.WSEvent_FlowEvent{
+			FlowEvent: &pb.FlowEventPayload{
+				FlowId:      event.FlowID,
+				Type:        string(event.Type),
+				Timestamp:   event.Timestamp.Format(time.RFC3339),
+				TaskId:      event.TaskID,
+				AgentCount:  int32(event.AgentCount),
+				AgentId:     event.AgentID,
+				AgentIndex:  int32(event.AgentIndex),
+				Instruction: event.Instruction,
+				Status:      event.Status,
+				Attempt:     int32(event.Attempt),
+				Trace:       event.Trace,
+				CandidateId: event.CandidateID,
+				Passed:      event.Passed,
+			},
+		},
+	}
+	return f.marshaler.Marshal(pbEvent)
 }
 
 // Inbound Deserialization

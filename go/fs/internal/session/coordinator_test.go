@@ -64,7 +64,11 @@ func (m *mockThinkSpace) Tools() []*genai.Tool                          { return
 func (m *mockThinkSpace) TurnTimeout() time.Duration                    { return 5 * time.Minute }
 func (m *mockThinkSpace) AgentTimeout() time.Duration                   { return 1 * time.Minute }
 func (m *mockThinkSpace) VerifyTimeout() time.Duration                  { return 15 * time.Second }
-func (m *mockThinkSpace) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
+func (m *mockThinkSpace) Verifier() workspace.Verifier                  { return &mockVerifier{} }
+
+type mockVerifier struct{}
+
+func (m *mockVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
 	return nil
 }
 
@@ -73,7 +77,7 @@ type mockFlow struct {
 }
 
 func (m *mockFlow) Name() string { return "MockFlow" }
-func (m *mockFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*flows.FlowResult, error) {
+func (m *mockFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, flowCfg flows.FlowConfig, flowCtx flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier workspace.Verifier) (*flows.FlowResult, error) {
 	m.executeCalled = true
 	return &flows.FlowResult{
 		Branches: []string{"candidate/mock-123"},
@@ -103,14 +107,14 @@ func (u *mockUI) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
 }
-func (u *mockUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
-	return nil
-}
+
+type mockEmitter struct{}
+
+func (m *mockEmitter) Emit(event flows.FlowEvent) {}
 
 // --- Tests ---
 
 func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
-	// FAIL FAST: 2-second timeout to prevent deadlocks
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -153,7 +157,10 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 		return nil
 	}
 
-	coordinator := session.NewCoordinator(logger, svc, llmMgr, executor, flow)
+	emitter := &mockEmitter{}
+	flowCfg := flows.FlowConfig{RetryPrompt: "retry"}
+
+	coordinator := session.NewCoordinator(logger, svc, llmMgr, executor, flow, emitter, "golang", "use /src", flowCfg)
 
 	ui := &mockUI{
 		strategyToReturn: session.StrategyManual,
@@ -186,7 +193,6 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 }
 
 func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
-	// FAIL FAST: 2-second timeout to prevent deadlocks
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -220,7 +226,9 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 		},
 	}
 
-	coordinator := session.NewCoordinator(logger, svc, llm.NewManager(client), nil, &mockFlow{})
+	emitter := &mockEmitter{}
+	flowCfg := flows.FlowConfig{}
+	coordinator := session.NewCoordinator(logger, svc, llm.NewManager(client), nil, &mockFlow{}, emitter, "golang", "", flowCfg)
 
 	ui := &mockUI{
 		strategyToReturn: session.StrategySkip,

@@ -52,7 +52,6 @@ func main() {
 	configsDir := filepath.Join(homeDir, "Documents", "thinkspace", "configs")
 	_ = os.MkdirAll(repoRoot, 0755)
 
-	// FIXED: Using the new ChatEngine interface and stateful constructors
 	var stateEngine workspace.ChatEngine
 	switch *engineType {
 	case "exec":
@@ -61,24 +60,20 @@ func main() {
 		stateEngine = gitfs.NewGoGitChat(repoRoot, rootMode)
 	}
 
-	// 1. Initialize Registry and load domains
 	registry := config.NewRegistry()
 	if err := registry.LoadDirectory(configsDir); err != nil {
 		logger.Error("Failed to load configs", "error", err)
 	}
 
-	// 2. Wire up shared dependencies
 	llmMgr := llm.NewManager(modelClient)
-	fanOutFlow := flows.NewFanOutFlow("FanOut", logger)
+	fanOutFlow := flows.NewFanOutFlow(logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
-	// 3. Initialize the new API Server
 	srv := api.NewServer(logger, registry, workspaceService, llmMgr, fanOutFlow, modelClient, *chatName)
 
 	serverAddr := fmt.Sprintf(":%d", *port)
 	logger.Info("🚀 ThinkSpace Server listening", "addr", serverAddr)
 
-	// 4. Start serving the HTTP/WebSocket routes
 	if err := http.ListenAndServe(serverAddr, srv.Handler()); err != nil {
 		logger.Error("Server stopped", "error", err)
 	}

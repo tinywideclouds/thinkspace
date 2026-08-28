@@ -1,8 +1,6 @@
 package golang
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -79,61 +77,7 @@ func (s *GoThinkSpace) Tools() []*genai.Tool {
 	}
 }
 
-func (s *GoThinkSpace) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
-	verifyCtx, cancel := context.WithTimeout(ctx, s.VerifyTimeout())
-	defer cancel()
-
-	// 1. Black Box Verification: We enforce the contract directly.
-	// If the agent didn't write to src/go.mod, it fails.
-	if _, err := sandbox.ReadFile(verifyCtx, "src/go.mod"); err != nil {
-		return fmt.Errorf("verification failed: no 'go.mod' file found. You must generate a go.mod file in the src/ directory")
-	}
-
-	// 2. Black Box Execution: We tell the sandbox WHAT to do, and let it handle the HOW.
-	// The Go 1.20 -C flag natively tells the compiler to shift its context to the src/ directory.
-	buildOutput, err := sandbox.ExecuteCommand(verifyCtx, "go", "build", "-C", "src", "./...")
-	if err != nil {
-		if verifyCtx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("compilation timed out after %s", s.VerifyTimeout())
-		}
-		return fmt.Errorf("AST syntax or compilation failed: %w\n%s", err, buildOutput)
-	}
-
-	testOutput, err := sandbox.ExecuteCommand(verifyCtx, "go", "test", "-C", "src", "./...")
-	if err != nil {
-		if verifyCtx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("unit tests timed out (possible infinite loop) after %s", s.VerifyTimeout())
-		}
-		return fmt.Errorf("unit tests failed: %w\n%s", err, testOutput)
-	}
-
-	return nil
+// Verifier returns the domain-specific verification engine.
+func (s *GoThinkSpace) Verifier() workspace.Verifier {
+	return NewGoVerifier(s.VerifyTimeout())
 }
-
-// func (s *GoThinkSpace) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
-// 	verifyCtx, cancel := context.WithTimeout(ctx, s.VerifyTimeout())
-// 	defer cancel()
-
-// 	findOutput, err := sandbox.ExecuteCommand(verifyCtx, "find", ".", "-name", "go.mod")
-// 	if err != nil || strings.TrimSpace(findOutput) == "" {
-// 		return fmt.Errorf("verification failed: no 'go.mod' file found. You must generate a go.mod file in the src/ directory")
-// 	}
-
-// 	buildOutput, err := sandbox.ExecuteCommand(verifyCtx, "go", "build", "./...")
-// 	if err != nil {
-// 		if verifyCtx.Err() == context.DeadlineExceeded {
-// 			return fmt.Errorf("compilation timed out after %s", s.VerifyTimeout())
-// 		}
-// 		return fmt.Errorf("AST syntax or compilation failed: %w\n%s", err, buildOutput)
-// 	}
-
-// 	testOutput, err := sandbox.ExecuteCommand(verifyCtx, "go", "test", "./...")
-// 	if err != nil {
-// 		if verifyCtx.Err() == context.DeadlineExceeded {
-// 			return fmt.Errorf("unit tests timed out (possible infinite loop) after %s", s.VerifyTimeout())
-// 		}
-// 		return fmt.Errorf("unit tests failed: %w\n%s", err, testOutput)
-// 	}
-
-// 	return nil
-// }

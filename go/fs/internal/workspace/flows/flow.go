@@ -2,6 +2,7 @@ package flows
 
 import (
 	"context"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -13,9 +14,20 @@ type FlowResult struct {
 
 // Flow encapsulates a specific multi-step agentic lifecycle pattern.
 type Flow interface {
-	// Name returns the identifier that maps to the LLM Tool Call (e.g., "FanOutProposals").
+	// Name returns the identifier that maps to the LLM Tool Call (e.g., "FanOutFlow").
 	Name() string
 
-	// Execute runs the lifecycle loop, now accepting a multiplexing token channel.
-	Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*FlowResult, error)
+	// Execute runs the lifecycle loop, streaming events via the FlowEmitter.
+	Execute(
+		ctx context.Context,
+		service *workspace.Service,
+		thread *workspace.Thread,
+		space workspace.ThinkSpace,
+		args map[string]any,
+		flowCfg FlowConfig,
+		flowCtx FlowContext,
+		emitter FlowEmitter,
+		executor workspace.SubAgentExecutor,
+		verifier workspace.Verifier,
+	) (*FlowResult, error)
 }

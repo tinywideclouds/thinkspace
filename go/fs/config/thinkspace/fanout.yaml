@@ -1,0 +1,6 @@
+fanout:
+  type: "flow"
+  description: "Delegate a coding task to parallel sub-agents."
+  retry_prompt: |
+    Verification failed. Output trace:
+    {{.ErrorTrace}}

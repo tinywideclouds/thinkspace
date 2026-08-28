@@ -55,7 +55,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// FIXED: Using the new ChatEngine interface and stateful constructors
 	var stateEngine workspace.ChatEngine
 	switch *engineType {
 	case "exec":
@@ -68,7 +67,6 @@ func main() {
 		stateEngine = gitfs.NewGoGitChat(repoRoot, true)
 	}
 
-	// 1. Initialize Registry and dynamically load the requested domain
 	registry := config.NewRegistry()
 	if err := registry.LoadDirectory(configsDir); err != nil {
 		logger.Error("Failed to load configs", "error", err)
@@ -81,15 +79,35 @@ func main() {
 		os.Exit(1)
 	}
 
+	spaceConfig, _ := registry.GetConfig(*domainName)
+	flowCfg, flowOk := registry.GetFlow("fanout")
+	if !flowOk {
+		logger.Error("FanOut configuration missing from registry")
+		os.Exit(1)
+	}
+
 	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
 	llmMgr := llm.NewManager(modelClient)
 	subAgentExecutor := llm.SubAgentFactory(modelClient, workerModel)
-	fanOutFlow := flows.NewFanOutFlow("FanOut", logger)
+	fanOutFlow := flows.NewFanOutFlow(logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
-	// Inject the newly extracted Terminal UI
 	ui := cli.NewTerminalUI()
-	coordinator := session.NewCoordinator(logger, workspaceService, llmMgr, subAgentExecutor, fanOutFlow)
+
+	// CLI doesn't use WebSockets, so it purely relies on the SlogEmitter
+	emitter := flows.MultiFlowEmitter{flows.NewSlogEmitter(logger)}
+
+	coordinator := session.NewCoordinator(
+		logger,
+		workspaceService,
+		llmMgr,
+		subAgentExecutor,
+		fanOutFlow,
+		emitter,
+		*domainName,
+		spaceConfig.BaseAgentRules,
+		flowCfg,
+	)
 
 	fmt.Printf("📂 Workspace root: %s\n", repoRoot)
 	fmt.Printf("📄 Active Domain: %s\n", *domainName)

@@ -2,64 +2,67 @@ package config
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace/spaces/golang"
 )
 
-// Registry holds all loaded ThinkSpace configurations and their initialized interfaces.
 type Registry struct {
 	spaces  map[string]workspace.ThinkSpace
 	configs map[string]workspace.ThinkSpaceConfig
+	flows   map[string]flows.FlowConfig
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
 		spaces:  make(map[string]workspace.ThinkSpace),
 		configs: make(map[string]workspace.ThinkSpaceConfig),
+		flows:   make(map[string]flows.FlowConfig),
 	}
 }
 
-// LoadDirectory scans the given path for .yaml files and loads them.
+// LoadDirectory is a convenience wrapper for the physical filesystem.
 func (r *Registry) LoadDirectory(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return fmt.Errorf("failed to read config directory %s: %w", dir, err)
-	}
+	return r.LoadFS(os.DirFS(dir), ".")
+}
 
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-			continue
+// LoadFS traverses the given filesystem recursively and builds the master registry.
+func (r *Registry) LoadFS(fileSystem fs.FS, root string) error {
+	return fs.WalkDir(fileSystem, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".yaml") {
+			return nil
 		}
 
-		path := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(path)
+		data, err := fs.ReadFile(fileSystem, path)
 		if err != nil {
 			fmt.Printf("⚠️ Could not read %s: %v\n", path, err)
-			continue
+			return nil
 		}
 
-		var cfg workspace.ThinkSpaceConfig
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
-			fmt.Printf("⚠️ Invalid YAML at %s: %v\n", path, err)
-			continue
+		parsed, err := ParseConfigBytes(data)
+		if err != nil {
+			fmt.Printf("⚠️ Config error in %s: %v\n", path, err)
+			return nil
 		}
 
-		cfg.ApplyDefaults()
+		// Instantiate successfully parsed blocks
+		for id, spaceCfg := range parsed.Spaces {
+			r.spaces[id] = golang.NewGoThinkSpace(spaceCfg)
+			r.configs[id] = spaceCfg
+		}
+		for id, flowCfg := range parsed.Flows {
+			r.flows[id] = flowCfg
+		}
 
-		// The ID is simply the filename without the extension (e.g., "golang")
-		id := strings.TrimSuffix(entry.Name(), ".yaml")
-
-		r.spaces[id] = golang.NewGoThinkSpace(cfg)
-		r.configs[id] = cfg
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // GetSpace retrieves an initialized ThinkSpace interface.
@@ -74,9 +77,10 @@ func (r *Registry) GetConfig(id string) (workspace.ThinkSpaceConfig, bool) {
 	return cfg, ok
 }
 
-// GetAllConfigs returns a map of all loaded configurations (useful for the HTTP API).
-func (r *Registry) GetAllConfigs() map[string]workspace.ThinkSpaceConfig {
-	return r.configs
+// GetFlow retrieves a loaded flow configuration.
+func (r *Registry) GetFlow(id string) (flows.FlowConfig, bool) {
+	cfg, ok := r.flows[id]
+	return cfg, ok
 }
 
 // GetAvailableSpaces returns a lightweight list for the WebSocket handshake.
@@ -94,8 +98,18 @@ func (r *Registry) GetAvailableSpaces() []struct {
 			Name string
 		}{
 			ID:   id,
-			Name: id, // Can be updated if the YAML explicitly defines a display name later
+			Name: id,
 		})
 	}
 	return list
+}
+
+// GetAllConfigs returns a map of all loaded space configurations (used by the HTTP API).
+func (r *Registry) GetAllConfigs() map[string]workspace.ThinkSpaceConfig {
+	return r.configs
+}
+
+// GetAllFlows returns a map of all loaded flow configurations (used by the HTTP API).
+func (r *Registry) GetAllFlows() map[string]flows.FlowConfig {
+	return r.flows
 }

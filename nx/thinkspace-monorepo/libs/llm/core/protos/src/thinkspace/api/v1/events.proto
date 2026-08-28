@@ -28,6 +28,7 @@ message LogMessagePayload {
   string message = 2;
 }
 
+// Legacy FanOut Payloads (To be deprecated)
 message DelegationStartPayload {
   int32 agent_count = 1;
   string instructions = 2;
@@ -53,6 +54,7 @@ message AgentCompletePayload {
   bool verified = 3;
 }
 
+// Core System Payloads
 message RequestStrategyPayload {
   bool active = 1;
 }
@@ -63,6 +65,27 @@ message RequestReviewPayload {
 
 message AvailableSpacesPayload {
   repeated SpaceInfo spaces = 1;
+}
+
+// The New Unified Flow Protocol
+message FlowEventPayload {
+  string flow_id = 1;
+  string type = 2;          // e.g., "flow_start", "flow_spawn", "flow_status", "flow_complete"
+  string timestamp = 3;     // RFC3339 formatted time string
+  
+  // Flow-Level Context
+  string task_id = 4;
+  int32 agent_count = 5;
+  
+  // Agent-Level Context
+  string agent_id = 6;
+  int32 agent_index = 7;
+  string instruction = 8;
+  string status = 9;        // e.g., "writing_code", "running_tests"
+  int32 attempt = 10;
+  string trace = 11;        // Compiler output or test failures
+  string candidate_id = 12;
+  bool passed = 13;
 }
 
 // --- Inbound Payloads (Client -> Server) ---
@@ -94,6 +117,9 @@ message WSEvent {
     RequestStrategyPayload request_strategy = 8;
     RequestReviewPayload request_review = 9;
     AvailableSpacesPayload available_spaces = 10;
+
+    // The New Unified Flow Protocol
+    FlowEventPayload flow_event = 14;
 
     // Inbound
     SubmitPromptPayload submit_prompt = 11;

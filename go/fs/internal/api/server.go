@@ -46,7 +46,6 @@ func NewServer(
 	}
 }
 
-// Handler returns the HTTP router with all endpoints registered.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/spaces", s.handleGetSpaces)
@@ -75,7 +74,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ui := NewWebSocketUI(wsCtx, conn, tokenChan)
 	facade := NewEventFacade()
 
-	// Handshake: Emit Available Spaces safely using the Facade
 	var availableSpaces []SpaceInfo
 	for _, space := range s.registry.GetAvailableSpaces() {
 		availableSpaces = append(availableSpaces, SpaceInfo{ID: space.ID, Name: space.Name})
@@ -85,7 +83,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Write(wsCtx, websocket.MessageText, handshakeBytes)
 	}
 
-	// Multiplexing Goroutine safely using the Facade
 	go func() {
 		for token := range tokenChan {
 			if streamBytes, err := facade.MarshalAgentStream(token.AgentID, token.Text); err == nil {
@@ -94,7 +91,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Inbound Message Loop
 	for {
 		_, data, err := conn.Read(wsCtx)
 		if err != nil {
@@ -117,7 +113,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			go func(promptText string, space workspace.ThinkSpace) {
+			spaceConfig, _ := s.registry.GetConfig(payload.SpaceID)
+			flowCfg, flowOk := s.registry.GetFlow("fanout")
+			if !flowOk {
+				s.logger.Error("critical error: fanout flow configuration not found in registry")
+				continue
+			}
+
+			go func(promptText string, space workspace.ThinkSpace, spaceID string, baseRules string, cfg flows.FlowConfig) {
 				chatName := s.initialChat
 				thread, err := s.service.StartThread(wsCtx, chatName)
 				if err != nil {
@@ -130,12 +133,27 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					{Role: "user", Parts: []*genai.Part{{Text: promptText}}},
 				}
 
+				slogEmitter := flows.NewSlogEmitter(s.logger)
+				wsEmitter := NewWebSocketEmitter(wsCtx, conn, facade)
+				multiEmitter := flows.MultiFlowEmitter{slogEmitter, wsEmitter}
+
 				workerModel := space.Model(workspace.ModelCategoryWorker)
 				executor := llm.SubAgentFactory(s.client, workerModel)
-				coordinator := session.NewCoordinator(s.logger, s.service, s.llmMgr, executor, s.flow)
+
+				coordinator := session.NewCoordinator(
+					s.logger,
+					s.service,
+					s.llmMgr,
+					executor,
+					s.flow,
+					multiEmitter,
+					spaceID,
+					baseRules,
+					cfg,
+				)
 
 				_ = coordinator.ExecuteTurn(wsCtx, thread, space, history, ui)
-			}(payload.Text, activeSpace)
+			}(payload.Text, activeSpace, payload.SpaceID, spaceConfig.BaseAgentRules, flowCfg)
 
 		case "select_strategy":
 			ui.PushStrategy(inboundEvent.SelectStrategy.StrategyID)

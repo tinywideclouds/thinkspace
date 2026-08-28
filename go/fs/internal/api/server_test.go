@@ -21,18 +21,16 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
-// mockModelClient implements llm.ModelClient for testing
 type mockModelClient struct{}
 
 func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, genConfig *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
 	return func(yield func(*genai.GenerateContentResponse, error) bool) {}
 }
 
-// dummyFlow implements workspace.Flow for testing
 type dummyFlow struct{}
 
 func (f *dummyFlow) Name() string { return "dummy" }
-func (f *dummyFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*flows.FlowResult, error) {
+func (f *dummyFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, flowCfg flows.FlowConfig, flowCtx flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier workspace.Verifier) (*flows.FlowResult, error) {
 	return &flows.FlowResult{}, nil
 }
 
@@ -45,11 +43,19 @@ func setupTestServer(t *testing.T) (*api.Server, string) {
 		t.Fatalf("failed to create configs dir: %v", err)
 	}
 
-	yamlContent := `name: test-domain
-system_prompt: "You are a test assistant."
-models:
-  manager: "gemini-test-manager"
-  worker: "gemini-test-worker"
+	// Correctly structured YAML to satisfy the new Registry parsing
+	yamlContent := `golang:
+  type: space
+  name: test-domain
+  system_prompt: "You are a test assistant."
+  models:
+    manager: "gemini-test-manager"
+    worker: "gemini-test-worker"
+
+fanout:
+  type: flow
+  name: FanOut Flow
+  retry_prompt: "retry"
 `
 	configPath := filepath.Join(configsDir, "golang.yaml")
 	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {
@@ -63,7 +69,6 @@ models:
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	// FIXED: Replaced NewGoExecEngine with NewGoExecChat
 	stateEngine := gitfs.NewGoExecChat(workspaceRoot, true)
 
 	svc := workspace.NewService(logger, stateEngine, workspaceRoot)

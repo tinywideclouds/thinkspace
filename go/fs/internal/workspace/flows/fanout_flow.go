@@ -1,180 +1,224 @@
 package flows
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
+	"text/template"
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type FanOutFlow struct {
-	logger *slog.Logger
-	name   string
+// FlowContext holds the dynamic parameters passed from the Manager/Space during execution.
+type FlowContext struct {
+	FlowID         string
+	SpaceID        string
+	BaseAgentRules string
 }
 
-func NewFanOutFlow(name string, logger *slog.Logger) *FanOutFlow {
-	return &FanOutFlow{
-		name:   name,
-		logger: logger,
-	}
+// SubAgentTask represents the specific instruction assigned to a single parallel agent.
+type SubAgentTask struct {
+	AgentID     string
+	Instruction string
+}
+
+type FanOutFlow struct {
+	logger *slog.Logger
+}
+
+func NewFanOutFlow(logger *slog.Logger) *FanOutFlow {
+	return &FanOutFlow{logger: logger}
 }
 
 func (f *FanOutFlow) Name() string {
-	return f.name
+	return "FanOutFlow"
 }
 
-type agentResult struct {
-	candidateID   string
-	branchName    string
-	success       bool
-	commitSuccess bool
-	skipped       bool
-}
+func (f *FanOutFlow) Execute(
+	ctx context.Context,
+	service *workspace.Service,
+	thread *workspace.Thread,
+	space workspace.ThinkSpace,
+	args map[string]any,
+	flowCfg FlowConfig,
+	flowCtx FlowContext,
+	emitter FlowEmitter,
+	executor workspace.SubAgentExecutor,
+	verifier workspace.Verifier,
+) (*FlowResult, error) {
 
-func (f *FanOutFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, executor workspace.SubAgentExecutor, tokenChan chan<- workspace.AgentToken) (*FlowResult, error) {
-	countFloat, ok := args["agent_count"].(float64)
-	if !ok {
-		return nil, fmt.Errorf("missing or invalid 'agent_count' argument")
-	}
-	count := int(countFloat)
-
-	rawInstructions, ok := args["agent_instructions"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("missing or invalid 'agent_instructions' argument")
-	}
-
-	f.logger.InfoContext(ctx, "executing FanOut flow", slog.Int("agent_count", count))
-
-	for i, inst := range rawInstructions {
-		f.logger.InfoContext(ctx, "sub-agent instruction payload",
-			slog.Int("agent_index", i+1),
-			slog.String("instruction", fmt.Sprintf("%v", inst)),
-		)
+	// 1. Extract Tasks from Tool Call Args
+	var tasks []SubAgentTask
+	if instructions, ok := args["agent_instructions"].([]any); ok {
+		for i, inst := range instructions {
+			tasks = append(tasks, SubAgentTask{
+				AgentID:     fmt.Sprintf("agent-%d", i+1),
+				Instruction: fmt.Sprintf("%v", inst),
+			})
+		}
 	}
 
-	baseID := fmt.Sprintf("proposal-%d", time.Now().Unix())
+	// 2. Emit Flow Start
+	emitter.Emit(FlowEvent{
+		FlowID:     flowCtx.FlowID,
+		Type:       FlowStart,
+		Timestamp:  time.Now(),
+		TaskID:     thread.ID,
+		AgentCount: len(tasks),
+	})
 
-	results := make([]agentResult, count)
-	var wg sync.WaitGroup
-	var stateMu sync.Mutex
+	f.logger.Info("starting fanout flow", "flow_id", flowCtx.FlowID, "agent_count", len(tasks))
 
-	for i := 1; i <= count; i++ {
-		wg.Add(1)
-		go func(agentIdx int) {
-			defer wg.Done()
+	retryTmpl, err := template.New("retry").Parse(flowCfg.RetryPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse retry template: %w", err)
+	}
 
-			candidateID := fmt.Sprintf("%s-%d", baseID, agentIdx)
-			specificInstruction := "Implement the requested feature."
-			if agentIdx-1 < len(rawInstructions) {
-				specificInstruction = rawInstructions[agentIdx-1].(string)
-			}
+	type RetryData struct {
+		ErrorTrace     string
+		BaseAgentRules string
+	}
 
-			fmt.Printf("   [Agent %d] Spawning sandbox...\n", agentIdx)
+	// 3. Execute Sub-Agents Concurrently
+	type result struct {
+		candidateID string
+		err         error
+	}
+	results := make(chan result, len(tasks))
 
-			stateMu.Lock()
-			sandbox, err := svc.SpawnSandbox(ctx, thread.ID, candidateID)
-			stateMu.Unlock()
+	for i, task := range tasks {
+		go func(agentIndex int, task SubAgentTask) {
+			agentLogger := f.logger.With("flow_id", flowCtx.FlowID, "agent_id", task.AgentID)
 
+			emitter.Emit(FlowEvent{
+				FlowID:      flowCtx.FlowID,
+				Type:        FlowSpawn,
+				Timestamp:   time.Now(),
+				AgentID:     task.AgentID,
+				AgentIndex:  agentIndex,
+				Instruction: task.Instruction,
+			})
+
+			candidateID := fmt.Sprintf("%s-%s", thread.ID, task.AgentID)
+			sandbox, err := service.SpawnSandbox(ctx, thread.ID, candidateID)
 			if err != nil {
-				f.logger.ErrorContext(ctx, "failed to spawn sandbox", "error", err, "agent", agentIdx)
-				results[agentIdx-1] = agentResult{skipped: true}
+				agentLogger.Error("failed to spawn sandbox", "error", err)
+				results <- result{err: err}
 				return
 			}
+			defer sandbox.TearDown(ctx)
 
-			defer func() {
-				// Safely extract the trace ledger via the virtual environment before tearing down
-				if traceData, err := sandbox.ReadFile(ctx, "trace.jsonl"); err == nil {
-					targetTrace := filepath.Join(svc.WorkspaceRoot(), "chats", thread.ID, fmt.Sprintf("trace-%s.jsonl", candidateID))
-					_ = os.WriteFile(targetTrace, traceData, 0644)
+			var passed bool
+			var finalTrace string
+			maxAttempts := 2
+
+			// 4. The Agent Retry Loop
+			for attempt := 1; attempt <= maxAttempts; attempt++ {
+				emitter.Emit(FlowEvent{
+					FlowID:     flowCtx.FlowID,
+					Type:       FlowStatus,
+					Timestamp:  time.Now(),
+					AgentID:    task.AgentID,
+					AgentIndex: agentIndex,
+					Status:     "executing_instructions",
+					Attempt:    attempt,
+				})
+
+				prompt := task.Instruction
+				if attempt > 1 {
+					agentLogger.Info("compiling retry prompt with base rules")
+					var buf bytes.Buffer
+					_ = retryTmpl.Execute(&buf, RetryData{
+						ErrorTrace:     finalTrace,
+						BaseAgentRules: flowCtx.BaseAgentRules,
+					})
+					prompt = buf.String()
 				}
 
-				stateMu.Lock()
-				_ = sandbox.TearDown(ctx)
-				stateMu.Unlock()
-			}()
-
-			maxRetries := 2
-			success := false
-			currentInstructions := fmt.Sprintf("%s\n\n%s", space.SubAgentSystemPrompt(), specificInstruction)
-
-			for attempt := 1; attempt <= maxRetries; attempt++ {
-				fmt.Printf("   [Agent %d] Writing code (Attempt %d/%d)...\n", agentIdx, attempt, maxRetries)
-
-				agentCtx, agentCancel := context.WithTimeout(ctx, space.AgentTimeout())
-				// Pass the pure CandidateSandbox interface to the executor
-				err := executor(agentCtx, currentInstructions, sandbox, agentIdx, tokenChan)
-				agentCancel()
-
+				// Delegate actual environment manipulation back to the LLM layer.
+				// We pass nil for the tokenChan because streaming is now handled via FlowEvents.
+				err := executor(ctx, prompt, sandbox, agentIndex, nil)
 				if err != nil {
-					if agentCtx.Err() == context.DeadlineExceeded {
-						fmt.Printf("   [Agent %d] ⚠️ Generation timed out.\n", agentIdx)
-					}
-					break
-				}
-
-				fmt.Printf("   [Agent %d] Verifying domain constraints...\n", agentIdx)
-				// Pass the pure CandidateSandbox interface to the verifier
-				if err := space.Verify(ctx, sandbox); err != nil {
-					fmt.Printf("   [Agent %d] ⚠️ Verification failed: %v\n", agentIdx, err)
-					currentInstructions = fmt.Sprintf("%s\n\nVerification failed:\n%s\nPlease fix.", specificInstruction, err.Error())
+					finalTrace = fmt.Sprintf("Execution Error: %v", err)
+					agentLogger.Error("execution failed", "attempt", attempt, "error", err)
 					continue
 				}
 
-				success = true
-				fmt.Printf("   [Agent %d] ✅ Verification passed.\n", agentIdx)
-				break
+				_ = sandbox.ApplyDraft(ctx, fmt.Sprintf("attempt %d", attempt))
+
+				emitter.Emit(FlowEvent{
+					FlowID:     flowCtx.FlowID,
+					Type:       FlowStatus,
+					Timestamp:  time.Now(),
+					AgentID:    task.AgentID,
+					AgentIndex: agentIndex,
+					Status:     "running_tests",
+					Attempt:    attempt,
+				})
+
+				err = verifier.Verify(ctx, sandbox)
+				if err == nil {
+					passed = true
+					agentLogger.Info("verification passed")
+					break
+				}
+
+				finalTrace = err.Error()
+				agentLogger.Warn("verification failed", "attempt", attempt, "trace", finalTrace)
+
+				emitter.Emit(FlowEvent{
+					FlowID:     flowCtx.FlowID,
+					Type:       FlowError,
+					Timestamp:  time.Now(),
+					AgentID:    task.AgentID,
+					AgentIndex: agentIndex,
+					Attempt:    attempt,
+					Trace:      finalTrace,
+				})
 			}
 
-			commitMsg := fmt.Sprintf("auto(candidate): proposal %s", candidateID)
-			commitSuccess := true
-
-			stateMu.Lock()
-			if err := sandbox.ApplyDraft(ctx, commitMsg); err != nil {
-				f.logger.ErrorContext(ctx, "failed to apply sandbox draft", "error", err, "agent", agentIdx)
-				commitSuccess = false
-			} else if err := sandbox.DeliverForReview(ctx); err != nil {
-				f.logger.ErrorContext(ctx, "failed to deliver sandbox for review", "error", err, "agent", agentIdx)
-				commitSuccess = false
+			// 5. Unconditional Delivery
+			if err := sandbox.DeliverForReview(ctx); err != nil {
+				agentLogger.Error("failed to deliver candidate", "error", err)
+				results <- result{err: err}
+				return
 			}
-			stateMu.Unlock()
 
-			results[agentIdx-1] = agentResult{
-				candidateID:   candidateID,
-				branchName:    "candidate/" + candidateID,
-				success:       success,
-				commitSuccess: commitSuccess,
-				skipped:       false,
-			}
-		}(i)
+			emitter.Emit(FlowEvent{
+				FlowID:      flowCtx.FlowID,
+				Type:        FlowComplete,
+				Timestamp:   time.Now(),
+				AgentID:     task.AgentID,
+				AgentIndex:  agentIndex,
+				CandidateID: candidateID,
+				Passed:      passed,
+				Trace:       finalTrace,
+			})
+
+			results <- result{candidateID: fmt.Sprintf("candidate/%s", candidateID), err: nil}
+		}(i+1, task)
 	}
 
-	wg.Wait()
-
+	// 6. Aggregate Results
 	var branches []string
-	var summaryBuilder strings.Builder
-	fmt.Fprintf(&summaryBuilder, "Delegation Results (%d Agents):\n\n", count)
-
-	for _, res := range results {
-		if res.skipped {
-			continue
-		}
-		if res.commitSuccess {
-			branches = append(branches, res.branchName)
-			if res.success {
-				fmt.Fprintf(&summaryBuilder, "- %s (Verified: true)\n", res.branchName)
-			} else {
-				fmt.Fprintf(&summaryBuilder, "- %s (Verified: false - Failed Domain Constraints)\n", res.branchName)
-			}
+	var errs []error
+	for i := 0; i < len(tasks); i++ {
+		res := <-results
+		if res.err != nil {
+			errs = append(errs, res.err)
 		} else {
-			fmt.Fprintf(&summaryBuilder, "- %s (Git Submission Failed)\n", res.candidateID)
+			branches = append(branches, res.candidateID)
 		}
 	}
 
-	return &FlowResult{Branches: branches, Summary: summaryBuilder.String()}, nil
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("fanout completed with %d fatal system errors", len(errs))
+	}
+
+	return &FlowResult{
+		Branches: branches,
+		Summary:  fmt.Sprintf("Successfully generated %d candidate branches.", len(branches)),
+	}, nil
 }
