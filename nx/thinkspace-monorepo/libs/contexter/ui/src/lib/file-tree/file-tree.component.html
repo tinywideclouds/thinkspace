@@ -1,0 +1,50 @@
+<ul class="list-none pl-4 border-l border-gray-200">
+  @for (node of nodes; track node.path) {
+    <li class="my-1">
+      @if (node.isDirectory) {
+        <div 
+          class="cursor-pointer font-medium text-gray-700 flex items-center gap-2 p-1.5 rounded hover:bg-blue-50 hover:text-blue-700 transition-colors select-none"
+          (click)="toggleExpand(node)">
+          <span class="text-lg leading-none">{{ expanded.has(node.path) ? '📂' : '📁' }}</span>
+          
+          @if (hasDirectFiles(node)) {
+            <input 
+              type="checkbox" 
+              [checked]="isAllDirectFilesSelected(node)"
+              [indeterminate]="isSomeDirectFilesSelected(node)"
+              (click)="$event.preventDefault(); $event.stopPropagation(); directoryToggled.emit(node)"
+              class="form-checkbox h-4 w-4 text-blue-600 rounded cursor-pointer ml-1"
+              title="Select all files in this directory"
+            />
+          }
+          
+          <span class="truncate">{{ node.name }}</span>
+          
+          @if (expanded.has(node.path) && !node.children) {
+            <span class="text-xs text-blue-500 font-semibold animate-pulse ml-2">Loading...</span>
+          }
+        </div>
+        
+        @if (expanded.has(node.path) && node.children) {
+          <lib-file-tree 
+            [nodes]="node.children" 
+            [selectedFiles]="selectedFiles"
+            (fileToggled)="fileToggled.emit($event)"
+            (folderToggled)="folderToggled.emit($event)"
+            (directoryToggled)="directoryToggled.emit($event)">
+          </lib-file-tree>
+        }
+      } @else {
+        <label class="flex items-center gap-2 cursor-pointer text-gray-600 p-1.5 rounded hover:bg-gray-100 transition-colors select-none">
+          <input 
+            type="checkbox" 
+            [checked]="selectedFiles.has(node.path)"
+            (change)="fileToggled.emit(node.path)"
+            class="form-checkbox h-4 w-4 text-blue-600 rounded cursor-pointer"
+          />
+          <span class="text-sm">📄 {{ node.name }}</span>
+        </label>
+      }
+    </li>
+  }
+</ul>

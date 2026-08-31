@@ -21,8 +21,8 @@ export default [
           allow: ['^.*/eslint(\\.base)?\\.config\\.[cm]?[jt]s$'],
           depConstraints: [
             {
-              sourceTag: 'scope:context',
-              onlyDependOnLibsWithTags: ['scope:context', 'scope:shared'],
+              sourceTag: 'scope:contexter',
+              onlyDependOnLibsWithTags: ['scope:contexter'],
             },
             {
               sourceTag: 'type:facade',

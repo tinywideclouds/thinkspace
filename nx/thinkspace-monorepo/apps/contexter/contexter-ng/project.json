@@ -1,0 +1,75 @@
+{
+  "name": "contexter-ng",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "prefix": "app",
+  "sourceRoot": "apps/contexter/contexter-ng/src",
+  "tags": ["scope:contexter"],
+  "targets": {
+    "build": {
+      "executor": "@angular/build:application",
+      "outputs": ["{options.outputPath}"],
+      "defaultConfiguration": "production",
+      "options": {
+        "outputPath": "dist/apps/contexter/contexter-ng",
+        "browser": "apps/contexter/contexter-ng/src/main.ts",
+        "tsConfig": "apps/contexter/contexter-ng/tsconfig.app.json",
+        "assets": [
+          {
+            "glob": "**/*",
+            "input": "apps/contexter/contexter-ng/public"
+          }
+        ],
+        "styles": ["apps/contexter/contexter-ng/src/styles.css"]
+      },
+      "configurations": {
+        "production": {
+          "budgets": [
+            {
+              "type": "initial",
+              "maximumWarning": "500kb",
+              "maximumError": "1mb"
+            },
+            {
+              "type": "anyComponentStyle",
+              "maximumWarning": "4kb",
+              "maximumError": "8kb"
+            }
+          ],
+          "outputHashing": "all"
+        },
+        "development": {
+          "optimization": false,
+          "extractLicenses": false,
+          "sourceMap": true
+        }
+      }
+    },
+    "serve": {
+      "continuous": true,
+      "executor": "@angular/build:dev-server",
+      "defaultConfiguration": "development",
+      "configurations": {
+        "production": {
+          "buildTarget": "contexter-ng:build:production"
+        },
+        "development": {
+          "buildTarget": "contexter-ng:build:development"
+        }
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint"
+    },
+    "serve-static": {
+      "continuous": true,
+      "executor": "@nx/web:file-server",
+      "options": {
+        "buildTarget": "contexter-ng:build",
+        "port": 4200,
+        "staticFilePath": "dist/apps/contexter/contexter-ng/browser",
+        "spa": true
+      }
+    }
+  }
+}

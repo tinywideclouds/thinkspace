@@ -1,0 +1,13 @@
+{
+  "name": "contexter-data-access",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/contexter/data-access/src",
+  "prefix": "lib",
+  "projectType": "library",
+  "tags": ["scope:contexter"],
+  "targets": {
+    "lint": {
+      "executor": "@nx/eslint:lint"
+    }
+  }
+}

@@ -25,12 +25,16 @@
       "@org/shop/feature-products": [
         "./packages/shop/feature-products/src/index.ts"
       ],
-      "@org/shop/shared-ui": ["./packages/shop/shared-ui/src/index.ts"],
       "@org/llm-core-protos": ["./libs/llm/core/protos/src/index.ts"],
       "@org/llm-core-transport": ["./libs/llm/core/transport/src/index.ts"],
       "@org/llm-core-facade": ["./libs/llm/core/facade/src/index.ts"],
       "@org/llm-state-chat": ["./libs/llm/state/chat/src/index.ts"],
-      "@org/llm-ui-chat": ["./libs/llm/ui/chat/src/index.ts"]
+      "@org/llm-ui-chat": ["./libs/llm/ui/chat/src/index.ts"],
+      "@org/contexter-shared": ["./libs/contexter/shared/src/index.ts"],
+      "@org/contexter-ui": ["./libs/contexter/ui/src/index.ts"],
+      "@org/contexter-data-access": [
+        "./libs/contexter/data-access/src/index.ts"
+      ]
     }
   },
   "exclude": ["node_modules", "tmp"]

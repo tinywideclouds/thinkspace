@@ -1,0 +1,9 @@
+{
+  "name": "contexter-ng-e2e",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/contexter/contexter-ng-e2e/src",
+  "implicitDependencies": ["contexter-ng"],
+  "// targets": "to see all targets run: nx show project contexter-ng-e2e --web",
+  "targets": {}
+}

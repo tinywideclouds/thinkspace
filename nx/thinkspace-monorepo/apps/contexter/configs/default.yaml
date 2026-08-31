@@ -1,0 +1,9 @@
+root_dir: ./
+always_load: []
+saved_bundles: {}
+paths:
+  selections: apps/contexter/bundles
+  contexts: apps/contexter/contexts
+counters:
+  selections: 2
+  contexts: 2
