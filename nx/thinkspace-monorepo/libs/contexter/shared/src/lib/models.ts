@@ -6,8 +6,9 @@ export interface FileNode {
 }
 
 export interface BundlePreset {
-  description: string;
+  description?: string;
   files: string[];
+  last_context?: string;
 }
 
 export interface ContextConfig {

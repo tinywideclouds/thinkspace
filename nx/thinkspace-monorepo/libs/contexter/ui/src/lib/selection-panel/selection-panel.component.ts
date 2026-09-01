@@ -9,5 +9,11 @@ import { CommonModule } from '@angular/common';
 })
 export class SelectionPanelComponent {
   @Input() files: Set<string> = new Set();
+  @Input() missingFiles: Set<string> = new Set();
+  @Input() currentFilename: string | null = null;
+  @Input() hasUnsavedChanges = false;
+  
   @Output() removeFile = new EventEmitter<string>();
+  @Output() removeMissing = new EventEmitter<void>();
+  @Output() quickSave = new EventEmitter<void>();
 }

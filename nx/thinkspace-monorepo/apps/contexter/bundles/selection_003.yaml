@@ -1,0 +1,26 @@
+files:
+  - libs\contexter\ui\src\lib\action-panel\action-panel.component.html
+  - libs\contexter\ui\src\lib\action-panel\action-panel.component.ts
+  - libs\contexter\ui\src\lib\file-tree\file-tree.component.html
+  - libs\contexter\ui\src\lib\file-tree\file-tree.component.ts
+  - libs\contexter\ui\src\lib\layout\layout.component.html
+  - libs\contexter\ui\src\lib\layout\layout.component.ts
+  - libs\contexter\ui\src\lib\output-overlay\output-overlay.component.html
+  - libs\contexter\ui\src\lib\output-overlay\output-overlay.component.ts
+  - libs\contexter\ui\src\lib\selection-modal\selection-modal.component.ts
+  - libs\contexter\ui\src\lib\selection-panel\selection-panel.component.html
+  - libs\contexter\ui\src\lib\selection-panel\selection-panel.component.ts
+  - libs\contexter\ui\src\lib\snackbar\snackbar.component.ts
+  - libs/contexter/ui/src/lib/action-panel/action-panel.component.html
+  - libs/contexter/ui/src/lib/action-panel/action-panel.component.ts
+  - libs/contexter/ui/src/lib/file-tree/file-tree.component.html
+  - libs/contexter/ui/src/lib/file-tree/file-tree.component.ts
+  - libs/contexter/ui/src/lib/layout/layout.component.html
+  - libs/contexter/ui/src/lib/layout/layout.component.ts
+  - libs/contexter/ui/src/lib/output-overlay/output-overlay.component.ts
+  - libs/contexter/ui/src/lib/selection-panel/selection-panel.component.html
+  - libs/contexter/ui/src/lib/selection-panel/selection-panel.component.ts
+  - libs/contexter/ui/src/lib/snackbar/snackbar.component.ts
+  - libs\llm\core\protos\src\test-setup.ts
+  - libs\llm\core\protos\src\index.ts
+  - libs\llm\core\protos\src\generated\src\thinkspace\api\v1\events_pb.ts

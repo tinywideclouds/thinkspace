@@ -1,0 +1,13 @@
+{
+  "name": "contexter-feature",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/contexter/feature/src",
+  "prefix": "lib",
+  "projectType": "library",
+  "tags": ["scope:contexter"],
+  "targets": {
+    "lint": {
+      "executor": "@nx/eslint:lint"
+    }
+  }
+}

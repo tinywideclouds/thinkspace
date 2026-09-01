@@ -1,6 +1,37 @@
 <div class="flex flex-col h-full bg-gray-50">
-  <div class="p-4 border-b border-gray-200 bg-gray-100">
-    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Selected Files</h3>
+  <div class="p-4 border-b border-gray-200 bg-gray-100 flex justify-between items-center">
+    <div class="flex items-center gap-3">
+      <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider">Selected Files</h3>
+      @if (currentFilename) {
+        <div class="flex items-center gap-1">
+          <span 
+            class="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded border border-blue-200"
+            title="Currently loaded selection">
+            {{ currentFilename }}
+          </span>
+          @if (hasUnsavedChanges) {
+            <button 
+              (click)="quickSave.emit()"
+              class="text-[10px] font-bold text-orange-700 bg-orange-100 hover:bg-orange-200 px-1.5 py-0.5 rounded border border-orange-200 transition-colors"
+              title="Overwrite current file with changes">
+              [modified]
+            </button>
+          }
+        </div>
+      }
+    </div>
+    
+    @if (missingFiles.size > 0) {
+      <div class="flex items-center gap-2">
+        <span class="text-red-500 font-bold cursor-help" title="Some files in your selection are no longer available on disk.">[!]</span>
+        <button 
+          (click)="removeMissing.emit()"
+          class="text-[10px] uppercase tracking-wide font-bold bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1 rounded transition-colors"
+          title="Remove missing files from selection">
+          Clean
+        </button>
+      </div>
+    }
   </div>
   
   <ul class="flex-1 overflow-y-auto p-4 space-y-2 text-sm">
@@ -11,7 +42,17 @@
           class="text-red-400 hover:text-red-600 font-bold px-1 rounded hover:bg-red-50 transition-colors shrink-0">
           ×
         </button>
-        <code class="bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-700 break-all">{{ file }}</code>
+        <code 
+          class="bg-white border px-1.5 py-0.5 rounded text-gray-700 break-all transition-colors"
+          [class.border-red-300]="missingFiles.has(file)"
+          [class.text-red-500]="missingFiles.has(file)"
+          [class.line-through]="missingFiles.has(file)"
+          [class.border-gray-200]="!missingFiles.has(file)">
+          {{ file }}
+          @if (missingFiles.has(file)) {
+            <span class="text-red-500 ml-1 inline-block" title="File not found on disk">⚠️</span>
+          }
+        </code>
       </li>
     } @empty {
       <li class="text-gray-400 italic text-center mt-10">No files selected.</li>

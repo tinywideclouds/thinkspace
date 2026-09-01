@@ -5,7 +5,7 @@
         <div 
           class="cursor-pointer font-medium text-gray-700 flex items-center gap-2 p-1.5 rounded hover:bg-blue-50 hover:text-blue-700 transition-colors select-none"
           (click)="toggleExpand(node)">
-          <span class="text-lg leading-none">{{ expanded.has(node.path) ? '📂' : '📁' }}</span>
+          <span class="text-lg leading-none">{{ expandedNodes.has(node.path) ? '📂' : '📁' }}</span>
           
           @if (hasDirectFiles(node)) {
             <input 
@@ -20,18 +20,20 @@
           
           <span class="truncate">{{ node.name }}</span>
           
-          @if (expanded.has(node.path) && !node.children) {
+          @if (expandedNodes.has(node.path) && !node.children) {
             <span class="text-xs text-blue-500 font-semibold animate-pulse ml-2">Loading...</span>
           }
         </div>
         
-        @if (expanded.has(node.path) && node.children) {
+        @if (expandedNodes.has(node.path) && node.children) {
           <lib-file-tree 
             [nodes]="node.children" 
             [selectedFiles]="selectedFiles"
+            [expandedNodes]="expandedNodes"
             (fileToggled)="fileToggled.emit($event)"
             (folderToggled)="folderToggled.emit($event)"
-            (directoryToggled)="directoryToggled.emit($event)">
+            (directoryToggled)="directoryToggled.emit($event)"
+            (expandToggled)="expandToggled.emit($event)">
           </lib-file-tree>
         }
       } @else {

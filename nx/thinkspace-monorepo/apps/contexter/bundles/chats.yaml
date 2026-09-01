@@ -1,0 +1,9 @@
+files:
+  - libs\llm\ui\chat\src\lib\chat-feed\chat-feed.component.spec.ts
+  - libs\llm\ui\chat\src\lib\chat-feed\chat-feed.component.ts
+  - libs\llm\ui\chat\src\lib\chat-input\chat-input.component.spec.ts
+  - libs\llm\ui\chat\src\lib\chat-input\chat-input.component.ts
+  - libs\llm\ui\chat\src\lib\chat-review-prompt\chat-review-prompt.component.spec.ts
+  - libs\llm\ui\chat\src\lib\chat-review-prompt\chat-review-prompt.component.ts
+  - libs\llm\ui\chat\src\lib\chat-strategy-prompt\chat-strategy-prompt.component.spec.ts
+  - libs\llm\ui\chat\src\lib\chat-strategy-prompt\chat-strategy-prompt.component.ts

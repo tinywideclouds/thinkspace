@@ -14,4 +14,5 @@ export class ActionPanelComponent {
   @Output() generateContext = new EventEmitter<void>();
   @Output() saveSelection = new EventEmitter<void>();
   @Output() loadSelection = new EventEmitter<string>();
+  @Output() clearSelection = new EventEmitter<void>();
 }

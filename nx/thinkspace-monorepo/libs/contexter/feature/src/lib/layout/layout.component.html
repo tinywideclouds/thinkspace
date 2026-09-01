@@ -1,0 +1,79 @@
+<div class="h-screen w-full flex overflow-hidden bg-white text-gray-900 font-sans relative">
+  
+  <main class="flex-1 flex flex-col min-w-0 border-r border-gray-200 relative">
+    <header class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center shrink-0">
+      <h2 class="font-bold text-lg flex items-center gap-2">
+        <span>📁</span> Workspace Explorer
+      </h2>
+      <button 
+        class="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+        (click)="workspace.refreshWorkspace()">
+        Refresh
+      </button>
+    </header>
+    
+    <div class="p-4 flex-1 overflow-y-auto">
+      <lib-file-tree 
+        [nodes]="workspace.fileTree()" 
+        [selectedFiles]="selection.selectedFiles()"
+        [expandedNodes]="workspace.expandedNodes()"
+        (expandToggled)="workspace.toggleNodeExpansion($event.path)"
+        (fileToggled)="selection.toggleFileSelection($event)"
+        (folderToggled)="workspace.loadChildren($event)"
+        (directoryToggled)="selection.toggleDirectoryFiles($event)">
+      </lib-file-tree>
+    </div>
+
+    <!-- Output Overlay -->
+    <lib-output-overlay
+      [content]="bundle.generatedBundle()"
+      [defaultFilename]="selection.lastContextFilename() || bundle.nextContextFilename()"
+      [suggestedNewFilename]="bundle.nextContextFilename()"
+      [existingFiles]="bundle.existingContexts()"
+      (copy)="copyToClipboard($event)"
+      (save)="onSaveContext($event)"
+      (close)="bundle.generatedBundle.set('')">
+    </lib-output-overlay>
+
+    <!-- Selection Modal -->
+    <lib-selection-modal
+      [mode]="selectionModalMode()"
+      [defaultFilename]="selection.currentSelectionFilename() || bundle.nextSelectionFilename()"
+      [suggestedNewFilename]="bundle.nextSelectionFilename()"
+      [existingFiles]="bundle.existingSelections()"
+      (save)="onSaveSelection($event)"
+      (load)="onLoadSelection($event)"
+      (close)="selectionModalMode.set(null)">
+    </lib-selection-modal>
+  </main>
+
+  <aside class="w-96 flex flex-col bg-gray-50 shrink-0 z-10 shadow-[-4px_0_15px_-3px_rgba(0,0,0,0.05)] relative">
+    <lib-action-panel
+      class="shrink-0"
+      [config]="workspace.config()"
+      [selectedCount]="selection.selectedFiles().size"
+      (generateContext)="bundle.generateBundle()"
+      (saveSelection)="selectionModalMode.set('save')"
+      (loadSelection)="selectionModalMode.set('load')"
+      (clearSelection)="selection.clearSelection()">
+    </lib-action-panel>
+
+    <lib-selection-panel
+      class="flex-1 overflow-hidden"
+      [files]="selection.selectedFiles()"
+      [missingFiles]="selection.missingFiles()"
+      [currentFilename]="selection.currentSelectionFilename()"
+      [hasUnsavedChanges]="selection.hasUnsavedChanges()"
+      (removeFile)="selection.toggleFileSelection($event)"
+      (removeMissing)="selection.removeMissingFiles()"
+      (quickSave)="onQuickSaveSelection()">
+    </lib-selection-panel>
+  </aside>
+
+  <lib-snackbar 
+    [message]="snackbarMsg()" 
+    [isVisible]="snackbarVisible()"
+    [type]="snackbarType()">
+  </lib-snackbar>
+
+</div>

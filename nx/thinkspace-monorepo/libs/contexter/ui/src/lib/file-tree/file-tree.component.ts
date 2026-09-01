@@ -11,21 +11,17 @@ import { FileNode } from '@org/contexter-shared';
 export class FileTreeComponent {
   @Input() nodes: FileNode[] = [];
   @Input() selectedFiles: Set<string> = new Set();
+  @Input() expandedNodes: Set<string> = new Set();
   
   @Output() fileToggled = new EventEmitter<string>();
   @Output() folderToggled = new EventEmitter<FileNode>();
   @Output() directoryToggled = new EventEmitter<FileNode>();
-
-  expanded = new Set<string>();
+  @Output() expandToggled = new EventEmitter<FileNode>();
 
   toggleExpand(node: FileNode) {
-    if (this.expanded.has(node.path)) {
-      this.expanded.delete(node.path);
-    } else {
-      this.expanded.add(node.path);
-      if (!node.children) {
-        this.folderToggled.emit(node);
-      }
+    this.expandToggled.emit(node);
+    if (!node.children) {
+      this.folderToggled.emit(node);
     }
   }
 

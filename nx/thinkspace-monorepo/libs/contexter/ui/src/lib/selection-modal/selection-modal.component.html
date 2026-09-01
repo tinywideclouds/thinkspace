@@ -1,0 +1,68 @@
+@if (mode()) {
+  <div class="absolute inset-0 z-50 bg-black/50 flex items-center justify-center p-8 backdrop-blur-sm">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col">
+      
+      <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+        <h3 class="font-bold text-lg">
+          {{ mode() === 'save' ? 'Save Selection' : 'Load Selection' }}
+        </h3>
+        <button (click)="close.emit()" class="text-gray-400 hover:text-gray-700 font-bold p-1">✕</button>
+      </div>
+
+      @if (mode() === 'save') {
+        <div class="p-4 flex flex-col gap-4">
+          <div>
+            <label class="block text-xs font-bold text-gray-700 mb-1">Filename</label>
+            <input 
+              type="text" 
+              [value]="customFilename"
+              (input)="updateFilename($event)"
+              (focus)="onFocus()"
+              class="w-full text-sm px-3 py-2 border border-gray-300 rounded focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+            
+            <div class="flex items-start justify-between mt-1 min-h-[20px]">
+              @if (willOverwrite()) {
+                <div class="text-xs text-orange-600 font-bold flex items-center gap-1 animate-pulse">
+                  <span>⚠️</span> Overwriting existing file.
+                </div>
+              } @else {
+                <div></div>
+              }
+              
+              @if (canSaveAsNew) {
+                <button 
+                  (click)="useIncrementedName()" 
+                  class="text-[10px] text-blue-600 hover:text-blue-800 hover:underline font-bold transition-colors text-right mt-0.5">
+                  Increment File Name ({{ incrementedFilename() }})
+                </button>
+              }
+            </div>
+          </div>
+          <button 
+            (click)="submitSave()"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors mt-2">
+            Save to Disk
+          </button>
+        </div>
+      } @else {
+        <div class="p-4 flex-1 overflow-auto max-h-96">
+          <div class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">Available Selections</div>
+          <ul class="flex flex-col gap-2">
+            @for (file of existingFiles(); track file) {
+              <li>
+                <button 
+                  (click)="load.emit(file)"
+                  class="w-full text-left px-3 py-2 rounded bg-gray-50 hover:bg-blue-50 hover:text-blue-700 border border-gray-200 transition-colors font-mono text-sm">
+                  {{ file }}
+                </button>
+              </li>
+            } @empty {
+              <div class="text-sm text-gray-500 italic p-4 text-center">No saved selections found.</div>
+            }
+          </ul>
+        </div>
+      }
+    </div>
+  </div>
+}

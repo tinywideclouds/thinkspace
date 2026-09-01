@@ -1,45 +1,119 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Output, input, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
+
+export interface SaveContextPayload {
+  filename: string;
+  description: string;
+}
 
 @Component({
   selector: 'lib-output-overlay',
   standalone: true,
   imports: [CommonModule],
-  template: `
-    @if (content) {
-      <div class="absolute inset-0 z-50 bg-black/50 flex items-center justify-center p-8 backdrop-blur-sm">
-        <div class="bg-white rounded-lg shadow-2xl w-full max-w-5xl h-full max-h-[80vh] flex flex-col">
-          <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 rounded-t-lg shrink-0">
-            <h3 class="font-bold text-lg">LLM Context</h3>
-            <div class="flex gap-4">
-              <button 
-                (click)="copy.emit(content)" 
-                class="text-sm font-medium text-blue-600 hover:underline">
-                Copy to Clipboard
-              </button>
-              <button 
-                (click)="save.emit()" 
-                class="text-sm font-medium text-blue-600 hover:underline">
-                Save to Disk
-              </button>
-              <button 
-                (click)="close.emit()" 
-                class="text-sm font-bold text-gray-500 hover:text-gray-800">
-                Close
-              </button>
-            </div>
-          </div>
-          <div class="flex-1 overflow-auto p-4 bg-gray-900 rounded-b-lg">
-            <pre class="text-gray-100 text-sm whitespace-pre-wrap font-mono">{{ content }}</pre>
-          </div>
-        </div>
-      </div>
-    }
-  `
+  templateUrl: './output-overlay.component.html'
 })
 export class OutputOverlayComponent {
-  @Input() content = '';
+  content = input<string>('');
+  defaultFilename = input<string>('context_001.md');
+  suggestedNewFilename = input<string>('');
+  existingFiles = input<string[]>([]);
+
   @Output() copy = new EventEmitter<string>();
-  @Output() save = new EventEmitter<void>();
+  @Output() save = new EventEmitter<SaveContextPayload>();
   @Output() close = new EventEmitter<void>();
+
+  isSaveOpen = signal(false);
+  customFilename = '';
+  customDescription = '';
+  private userHasEditedFilename = false;
+
+  estimatedTokens = computed(() => Math.ceil(this.content().length / 4));
+  
+  estimatedFileSize = computed(() => {
+    const bytes = this.content().length;
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  });
+
+  incrementedFilename = computed(() => {
+    const def = this.defaultFilename();
+    if (!def) return '';
+    const match = def.match(/^(.*?)_?(\d*)(\.[a-zA-Z0-9]+)$/);
+    if (!match) return def;
+    
+    const base = match[1];
+    const numStr = match[2];
+    const ext = match[3];
+    
+    if (!numStr) return `${base}_01${ext}`;
+    
+    const num = parseInt(numStr, 10) + 1;
+    const paddedNum = num.toString().padStart(numStr.length, '0');
+    return `${base}_${paddedNum}${ext}`;
+  });
+
+  get canSaveAsNew(): boolean {
+    return this.existingFiles().includes(this.defaultFilename()) && this.customFilename !== this.incrementedFilename();
+  }
+
+  toggleSavePanel() {
+    this.isSaveOpen.update(v => !v);
+    if (this.isSaveOpen()) {
+      this.customFilename = this.defaultFilename();
+      this.userHasEditedFilename = false;
+      this.customDescription = '';
+    }
+  }
+
+  updateFilename(event: Event) {
+    this.customFilename = (event.target as HTMLInputElement).value;
+    this.userHasEditedFilename = true;
+  }
+
+  updateDescription(event: Event) {
+    this.customDescription = (event.target as HTMLInputElement).value;
+  }
+
+  onFilenameFocus() {
+    if (!this.userHasEditedFilename && !this.existingFiles().includes(this.defaultFilename())) {
+      this.customFilename = '';
+    }
+    this.userHasEditedFilename = true;
+  }
+
+  useIncrementedName() {
+    this.customFilename = this.incrementedFilename();
+    this.userHasEditedFilename = true;
+  }
+
+  willOverwrite(): boolean {
+    const name = (this.userHasEditedFilename && this.customFilename.trim()) 
+      ? this.customFilename.trim() 
+      : this.defaultFilename();
+    let finalName = name;
+    if (finalName && !finalName.endsWith('.md')) finalName += '.md';
+    return this.existingFiles().includes(finalName);
+  }
+
+  submitSave() {
+    let filename = (this.userHasEditedFilename && this.customFilename.trim()) 
+      ? this.customFilename.trim() 
+      : this.defaultFilename();
+      
+    if (filename && !filename.endsWith('.md')) filename += '.md';
+      
+    this.save.emit({
+      filename,
+      description: this.customDescription.trim()
+    });
+    this.isSaveOpen.set(false);
+  }
+
+  onClose() {
+    this.isSaveOpen.set(false);
+    this.close.emit();
+  }
 }

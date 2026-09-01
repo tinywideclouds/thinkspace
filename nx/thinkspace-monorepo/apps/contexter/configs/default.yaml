@@ -6,4 +6,4 @@ paths:
   contexts: apps/contexter/contexts
 counters:
   selections: 2
-  contexts: 2
+  contexts: 3

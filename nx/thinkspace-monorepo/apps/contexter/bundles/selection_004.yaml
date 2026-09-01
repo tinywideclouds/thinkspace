@@ -1,0 +1,3 @@
+files:
+  - libs\contexter\ui\src\lib\action-panel\action-panel.component.html
+  - libs\contexter\ui\src\lib\action-panel\action-panel.component.ts

@@ -13,7 +13,11 @@ import { CommonModule } from '@angular/common';
       [class.opacity-100]="isVisible"
       [class.translate-y-0]="isVisible"
       [style.pointer-events]="isVisible ? 'auto' : 'none'">
-      <span class="text-green-400">✓</span>
+      @if (type === 'success') {
+        <span class="text-green-400">✓</span>
+      } @else {
+        <span class="text-red-400 font-bold">⚠️</span>
+      }
       {{ message }}
     </div>
   `
@@ -21,4 +25,5 @@ import { CommonModule } from '@angular/common';
 export class SnackbarComponent {
   @Input() message = '';
   @Input() isVisible = false;
+  @Input() type: 'success' | 'error' = 'success';
 }
