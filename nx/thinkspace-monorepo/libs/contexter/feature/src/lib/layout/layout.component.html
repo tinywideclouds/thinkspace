@@ -1,15 +1,63 @@
 <div class="h-screen w-full flex overflow-hidden bg-white text-gray-900 font-sans relative">
   
   <main class="flex-1 flex flex-col min-w-0 border-r border-gray-200 relative">
-    <header class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center shrink-0">
-      <h2 class="font-bold text-lg flex items-center gap-2">
-        <span>📁</span> Workspace Explorer
-      </h2>
-      <button 
-        class="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline transition-colors"
-        (click)="workspace.refreshWorkspace()">
-        Refresh
-      </button>
+    <header class="p-4 border-b border-gray-200 bg-gray-50 flex flex-col gap-3 shrink-0">
+      <div class="flex justify-between items-center">
+        <h2 class="font-bold text-lg flex items-center gap-2">
+          <span>📁</span> Workspace Explorer
+        </h2>
+        <button 
+          class="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+          (click)="workspace.refreshWorkspace()">
+          Refresh
+        </button>
+      </div>
+      
+      <div class="flex items-center gap-2">
+        <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">Root:</label>
+        
+        <button 
+          (click)="navigateUp()" 
+          class="px-2 py-1 bg-white hover:bg-gray-100 border border-gray-300 rounded text-xs font-bold transition-colors text-gray-700" 
+          title="Go up one directory">
+          ⬆️ Up
+        </button>
+        
+        <button 
+          (click)="resetRoot()" 
+          class="px-2 py-1 bg-white hover:bg-gray-100 border border-gray-300 rounded text-xs font-bold transition-colors text-gray-700" 
+          title="Reset to default root">
+          🏠 Home
+        </button>
+
+        <button 
+          (click)="workspace.browseForRoot()" 
+          class="px-2 py-1 bg-white hover:bg-gray-100 border border-gray-300 rounded text-xs font-bold transition-colors text-gray-700 flex items-center gap-1" 
+          title="Browse local file system">
+          <span>🔍</span> Browse...
+        </button>
+
+        <input 
+          type="text" 
+          [value]="workspace.currentRoot()"
+          (change)="onChangeRoot($event)"
+          placeholder="./"
+          class="flex-1 text-sm px-2 py-1 bg-white border border-gray-300 rounded focus:outline-none focus:border-blue-500 font-mono"
+        />
+      </div>
+      
+      @if (rootFiles().length > 0) {
+        <label class="flex items-center gap-2 cursor-pointer text-gray-700 bg-gray-100 p-1.5 rounded hover:bg-gray-200 transition-colors select-none mt-1">
+          <input 
+            type="checkbox" 
+            [checked]="isAllRootFilesSelected()"
+            [indeterminate]="isSomeRootFilesSelected()"
+            (change)="selection.toggleRootFiles()"
+            class="form-checkbox h-4 w-4 text-blue-600 rounded cursor-pointer"
+          />
+          <span class="text-sm font-medium">Select all root files</span>
+        </label>
+      }
     </header>
     
     <div class="p-4 flex-1 overflow-y-auto">
@@ -20,7 +68,8 @@
         (expandToggled)="workspace.toggleNodeExpansion($event.path)"
         (fileToggled)="selection.toggleFileSelection($event)"
         (folderToggled)="workspace.loadChildren($event)"
-        (directoryToggled)="selection.toggleDirectoryFiles($event)">
+        (directoryToggled)="selection.toggleDirectoryFiles($event)"
+        (setRoot)="workspace.loadDirectory($event)">
       </lib-file-tree>
     </div>
 

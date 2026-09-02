@@ -1,11 +1,11 @@
 <ul class="list-none pl-4 border-l border-gray-200">
-  @for (node of nodes; track node.path) {
+  @for (node of nodes(); track node.path) {
     <li class="my-1">
       @if (node.isDirectory) {
         <div 
-          class="cursor-pointer font-medium text-gray-700 flex items-center gap-2 p-1.5 rounded hover:bg-blue-50 hover:text-blue-700 transition-colors select-none"
+          class="cursor-pointer font-medium text-gray-700 flex items-center gap-2 p-1.5 rounded hover:bg-blue-50 hover:text-blue-700 transition-colors select-none group"
           (click)="toggleExpand(node)">
-          <span class="text-lg leading-none">{{ expandedNodes.has(node.path) ? '📂' : '📁' }}</span>
+          <span class="text-lg leading-none">{{ expandedNodes().has(node.path) ? '📂' : '📁' }}</span>
           
           @if (hasDirectFiles(node)) {
             <input 
@@ -20,27 +20,36 @@
           
           <span class="truncate">{{ node.name }}</span>
           
-          @if (expandedNodes.has(node.path) && !node.children) {
+          @if (expandedNodes().has(node.path) && !node.children) {
             <span class="text-xs text-blue-500 font-semibold animate-pulse ml-2">Loading...</span>
           }
+
+          <!-- Quick Focus Button (Visible on Hover) -->
+          <button 
+            (click)="$event.stopPropagation(); setRoot.emit(node.path)"
+            class="opacity-0 group-hover:opacity-100 ml-auto mr-2 text-[10px] font-bold bg-blue-100 hover:bg-blue-200 px-1.5 py-0.5 rounded text-blue-700 transition-opacity"
+            title="Set as workspace root">
+            Focus 🎯
+          </button>
         </div>
         
-        @if (expandedNodes.has(node.path) && node.children) {
+        @if (expandedNodes().has(node.path) && node.children) {
           <lib-file-tree 
             [nodes]="node.children" 
-            [selectedFiles]="selectedFiles"
-            [expandedNodes]="expandedNodes"
+            [selectedFiles]="selectedFiles()"
+            [expandedNodes]="expandedNodes()"
             (fileToggled)="fileToggled.emit($event)"
             (folderToggled)="folderToggled.emit($event)"
             (directoryToggled)="directoryToggled.emit($event)"
-            (expandToggled)="expandToggled.emit($event)">
+            (expandToggled)="expandToggled.emit($event)"
+            (setRoot)="setRoot.emit($event)">
           </lib-file-tree>
         }
       } @else {
         <label class="flex items-center gap-2 cursor-pointer text-gray-600 p-1.5 rounded hover:bg-gray-100 transition-colors select-none">
           <input 
             type="checkbox" 
-            [checked]="selectedFiles.has(node.path)"
+            [checked]="selectedFiles().has(node.path)"
             (change)="fileToggled.emit(node.path)"
             class="form-checkbox h-4 w-4 text-blue-600 rounded cursor-pointer"
           />

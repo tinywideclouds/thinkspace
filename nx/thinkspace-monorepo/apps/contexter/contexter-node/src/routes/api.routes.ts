@@ -2,6 +2,8 @@ import { Router } from 'express';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as yaml from 'js-yaml';
+import { exec } from 'child_process';
+import * as os from 'os';
 import { ensureDir, getNextSequenceFilename, getExistingFiles } from '../services/file-system';
 import { getConfig, saveConfig } from '../services/config';
 import { validateFiles, generateBundleContent } from '../services/workspace';
@@ -128,4 +130,25 @@ apiRouter.post('/contexts', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to save context' });
   }
+});
+
+// NEW: Native OS Folder Picker
+apiRouter.get('/browse', (req, res) => {
+  const platform = os.platform();
+  let cmd = '';
+
+  // Use the host OS native folder selection dialog
+  if (platform === 'darwin') {
+    cmd = `osascript -e 'tell application (path to frontmost application as text) to set myFolder to choose folder with prompt "Select Workspace Root"' -e 'POSIX path of myFolder'`;
+  } else if (platform === 'win32') {
+    cmd = `powershell.exe -NoProfile -Command "Add-Type -AssemblyName System.windows.forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; [void]$f.ShowDialog(); $f.SelectedPath"`;
+  } else {
+    cmd = `zenity --file-selection --directory`;
+  }
+
+  exec(cmd, (error, stdout) => {
+    // If the user hits "Cancel", stdout is usually empty or an error is thrown
+    const result = stdout ? stdout.trim() : null;
+    res.json({ path: result });
+  });
 });

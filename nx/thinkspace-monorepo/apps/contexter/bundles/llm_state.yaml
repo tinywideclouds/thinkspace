@@ -1,0 +1,13 @@
+files:
+  - libs\llm\state\chat\eslint.config.mjs
+  - libs\llm\state\chat\project.json
+  - libs\llm\state\chat\README.md
+  - libs\llm\state\chat\tsconfig.json
+  - libs\llm\state\chat\tsconfig.lib.json
+  - libs\llm\state\chat\tsconfig.spec.json
+  - libs\llm\state\chat\vite.config.mts
+  - libs\llm\state\chat\src\index.ts
+  - libs\llm\state\chat\src\test-setup.ts
+  - libs\llm\state\chat\src\lib\chat-state.service.spec.ts
+  - libs\llm\state\chat\src\lib\chat-state.service.ts
+last_context: llm_state.md

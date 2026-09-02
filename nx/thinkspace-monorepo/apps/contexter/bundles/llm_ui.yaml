@@ -1,4 +1,13 @@
 files:
+  - libs\llm\ui\chat\eslint.config.mjs
+  - libs\llm\ui\chat\project.json
+  - libs\llm\ui\chat\README.md
+  - libs\llm\ui\chat\tsconfig.json
+  - libs\llm\ui\chat\tsconfig.lib.json
+  - libs\llm\ui\chat\tsconfig.spec.json
+  - libs\llm\ui\chat\vite.config.mts
+  - libs\llm\ui\chat\src\index.ts
+  - libs\llm\ui\chat\src\test-setup.ts
   - libs\llm\ui\chat\src\lib\chat-feed\chat-feed.component.spec.ts
   - libs\llm\ui\chat\src\lib\chat-feed\chat-feed.component.ts
   - libs\llm\ui\chat\src\lib\chat-input\chat-input.component.spec.ts

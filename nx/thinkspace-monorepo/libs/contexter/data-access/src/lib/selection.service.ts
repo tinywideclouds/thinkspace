@@ -166,4 +166,19 @@ export class SelectionService {
       return false;
     }
   }
+
+  toggleRootFiles() {
+    const files = this.workspace.fileTree().filter(c => !c.isDirectory);
+    if (files.length === 0) return;
+
+    const current = new Set(this.selectedFiles());
+    const allSelected = files.every(f => current.has(f.path));
+
+    if (allSelected) files.forEach(f => current.delete(f.path));
+    else files.forEach(f => current.add(f.path));
+
+    this.selectedFiles.set(current);
+    this.validateSelection();
+    this.markChanged();
+  }
 }

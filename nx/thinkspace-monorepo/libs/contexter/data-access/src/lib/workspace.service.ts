@@ -11,6 +11,7 @@ export class WorkspaceService {
   readonly config = signal<ContextConfig | null>(null);
   readonly fileTree = signal<FileNode[]>([]);
   readonly expandedNodes = signal<Set<string>>(new Set());
+  readonly currentRoot = signal<string>('./');
 
   private sortNodes(nodes: FileNode[]): FileNode[] {
     return [...nodes].sort((a, b) => {
@@ -29,6 +30,8 @@ export class WorkspaceService {
 
   async loadDirectory(dirPath?: string) {
     const targetDir = dirPath || this.config()?.root_dir || './';
+    this.currentRoot.set(targetDir);
+    
     const tree = await firstValueFrom(
       this.http.get<FileNode[]>(`${this.baseUrl}/tree?dir=${encodeURIComponent(targetDir)}`)
     );
@@ -36,8 +39,21 @@ export class WorkspaceService {
     this.expandedNodes.set(new Set());
   }
 
+  async browseForRoot() {
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{path: string | null}>(`${this.baseUrl}/browse`)
+      );
+      if (res.path) {
+        this.loadDirectory(res.path);
+      }
+    } catch (e) {
+      console.error('[UI] Failed to open folder picker:', e);
+    }
+  }
+
   async refreshWorkspace() {
-    const targetDir = this.config()?.root_dir || './';
+    const targetDir = this.currentRoot();
     try {
       let tree = await firstValueFrom(
         this.http.get<FileNode[]>(`${this.baseUrl}/tree?dir=${encodeURIComponent(targetDir)}`)

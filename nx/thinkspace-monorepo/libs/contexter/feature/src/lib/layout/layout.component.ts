@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { WorkspaceService, SelectionService, BundleService } from '@org/contexter-data-access';
 import { 
@@ -37,6 +37,23 @@ export class LayoutComponent {
   
   selectionModalMode = signal<'save' | 'load' | null>(null);
 
+  rootFiles = computed(() => this.workspace.fileTree().filter(n => !n.isDirectory));
+  
+  isAllRootFilesSelected = computed(() => {
+    const files = this.rootFiles();
+    if (files.length === 0) return false;
+    const selected = this.selection.selectedFiles();
+    return files.every(f => selected.has(f.path));
+  });
+  
+  isSomeRootFilesSelected = computed(() => {
+    const files = this.rootFiles();
+    if (files.length === 0) return false;
+    const selected = this.selection.selectedFiles();
+    const count = files.filter(f => selected.has(f.path)).length;
+    return count > 0 && count < files.length;
+  });
+
   constructor() {
     this.workspace.loadConfig().then(conf => {
       if (conf?.always_load?.length) {
@@ -48,6 +65,35 @@ export class LayoutComponent {
     });
     this.workspace.loadDirectory();
     this.bundle.loadDefaults();
+  }
+
+  onChangeRoot(event: Event) {
+    const newRoot = (event.target as HTMLInputElement).value.trim() || './';
+    this.workspace.loadDirectory(newRoot);
+  }
+
+  navigateUp() {
+    let current = this.workspace.currentRoot().replace(/\\/g, '/');
+    if (current.endsWith('/')) current = current.slice(0, -1);
+    
+    if (current === '.' || current === '') {
+      this.workspace.loadDirectory('..');
+      return;
+    }
+    
+    const parts = current.split('/');
+    if (parts[parts.length - 1] === '..') {
+      parts.push('..');
+    } else {
+      parts.pop();
+    }
+    
+    const newRoot = parts.length > 0 ? parts.join('/') : './';
+    this.workspace.loadDirectory(newRoot);
+  }
+
+  resetRoot() {
+    this.workspace.loadDirectory(this.workspace.config()?.root_dir || './');
   }
 
   showSnackbar(message: string, type: 'success' | 'error' = 'success') {
@@ -120,10 +166,7 @@ export class LayoutComponent {
       const response = await this.bundle.saveContextToDisk(content, payload.filename, payload.description);
       if (response?.success) {
         this.showSnackbar(`Context saved: ${response.filename}`);
-        
-        // This mutates the active Selection's state, instantly lighting up the [modified] Quick Save button!
         this.selection.updateLastContextFilename(response.filename);
-
         await this.bundle.loadDefaults();
       }
     } catch (error) {
