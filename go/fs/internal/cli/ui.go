@@ -10,7 +10,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// TerminalUI implements session.UserInterface for the CLI binary.
 type TerminalUI struct {
 	reader *bufio.Reader
 }
@@ -23,14 +22,6 @@ func NewTerminalUI() *TerminalUI {
 
 func (ui *TerminalUI) OnTextChunk(text string) {
 	fmt.Print(text)
-}
-
-func (ui *TerminalUI) OnDelegationStart(count int, instructions string) {
-	fmt.Printf("\n\n🚀 Delegating task to %d agent(s): %s\n", count, instructions)
-}
-
-func (ui *TerminalUI) OnDelegationComplete(summary string) {
-	fmt.Println("\n✅ Delegation Flow Complete:\n" + summary)
 }
 
 func (ui *TerminalUI) ChooseNextStep() session.DelegationStrategy {
@@ -69,7 +60,5 @@ func (ui *TerminalUI) ReviewCandidate(branch string) bool {
 }
 
 func (ui *TerminalUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
-	// The CLI doesn't multiplex agent tokens, so we return nil.
-	// The SubAgentExecutor handles this safely.
 	return nil
 }

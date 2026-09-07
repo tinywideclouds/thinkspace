@@ -17,9 +17,12 @@ import (
 )
 
 func TestServer_WebSocketHandshake(t *testing.T) {
-	srv, expectedSpaceID := setupTestServer(t)
-	httpServer := httptest.NewServer(srv.Handler())
+	mux, expectedSpaceID, manager := setupTestServer(t)
+	httpServer := httptest.NewServer(mux)
 	defer httpServer.Close()
+
+	// Provision valid state so handshake passes isConfigured check
+	_ = manager.UpdateSpaceState(expectedSpaceID, func(s *workspace.SpaceState) { s.Domain = "golang" })
 
 	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
 
@@ -32,18 +35,17 @@ func TestServer_WebSocketHandshake(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	// Read raw bytes instead of using wsjson
 	_, data, err := conn.Read(ctx)
 	if err != nil {
 		t.Fatalf("failed to read handshake event: %v", err)
 	}
 
-	// Mirror the @bufbuild/protobuf JSON output for AvailableSpaces
 	var payload struct {
 		AvailableSpaces struct {
 			Spaces []struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
+				ID           string `json:"id"`
+				Name         string `json:"name"`
+				IsConfigured bool   `json:"isConfigured"`
 			} `json:"spaces"`
 		} `json:"availableSpaces"`
 	}
@@ -55,13 +57,16 @@ func TestServer_WebSocketHandshake(t *testing.T) {
 	if len(payload.AvailableSpaces.Spaces) != 1 || payload.AvailableSpaces.Spaces[0].ID != expectedSpaceID {
 		t.Errorf("expected 1 space with ID %s, got %+v", expectedSpaceID, payload.AvailableSpaces.Spaces)
 	}
+
+	if !payload.AvailableSpaces.Spaces[0].IsConfigured {
+		t.Errorf("expected space to be configured because state was provided")
+	}
 }
 
 func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// 1. Create a raw WebSocket handler to isolate the UI struct
 	var ui *api.WebSocketUI
 	uiReady := make(chan struct{})
 
@@ -75,7 +80,6 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		ui = api.NewWebSocketUI(r.Context(), conn, tokenChan)
 		close(uiReady)
 
-		// Keep connection alive for test
 		<-r.Context().Done()
 	})
 
@@ -92,7 +96,6 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 
 	<-uiReady
 
-	// 2. Test Outbound Serialization (Server -> Client)
 	go func() {
 		ui.OnTextChunk("hello world")
 	}()
@@ -102,7 +105,6 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Fatalf("failed to read event: %v", err)
 	}
 
-	// Mirror the @bufbuild/protobuf JSON output for ChatStream
 	var chatPayload struct {
 		ChatStream struct {
 			Text string `json:"text"`
@@ -116,20 +118,16 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Errorf("expected text 'hello world', got '%s'", chatPayload.ChatStream.Text)
 	}
 
-	// 3. Test Inbound Routing & Channel Blocking (Client -> Server)
 	strategyChosen := make(chan session.DelegationStrategy)
 	go func() {
-		// This should block until PushStrategy is called
 		strategyChosen <- ui.ChooseNextStep()
 	}()
 
-	// Read the outbound request event
 	_, data, err = conn.Read(ctx)
 	if err != nil {
 		t.Fatalf("failed to read strategy request: %v", err)
 	}
 
-	// Mirror the @bufbuild/protobuf JSON output for RequestStrategy
 	var reqPayload struct {
 		RequestStrategy struct {
 			Active bool `json:"active"`
@@ -143,7 +141,6 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Errorf("expected active true, got false")
 	}
 
-	// Simulate receiving the inbound choice from the web router
 	ui.PushStrategy(session.StrategyRefine)
 
 	select {

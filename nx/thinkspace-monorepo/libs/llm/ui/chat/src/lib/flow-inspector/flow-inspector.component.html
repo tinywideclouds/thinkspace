@@ -1,0 +1,84 @@
+<!-- Backdrop -->
+<div 
+  (click)="close.emit()"
+  style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000;">
+</div>
+
+<!-- Slide-out Pane -->
+<div 
+  style="position: fixed; top: 0; right: 0; bottom: 0; width: 75vw; max-width: 1200px; background: #fff; box-shadow: -5px 0 25px rgba(0,0,0,0.1); z-index: 1001; display: flex; flex-direction: column; animation: slideIn 0.3s ease-out;">
+  
+  <!-- Header -->
+  <div style="padding: 16px 24px; border-bottom: 1px solid #dee2e6; background: #f8f9fa; display: flex; justify-content: space-between; align-items: flex-start;">
+    <div>
+      <div style="font-size: 12px; color: #868e96; font-family: monospace; margin-bottom: 4px;">{{ parsedReceipt()?.flowId }}</div>
+      <h2 style="margin: 0 0 8px 0; font-size: 18px; color: #212529;">{{ parsedReceipt()?.task }}</h2>
+      <div style="font-size: 14px; color: #495057;">{{ parsedReceipt()?.summary }}</div>
+    </div>
+    <button 
+      (click)="close.emit()" 
+      style="background: none; border: none; font-size: 24px; color: #adb5bd; cursor: pointer; padding: 0; line-height: 1;">
+      &times;
+    </button>
+  </div>
+
+  <!-- Agent Tabs -->
+  <div style="display: flex; gap: 8px; padding: 12px 24px; border-bottom: 1px solid #dee2e6; background: #fff;">
+    @for (agent of parsedReceipt()?.agents; track agent.agentId) {
+      <button 
+        (click)="selectedAgentId.set(agent.agentId)"
+        [style.background]="selectedAgentId() === agent.agentId ? '#e7f5ff' : '#f8f9fa'"
+        [style.border]="selectedAgentId() === agent.agentId ? '1px solid #339af0' : '1px solid #dee2e6'"
+        [style.color]="selectedAgentId() === agent.agentId ? '#1971c2' : '#495057'"
+        style="padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; display: flex; align-items: center; gap: 6px;">
+        {{ agent.passed ? '✅' : '❌' }} {{ agent.agentId }}
+      </button>
+    }
+  </div>
+
+  <!-- Split View Area -->
+  @if (activeAgent()) {
+    <div style="display: flex; flex: 1; overflow: hidden; background: #f1f3f5;">
+      
+      <!-- Left Pane: Input & Output -->
+      <div style="flex: 1; display: flex; flex-direction: column; border-right: 1px solid #dee2e6; background: #fff; overflow-y: auto;">
+        <div style="padding: 16px;">
+          <h4 style="margin: 0 0 12px 0; font-size: 12px; text-transform: uppercase; color: #868e96; letter-spacing: 0.5px;">Instruction</h4>
+          <div style="background: #f8f9fa; padding: 12px; border-radius: 6px; font-size: 13px; color: #212529; white-space: pre-wrap;">{{ activeAgent()?.instruction }}</div>
+        </div>
+        <div style="padding: 16px; border-top: 1px solid #dee2e6;">
+          <h4 style="margin: 0 0 12px 0; font-size: 12px; text-transform: uppercase; color: #868e96; letter-spacing: 0.5px;">Raw Payload</h4>
+          <pre style="background: #212529; color: #f8f9fa; padding: 16px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 0;">{{ activeAgent()?.rawPayload }}</pre>
+        </div>
+      </div>
+
+      <!-- Right Pane: Traces & Deltas -->
+      <div style="flex: 1; display: flex; flex-direction: column; background: #fff; overflow-y: auto;">
+        <div style="padding: 16px;">
+          <h4 style="margin: 0 0 12px 0; font-size: 12px; text-transform: uppercase; color: #868e96; letter-spacing: 0.5px;">Verification Trace</h4>
+          @if (activeAgent()?.verificationTrace) {
+            <pre style="background: #fff5f5; color: #e03131; border: 1px solid #ffa8a8; padding: 12px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 0; white-space: pre-wrap;">{{ activeAgent()?.verificationTrace }}</pre>
+          } @else {
+            <div style="color: #adb5bd; font-size: 13px; font-style: italic;">No trace output.</div>
+          }
+        </div>
+        <div style="padding: 16px; border-top: 1px solid #dee2e6; flex: 1;">
+          <h4 style="margin: 0 0 12px 0; font-size: 12px; text-transform: uppercase; color: #868e96; letter-spacing: 0.5px;">State Delta (Git Patch)</h4>
+          @if (activeAgent()?.stateDelta) {
+            <pre style="background: #f4fce3; color: #2b8a3e; border: 1px solid #b2f2bb; padding: 12px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 0;">{{ activeAgent()?.stateDelta }}</pre>
+          } @else {
+            <div style="color: #adb5bd; font-size: 13px; font-style: italic;">No file changes proposed.</div>
+          }
+        </div>
+      </div>
+
+    </div>
+  }
+</div>
+
+<style>
+  @keyframes slideIn {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+</style>

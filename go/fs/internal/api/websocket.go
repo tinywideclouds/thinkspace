@@ -36,23 +36,13 @@ func (ui *WebSocketUI) sendBytes(data []byte) {
 	ui.writeMu.Lock()
 	defer ui.writeMu.Unlock()
 
-	_ = ui.conn.Write(ui.ctx, websocket.MessageText, data)
+	if err := ui.conn.Write(ui.ctx, websocket.MessageText, data); err != nil {
+		return
+	}
 }
 
 func (ui *WebSocketUI) OnTextChunk(text string) {
 	if data, err := ui.facade.MarshalChatStream(text); err == nil {
-		ui.sendBytes(data)
-	}
-}
-
-func (ui *WebSocketUI) OnDelegationStart(count int, instructions string) {
-	if data, err := ui.facade.MarshalDelegationStart(count, instructions); err == nil {
-		ui.sendBytes(data)
-	}
-}
-
-func (ui *WebSocketUI) OnDelegationComplete(summary string) {
-	if data, err := ui.facade.MarshalDelegationComplete(summary); err == nil {
 		ui.sendBytes(data)
 	}
 }

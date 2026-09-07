@@ -1,32 +1,4 @@
 files:
-  - libs\llm\ui\chat\eslint.config.mjs
-  - libs\llm\ui\chat\project.json
-  - libs\llm\ui\chat\README.md
-  - libs\llm\ui\chat\tsconfig.json
-  - libs\llm\ui\chat\tsconfig.lib.json
-  - libs\llm\ui\chat\tsconfig.spec.json
-  - libs\llm\ui\chat\vite.config.mts
-  - libs\llm\ui\chat\src\index.ts
-  - libs\llm\ui\chat\src\test-setup.ts
-  - libs\llm\ui\chat\src\lib\chat-feed\chat-feed.component.spec.ts
-  - libs\llm\ui\chat\src\lib\chat-feed\chat-feed.component.ts
-  - libs\llm\ui\chat\src\lib\chat-input\chat-input.component.spec.ts
-  - libs\llm\ui\chat\src\lib\chat-input\chat-input.component.ts
-  - libs\llm\ui\chat\src\lib\chat-review-prompt\chat-review-prompt.component.spec.ts
-  - libs\llm\ui\chat\src\lib\chat-review-prompt\chat-review-prompt.component.ts
-  - libs\llm\ui\chat\src\lib\chat-strategy-prompt\chat-strategy-prompt.component.spec.ts
-  - libs\llm\ui\chat\src\lib\chat-strategy-prompt\chat-strategy-prompt.component.ts
-  - libs\llm\state\chat\eslint.config.mjs
-  - libs\llm\state\chat\project.json
-  - libs\llm\state\chat\README.md
-  - libs\llm\state\chat\tsconfig.json
-  - libs\llm\state\chat\tsconfig.lib.json
-  - libs\llm\state\chat\tsconfig.spec.json
-  - libs\llm\state\chat\vite.config.mts
-  - libs\llm\state\chat\src\index.ts
-  - libs\llm\state\chat\src\test-setup.ts
-  - libs\llm\state\chat\src\lib\chat-state.service.spec.ts
-  - libs\llm\state\chat\src\lib\chat-state.service.ts
   - ..\..\go\go.work
   - ..\..\go\go.work.sum
   - ..\..\go\api\go.mod
@@ -54,7 +26,6 @@ files:
   - ..\..\go\fs\internal\cli\ui.go
   - ..\..\go\fs\internal\config\parser_test.go
   - ..\..\go\fs\internal\config\parser.go
-  - ..\..\go\fs\internal\config\reg_test.go
   - ..\..\go\fs\internal\config\registry.go
   - ..\..\go\fs\internal\gitfs\engine_contract_test.go
   - ..\..\go\fs\internal\gitfs\engine.md
@@ -92,4 +63,10 @@ files:
   - ..\..\go\fs\internal\workspace\flows\fanout_flow_test.go
   - ..\..\go\fs\internal\workspace\flows\fanout_flow.go
   - ..\..\go\fs\internal\workspace\flows\flow.go
-last_context: llm_state.md
+  - ..\..\go\fs\internal\workspace\receipts.go
+  - ..\..\go\fs\internal\api\management_test.go
+  - ..\..\go\fs\internal\api\management.go
+  - ..\..\go\fs\internal\config\registry_test.go
+  - ..\..\go\fs\internal\workspace\manager_test.go
+  - ..\..\go\fs\internal\workspace\manager.go
+last_context: llm_golang_02.md

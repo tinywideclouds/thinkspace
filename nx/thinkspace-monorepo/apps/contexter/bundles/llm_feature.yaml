@@ -1,0 +1,14 @@
+files:
+  - libs\llm\feature\chat\eslint.config.mjs
+  - libs\llm\feature\chat\project.json
+  - libs\llm\feature\chat\README.md
+  - libs\llm\feature\chat\tsconfig.json
+  - libs\llm\feature\chat\tsconfig.lib.json
+  - libs\llm\feature\chat\tsconfig.spec.json
+  - libs\llm\feature\chat\vite.config.mts
+  - libs\llm\feature\chat\src\index.ts
+  - libs\llm\feature\chat\src\test-setup.ts
+  - libs\llm\feature\chat\src\lib\chat-container\chat-container.component.css
+  - libs\llm\feature\chat\src\lib\chat-container\chat-container.component.html
+  - libs\llm\feature\chat\src\lib\chat-container\chat-container.component.ts
+last_context: llm_feature_02.md

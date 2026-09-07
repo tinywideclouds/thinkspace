@@ -1,0 +1,57 @@
+<div class="chat-layout">
+  
+  <main class="chat-main">
+    <div class="chat-header">
+      <!-- Replaced static H2 with dynamic header -->
+      <llm-chat-header
+        style="flex: 1; margin-right: 24px;"
+        [spaces]="workspaceState.spaces()"
+        [activeSpaceId]="workspaceState.activeSpaceId()"
+        [chats]="workspaceState.chats()"
+        [activeChatId]="workspaceState.activeChatId()"
+        (spaceSelected)="onSpaceSelected($event)"
+        (chatSelected)="onChatSelected($event)"
+        (newChatRequested)="onNewChatRequested()">
+      </llm-chat-header>
+      
+      <div class="connection-status" [class.connected]="chatState.connected()">
+        {{ chatState.connected() ? '🟢 Connected' : '🔴 Disconnected' }}
+      </div>
+    </div>
+    
+    <div class="chat-scroll-area">
+      <llm-chat-feed 
+        [feed]="chatState.coreChat()" 
+        (inspectFlow)="chatState.inspectFlow($event)"
+      />
+
+      <div class="prompt-area">
+        @if (chatState.pendingStrategy()) {
+          <llm-chat-strategy-prompt 
+            (strategySelected)="chatState.selectStrategy($event)" 
+          />
+        } @else if (chatState.pendingReviewBranch(); as branch) {
+          <llm-chat-review-prompt 
+            [branch]="branch" 
+            (reviewDecided)="chatState.submitReview($event)" 
+          />
+        } @else {
+          <llm-chat-input 
+            (sendPrompt)="chatState.submitPrompt($event)" 
+          />
+        }
+      </div>
+    </div>
+  </main>
+
+  <aside class="chat-drawer">
+    <llm-flow-tracker [flows]="chatState.flowStates()"></llm-flow-tracker>
+  </aside>
+
+  @if (chatState.inspectedReceipt()) {
+    <llm-flow-inspector 
+      [receiptXml]="chatState.inspectedReceipt()!"
+      (close)="chatState.inspectedReceipt.set(null)">
+    </llm-flow-inspector>
+  }
+</div>

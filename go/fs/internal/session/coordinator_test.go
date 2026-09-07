@@ -22,10 +22,10 @@ type mockModelClient struct {
 	responses []*genai.GenerateContentResponse
 }
 
-func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
+func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, configuration *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
 	return func(yield func(*genai.GenerateContentResponse, error) bool) {
-		for _, resp := range m.responses {
-			if !yield(resp, nil) {
+		for _, response := range m.responses {
+			if !yield(response, nil) {
 				return
 			}
 		}
@@ -77,7 +77,7 @@ type mockFlow struct {
 }
 
 func (m *mockFlow) Name() string { return "MockFlow" }
-func (m *mockFlow) Execute(ctx context.Context, svc *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, args map[string]any, flowCfg flows.FlowConfig, flowCtx flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier workspace.Verifier) (*flows.FlowResult, error) {
+func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier workspace.Verifier) (*flows.FlowResult, error) {
 	m.executeCalled = true
 	return &flows.FlowResult{
 		Branches: []string{"candidate/mock-123"},
@@ -85,25 +85,19 @@ func (m *mockFlow) Execute(ctx context.Context, svc *workspace.Service, thread *
 	}, nil
 }
 
-type mockUI struct {
-	strategyToReturn    session.DelegationStrategy
-	reviewToReturn      bool
-	delegationStarted   bool
-	delegationCompleted bool
-	reviewedBranch      string
+type mockUserInterface struct {
+	strategyToReturn session.DelegationStrategy
+	reviewToReturn   bool
+	reviewedBranch   string
 }
 
-func (u *mockUI) OnTextChunk(text string) {}
-func (u *mockUI) OnDelegationStart(agentCount int, instructions string) {
-	u.delegationStarted = true
-}
-func (u *mockUI) OnDelegationComplete(summary string) {
-	u.delegationCompleted = true
-}
-func (u *mockUI) ChooseNextStep() session.DelegationStrategy {
+func (u *mockUserInterface) OnTextChunk(text string) {}
+
+func (u *mockUserInterface) ChooseNextStep() session.DelegationStrategy {
 	return u.strategyToReturn
 }
-func (u *mockUI) ReviewCandidate(branch string) bool {
+
+func (u *mockUserInterface) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
 }
@@ -121,8 +115,8 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	workspaceRoot := t.TempDir()
-	svc := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot)
-	thread, _ := svc.StartThread(ctx, "test-thread")
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot)
+	thread, _ := workspaceService.StartThread(ctx, "test-thread")
 
 	os.MkdirAll(filepath.Join(workspaceRoot, "chats", "test-thread"), 0755)
 
@@ -151,18 +145,18 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 		},
 	}
 
-	llmMgr := llm.NewManager(client)
+	llmAdapter := llm.NewAdapter(client)
 	flow := &mockFlow{}
-	executor := func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+	executor := func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
 		return nil
 	}
 
 	emitter := &mockEmitter{}
-	flowCfg := flows.FlowConfig{RetryPrompt: "retry"}
+	flowConfiguration := flows.FlowConfig{RetryPrompt: "retry"}
 
-	coordinator := session.NewCoordinator(logger, svc, llmMgr, executor, flow, emitter, "golang", "use /src", flowCfg)
+	coordinator := session.NewCoordinator(logger, workspaceService, llmAdapter, executor, flow, emitter, "golang", "use /src", flowConfiguration)
 
-	ui := &mockUI{
+	userInterface := &mockUserInterface{
 		strategyToReturn: session.StrategyManual,
 		reviewToReturn:   true,
 	}
@@ -170,7 +164,7 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 	space := &mockThinkSpace{}
 	var history []*genai.Content
 
-	err := coordinator.ExecuteTurn(ctx, thread, space, history, ui)
+	err := coordinator.ExecuteTurn(ctx, thread, space, history, userInterface)
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
@@ -179,16 +173,8 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 		t.Errorf("Expected Flow to be executed upon intercepting tool call")
 	}
 
-	if !ui.delegationStarted {
-		t.Errorf("Expected UI.OnDelegationStart to be called")
-	}
-
-	if !ui.delegationCompleted {
-		t.Errorf("Expected UI.OnDelegationComplete to be called")
-	}
-
-	if ui.reviewedBranch != "candidate/mock-123" {
-		t.Errorf("Expected UI to review 'candidate/mock-123', got '%s'", ui.reviewedBranch)
+	if userInterface.reviewedBranch != "candidate/mock-123" {
+		t.Errorf("Expected UI to review 'candidate/mock-123', got '%s'", userInterface.reviewedBranch)
 	}
 }
 
@@ -199,8 +185,8 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	workspaceRoot := t.TempDir()
-	svc := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot)
-	thread, _ := svc.StartThread(ctx, "test-thread-skip")
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot)
+	thread, _ := workspaceService.StartThread(ctx, "test-thread-skip")
 
 	client := &mockModelClient{
 		responses: []*genai.GenerateContentResponse{
@@ -227,19 +213,19 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 	}
 
 	emitter := &mockEmitter{}
-	flowCfg := flows.FlowConfig{}
-	coordinator := session.NewCoordinator(logger, svc, llm.NewManager(client), nil, &mockFlow{}, emitter, "golang", "", flowCfg)
+	flowConfiguration := flows.FlowConfig{}
+	coordinator := session.NewCoordinator(logger, workspaceService, llm.NewAdapter(client), nil, &mockFlow{}, emitter, "golang", "", flowConfiguration)
 
-	ui := &mockUI{
+	userInterface := &mockUserInterface{
 		strategyToReturn: session.StrategySkip,
 	}
 
-	err := coordinator.ExecuteTurn(ctx, thread, &mockThinkSpace{}, nil, ui)
+	err := coordinator.ExecuteTurn(ctx, thread, &mockThinkSpace{}, nil, userInterface)
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
 
-	if ui.reviewedBranch != "" {
-		t.Errorf("Expected UI review step to be skipped, but got review for: %s", ui.reviewedBranch)
+	if userInterface.reviewedBranch != "" {
+		t.Errorf("Expected UI review step to be skipped, but got review for: %s", userInterface.reviewedBranch)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
-// WebSocketEmitter pushes flow events directly to a connected frontend client.
 type WebSocketEmitter struct {
 	ctx    context.Context
 	conn   *websocket.Conn
@@ -25,6 +24,9 @@ func NewWebSocketEmitter(ctx context.Context, conn *websocket.Conn, facade *Even
 func (w *WebSocketEmitter) Emit(event flows.FlowEvent) {
 	bytes, err := w.facade.MarshalFlowEvent(event)
 	if err == nil {
-		_ = w.conn.Write(w.ctx, websocket.MessageText, bytes)
+		if writeErr := w.conn.Write(w.ctx, websocket.MessageText, bytes); writeErr != nil {
+			// Client disconnected, swallow and return cleanly
+			return
+		}
 	}
 }

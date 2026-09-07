@@ -1,31 +1,22 @@
 import { Component, inject, afterNextRender } from '@angular/core';
 import { ChatStateService } from '@org/llm-state-chat';
-import { 
-  ChatFeedComponent, 
-  ChatInputComponent, 
-  ChatStrategyPromptComponent, 
-  ChatReviewPromptComponent 
-} from '@org/llm-ui-chat';
+import { ChatContainerComponent } from '@org/llm-feature-chat';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [
-    ChatFeedComponent,
-    ChatInputComponent,
-    ChatStrategyPromptComponent,
-    ChatReviewPromptComponent,
-  ],
+  imports: [ChatContainerComponent],
   templateUrl: './app.html',
-  styleUrl: './app.css'
+  styleUrls: ['./app.css'],
 })
 export class AppComponent {
   protected state = inject(ChatStateService);
 
   constructor() {
-    // Safely initiate the WebSocket connection only in the browser context after the first render
     afterNextRender(() => {
-      this.state.connect('ws://localhost:8080/ws');
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      this.state.connect(wsUrl);
     });
   }
 }

@@ -11,6 +11,7 @@ base_agent_rules: |
   Respond PURELY in a JSON format where keys are relative file paths and values are the exact file contents as strings. Do not wrap your response in markdown code blocks.
   
   Directory Structure Rules:
-  - All Go source code and your `go.mod` file MUST be placed inside a `src/` directory (e.g., `"src/go.mod"`, `"src/circle/circle.go"`).
+  - All Go source code and your `go.mod` file MUST be placed inside a `src/` directory (e.g., `"src/go.mod"`, `"src/math/circle.go"`).
+  - Go requires files in the same directory to have the same package name. If you create separate packages, you MUST place them in separate subdirectories under `src/` (e.g., `if circle.go has package math"` it must go in a directory called math `"src/math/circle.go"`)
   - You MUST always generate a valid `go.mod` file to define the module.
   - Any markdown notes, explanations, or design documents MUST be placed in a `docs/` directory (e.g., `"docs/architecture.md"`).

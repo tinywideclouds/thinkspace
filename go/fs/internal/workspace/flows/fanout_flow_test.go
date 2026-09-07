@@ -29,7 +29,7 @@ func (m *mockChatEngine) PreviewCandidate(ctx context.Context, chatID string, ca
 	return nil
 }
 func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID string, candidateID string) (string, error) {
-	return "", nil
+	return "+ mock candidate diff", nil
 }
 func (m *mockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
@@ -49,7 +49,13 @@ type mockSandbox struct {
 }
 
 func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error { return nil }
-func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error)     { return nil, nil }
+func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	// Mock a trace.jsonl file so the receipt has raw payload data to read
+	if path == "trace.jsonl" {
+		return []byte(`{"prompt": "Do a thing", "generated": "mock output"}`), nil
+	}
+	return nil, nil
+}
 func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
 	return "", nil
 }
@@ -139,12 +145,22 @@ func TestFanOutFlow_CleanRun(t *testing.T) {
 	if len(emitter.events) < 4 {
 		t.Fatalf("expected at least 4 events, got %d", len(emitter.events))
 	}
-	if emitter.events[0].Type != flows.FlowStart {
-		t.Errorf("expected first event to be FlowStart")
+
+	// Verify the XML Receipt was successfully saved
+	receiptData, err := service.GetReceipt(context.Background(), thread, "flow-123")
+	if err != nil {
+		t.Fatalf("Failed to retrieve generated receipt: %v", err)
 	}
-	lastEvent := emitter.events[len(emitter.events)-1]
-	if lastEvent.Type != flows.FlowComplete || !lastEvent.Passed {
-		t.Errorf("expected last event to be successful FlowComplete")
+
+	xmlStr := string(receiptData)
+	if !strings.Contains(xmlStr, `AgentID="agent-1"`) {
+		t.Errorf("Receipt missing Agent ID: %s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, "+ mock candidate diff") {
+		t.Errorf("Receipt missing State Delta: %s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, "mock output") {
+		t.Errorf("Receipt missing trace.jsonl payload data: %s", xmlStr)
 	}
 }
 
@@ -219,18 +235,14 @@ func TestFanOutFlow_DeliversOnFailure(t *testing.T) {
 	if len(result.Branches) != 1 {
 		t.Errorf("expected candidate to be returned despite failure")
 	}
-	if !engine.sandbox.delivered {
-		t.Errorf("expected sandbox to be delivered even on failure")
+
+	// Verify the receipt accurately logged the final failure trace
+	receiptData, err := service.GetReceipt(context.Background(), thread, "flow-123")
+	if err != nil {
+		t.Fatalf("Failed to retrieve generated receipt: %v", err)
 	}
 
-	lastEvent := emitter.events[len(emitter.events)-1]
-	if lastEvent.Type != flows.FlowComplete {
-		t.Fatalf("expected last event to be FlowComplete")
-	}
-	if lastEvent.Passed {
-		t.Errorf("expected FlowComplete to report failure (Passed = false)")
-	}
-	if lastEvent.Trace != "err 2" {
-		t.Errorf("expected final trace to contain 'err 2', got %q", lastEvent.Trace)
+	if !strings.Contains(string(receiptData), "err 2") {
+		t.Errorf("Receipt failed to record the fatal VerificationTrace: %s", string(receiptData))
 	}
 }

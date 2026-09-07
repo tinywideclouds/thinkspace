@@ -41,58 +41,66 @@ func main() {
 	}
 	modelClient := llm.NewGenAIClient(client)
 
-	homeDir, err := os.UserHomeDir()
+	homeDirectory, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error("Failed to get user home directory", "error", err)
 		os.Exit(1)
 	}
 
-	repoRoot := filepath.Join(homeDir, "Documents", "thinkspace", *spaceName)
-	configsDir := filepath.Join(homeDir, "Documents", "thinkspace", "configs")
+	repositoryRoot := filepath.Join(homeDirectory, "Documents", "thinkspace", *spaceName)
+	configurationsDirectory := filepath.Join(homeDirectory, "Documents", "thinkspace", "configs")
 
-	if err := os.MkdirAll(repoRoot, 0755); err != nil {
+	if err := os.MkdirAll(repositoryRoot, 0755); err != nil {
 		logger.Error("Failed to create workspace directory", "error", err)
 		os.Exit(1)
 	}
+
+	if err := os.MkdirAll(configurationsDirectory, 0755); err != nil {
+		logger.Error("Failed to create configurations directory", "error", err)
+		os.Exit(1)
+	}
+
+	// Ensure default templates exist before loading
+	config.ScaffoldDefaults(logger, configurationsDirectory)
 
 	var stateEngine workspace.ChatEngine
 	switch *engineType {
 	case "exec":
 		fmt.Println("⚙️  Engine: Git CLI (ExecEngine with Worktrees)")
-		stateEngine = gitfs.NewGoExecChat(repoRoot, true)
+		stateEngine = gitfs.NewGoExecEngine(repositoryRoot, true)
 	case "gogit":
 		fallthrough
 	default:
 		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
-		stateEngine = gitfs.NewGoGitChat(repoRoot, true)
+		stateEngine = gitfs.NewGoGitEngine(repositoryRoot, true)
 	}
 
 	registry := config.NewRegistry()
-	if err := registry.LoadDirectory(configsDir); err != nil {
-		logger.Error("Failed to load configs", "error", err)
+	if err := registry.LoadDirectory(configurationsDirectory); err != nil {
+		logger.Error("Failed to load configurations", "error", err)
 		os.Exit(1)
 	}
 
-	activeThinkSpace, ok := registry.GetSpace(*domainName)
+	activeThinkSpace, ok := registry.GetDomain(*domainName)
 	if !ok {
-		fmt.Printf("⚠️ Domain config '%s.yaml' not found in %s\n", *domainName, configsDir)
+		fmt.Printf("⚠️ Domain config '%s.yaml' not found in %s\n", *domainName, configurationsDirectory)
 		os.Exit(1)
 	}
 
-	spaceConfig, _ := registry.GetConfig(*domainName)
-	flowCfg, flowOk := registry.GetFlow("fanout")
+	spaceConfiguration, _ := registry.GetConfig(*domainName)
+	flowConfiguration, flowOk := registry.GetFlow("fanout")
 	if !flowOk {
 		logger.Error("FanOut configuration missing from registry")
 		os.Exit(1)
 	}
 
 	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
-	llmMgr := llm.NewManager(modelClient)
-	subAgentExecutor := llm.SubAgentFactory(modelClient, workerModel)
+	llmAdapter := llm.NewAdapter(modelClient)
+	subAgentExecutor := llm.NewSubAgentExecutor(modelClient, workerModel, activeThinkSpace.SubAgentSystemPrompt())
 	fanOutFlow := flows.NewFanOutFlow(logger)
-	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
+	workspaceService := workspace.NewService(logger, stateEngine, repositoryRoot)
 
-	ui := cli.NewTerminalUI()
+	userInterface := cli.NewTerminalUI()
 
 	// CLI doesn't use WebSockets, so it purely relies on the SlogEmitter
 	emitter := flows.MultiFlowEmitter{flows.NewSlogEmitter(logger)}
@@ -100,24 +108,24 @@ func main() {
 	coordinator := session.NewCoordinator(
 		logger,
 		workspaceService,
-		llmMgr,
+		llmAdapter,
 		subAgentExecutor,
 		fanOutFlow,
 		emitter,
 		*domainName,
-		spaceConfig.BaseAgentRules,
-		flowCfg,
+		spaceConfiguration.BaseAgentRules,
+		flowConfiguration,
 	)
 
-	fmt.Printf("📂 Workspace root: %s\n", repoRoot)
+	fmt.Printf("📂 Workspace root: %s\n", repositoryRoot)
 	fmt.Printf("📄 Active Domain: %s\n", *domainName)
 
-	threadDir := filepath.Join(repoRoot, "chats", *chatName)
-	ledgerPath := filepath.Join(threadDir, "conversation.jsonl")
+	threadDirectory := filepath.Join(repositoryRoot, "chats", *chatName)
+	ledgerPath := filepath.Join(threadDirectory, "conversation.jsonl")
 	var thread *workspace.Thread
 	var history []*genai.Content
 
-	if _, err := os.Stat(threadDir); os.IsNotExist(err) {
+	if _, err := os.Stat(threadDirectory); os.IsNotExist(err) {
 		fmt.Printf("🌱 Creating new exploration thread: %s\n", *chatName)
 		thread, err = workspaceService.StartThread(ctx, *chatName)
 		if err != nil {
@@ -137,7 +145,7 @@ func main() {
 			ID:         *chatName,
 			Branch:     fmt.Sprintf("chat/%s", *chatName),
 			LedgerPath: ledgerPath,
-			Dir:        threadDir,
+			Dir:        threadDirectory,
 		}
 
 		events, err := workspaceService.LoadEvents(ctx, thread)
@@ -146,7 +154,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		history = llmMgr.BuildHistory(events)
+		history = llmAdapter.BuildHistory(events)
 		fmt.Printf("Loaded %d historical turns.\n", len(history))
 
 		fmt.Print("\n> ")
@@ -165,7 +173,7 @@ func main() {
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	if err := coordinator.ExecuteTurn(ctx, thread, activeThinkSpace, history, ui); err != nil {
+	if err := coordinator.ExecuteTurn(ctx, thread, activeThinkSpace, history, userInterface); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)
 	}

@@ -1,11 +1,15 @@
 import { Injectable, signal, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { TransportService } from '@org/llm-core-transport';
-import { LlmFacade, DomainEvent, DomainDelegationStrategy } from '@org/llm-core-facade';
+import { LlmFacade, DomainEvent, DomainDelegationStrategy, DomainFlowEvent } from '@org/llm-core-facade';
+import { firstValueFrom } from 'rxjs';
+import { WorkspaceStateService } from './workspace-state.service';
 
 export interface ChatItem {
   id: string;
-  source: 'user' | 'model' | 'system';
+  source: 'user' | 'model' | 'system' | 'flow_card';
   content: string;
+  flowId?: string; 
 }
 
 export interface LogItem {
@@ -24,31 +28,51 @@ export interface AgentState {
   verified?: boolean;
 }
 
+export interface FlowAgentState {
+  agentId: string;
+  agentIndex: number;
+  instruction: string;
+  status: string;
+  attempt: number;
+  trace: string;
+  passed: boolean;
+}
+
+export interface FlowState {
+  flowId: string;
+  taskId: string;
+  agentCount: number;
+  completedCount: number;
+  status: 'running' | 'completed';
+  agents: Map<string, FlowAgentState>;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ChatStateService {
-  private transport = inject(TransportService);
+  private transportService = inject(TransportService);
+  private httpClient = inject(HttpClient);
+  private workspaceStateService = inject(WorkspaceStateService); 
 
-  // Partitioned State Signals
   public coreChat = signal<ChatItem[]>([]);
   public systemLogs = signal<LogItem[]>([]);
   public activeAgents = signal<Map<number, AgentState>>(new Map());
+  public flowStates = signal<Map<string, FlowState>>(new Map());
   
-  public spaces = signal<{id: string; name: string}[]>([]);
-  public activeSpaceId = signal<string>('golang');
   public pendingStrategy = signal<boolean>(false);
   public pendingReviewBranch = signal<string | null>(null);
   public connected = signal<boolean>(false);
+  public inspectedReceipt = signal<string | null>(null);
 
   public connect(url: string): void {
-    this.transport.connect(url).subscribe({
-      next: (proto) => {
-        const domainEvent = LlmFacade.toDomain(proto);
+    this.transportService.connect(url).subscribe({
+      next: (protocolBufferEvent) => {
+        const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
         if (domainEvent) {
           this.handleEvent(domainEvent);
         }
       },
-      error: (err) => {
-        this.appendSystemLog('ERROR', `Connection error: ${err}`);
+      error: (error) => {
+        this.appendSystemLog('ERROR', `Connection error: ${error}`);
         this.connected.set(false);
       },
       complete: () => {
@@ -60,122 +84,168 @@ export class ChatStateService {
   }
 
   public disconnect(): void {
-    this.transport.disconnect();
+    this.transportService.disconnect();
     this.connected.set(false);
   }
 
+  public clearSession(): void {
+    this.coreChat.set([]);
+    this.systemLogs.set([]);
+    this.activeAgents.set(new Map());
+    this.flowStates.set(new Map());
+    this.pendingStrategy.set(false);
+    this.pendingReviewBranch.set(null);
+    this.inspectedReceipt.set(null);
+  }
+
   public submitPrompt(text: string): void {
+    const spaceId = this.workspaceStateService.activeSpaceId();
+    const chatId = this.workspaceStateService.activeChatId();
+
+    if (!spaceId || !chatId) {
+      this.appendSystemLog('ERROR', 'Cannot submit prompt: No active space or chat selected.');
+      return;
+    }
+
     this.appendCoreChat('user', text);
-    const proto = LlmFacade.createSubmitPrompt(text, this.activeSpaceId());
-    this.transport.send(proto);
+    // the llm system now gives back true state here instead of assuming this.
+    // this.appendCoreChat('system', '🤖 Manager is thinking...');
+    
+    const protocolBufferEvent = LlmFacade.createSubmitPrompt(text, spaceId, chatId);
+    this.transportService.send(protocolBufferEvent);
+  }
+
+  public async inspectFlow(flowId: string): Promise<void> {
+    const spaceId = this.workspaceStateService.activeSpaceId();
+    const chatId = this.workspaceStateService.activeChatId();
+
+    if (!spaceId || !chatId) return;
+
+    try {
+      const url = `/api/receipts/${encodeURIComponent(chatId)}/${encodeURIComponent(flowId)}?space=${encodeURIComponent(spaceId)}`;
+      const xmlData = await firstValueFrom(this.httpClient.get(url, { responseType: 'text' }));
+      this.inspectedReceipt.set(xmlData);
+    } catch (error) {
+      console.error(`Failed to fetch receipt for flow ${flowId}`, error);
+      this.appendSystemLog('ERROR', `Failed to load receipt for flow ${flowId}`);
+    }
   }
 
   private handleEvent(event: DomainEvent): void {
     switch (event.type) {
       case 'available_spaces':
-        this.spaces.set(event.spaces);
-        this.appendSystemLog('INFO', `Available spaces: ${event.spaces.map(s => s.id).join(', ')}`);
+        // Legacy support: Handled by WorkspaceStateService
         break;
-      
       case 'chat_stream':
         this.appendToLastModelMessage(event.text);
         break;
-      
       case 'log_message':
         this.appendSystemLog(event.level, event.message);
         break;
-      
-      case 'delegation_start':
-        // Log to system, but ALSO drop a contextual note in the main chat feed
-        const msg = `🚀 Delegating task to ${event.agentCount} agent(s): ${event.instructions}`;
-        this.appendSystemLog('INFO', msg);
-        this.appendCoreChat('system', msg);
+      case 'flow_event':
+        this.handleFlowEvent(event);
         break;
-      
-      case 'delegation_complete':
-        this.appendSystemLog('INFO', `✅ Delegation Flow Complete:\n${event.summary}`);
-        break;
-      
-      case 'agent_start':
-        this.activeAgents.update(map => {
-          const newMap = new Map(map);
-          newMap.set(event.agentId, {
-            id: event.agentId,
-            instructions: event.instructions,
-            stream: '',
-            status: 'running'
-          });
-          return newMap;
-        });
-        break;
-      
       case 'agent_stream':
-        this.activeAgents.update(map => {
-          const newMap = new Map(map);
-          const agent = newMap.get(event.agentId);
-          if (agent) {
-            agent.stream += event.text;
-            newMap.set(event.agentId, agent);
+        this.activeAgents.update(currentMap => {
+          const updatedMap = new Map(currentMap);
+          let agent = updatedMap.get(event.agentId);
+          if (!agent) {
+            agent = { id: event.agentId, instructions: '', stream: '', status: 'running' };
           }
-          return newMap;
+          agent.stream += event.text;
+          updatedMap.set(event.agentId, agent);
+          return updatedMap;
         });
         break;
-      
-      case 'agent_complete':
-        this.activeAgents.update(map => {
-          const newMap = new Map(map);
-          const agent = newMap.get(event.agentId);
-          if (agent) {
-            agent.status = 'completed';
-            agent.branch = event.branch;
-            agent.verified = event.verified;
-            newMap.set(event.agentId, agent);
-          }
-          return newMap;
-        });
-        break;
-      
       case 'request_strategy':
         this.pendingStrategy.set(event.active);
         break;
-      
       case 'request_review':
         this.pendingReviewBranch.set(event.branch);
         break;
     }
   }
 
-  private appendCoreChat(source: ChatItem['source'], content: string): void {
-    this.coreChat.update(chat => [...chat, { id: crypto.randomUUID(), source, content }]);
+  private handleFlowEvent(event: DomainFlowEvent): void {
+    this.flowStates.update(currentFlows => {
+      const updatedMap = new Map(currentFlows);
+      let flow = updatedMap.get(event.flowId);
+
+      if (event.eventType === 'flow_start') {
+        flow = {
+          flowId: event.flowId,
+          taskId: event.taskId,
+          agentCount: event.agentCount,
+          completedCount: 0,
+          status: 'running',
+          agents: new Map()
+        };
+        updatedMap.set(event.flowId, flow);
+      }
+
+      if (event.eventType === 'flow_complete' && flow) {
+        flow.completedCount++;
+        if (flow.completedCount === flow.agentCount && flow.status !== 'completed') {
+          flow.status = 'completed';
+          this.coreChat.update(chatHistory => [...chatHistory, { 
+            id: crypto.randomUUID(), 
+            source: 'flow_card', 
+            content: 'Orchestration Flow Completed', 
+            flowId: event.flowId 
+          }]);
+        }
+      }
+
+      if (!flow) return updatedMap;
+
+      if (event.agentId) {
+        const agent = flow.agents.get(event.agentId) || {
+          agentId: event.agentId,
+          agentIndex: event.agentIndex,
+          instruction: '',
+          status: 'starting',
+          attempt: 1,
+          trace: '',
+          passed: false
+        };
+
+        if (event.instruction) agent.instruction = event.instruction;
+        if (event.status) agent.status = event.status;
+        if (event.attempt) agent.attempt = event.attempt;
+        if (event.trace) agent.trace = event.trace;
+        if (event.passed !== undefined) agent.passed = event.passed;
+
+        flow.agents.set(event.agentId, agent);
+      }
+
+      return updatedMap;
+    });
   }
 
-  private appendToLastModelMessage(chunk: string): void {
-    this.coreChat.update(chat => {
-      if (chat.length === 0 || chat[chat.length - 1].source !== 'model') {
-        return [...chat, { id: crypto.randomUUID(), source: 'model', content: chunk }];
+  private appendCoreChat(source: ChatItem['source'], content: string): void {
+    this.coreChat.update(chatHistory => [...chatHistory, { id: crypto.randomUUID(), source, content }]);
+  }
+
+  private appendToLastModelMessage(chunkText: string): void {
+    this.coreChat.update(chatHistory => {
+      if (chatHistory.length === 0 || chatHistory[chatHistory.length - 1].source !== 'model') {
+        return [...chatHistory, { id: crypto.randomUUID(), source: 'model', content: chunkText }];
       }
-      const newChat = [...chat];
-      newChat[newChat.length - 1].content += chunk;
-      return newChat;
+      const updatedChatHistory = [...chatHistory];
+      updatedChatHistory[updatedChatHistory.length - 1].content += chunkText;
+      return updatedChatHistory;
     });
   }
 
   private appendSystemLog(level: string, message: string): void {
-    this.systemLogs.update(logs => [...logs, { 
-      id: crypto.randomUUID(), 
-      timestamp: Date.now(),
-      level, 
-      message 
-    }]);
+    this.systemLogs.update(logs => [...logs, { id: crypto.randomUUID(), timestamp: Date.now(), level, message }]);
   }
 
   public selectStrategy(strategy: DomainDelegationStrategy): void {
     this.pendingStrategy.set(false);
-    // Explicitly record the user's decision in the main chat feed
     this.appendCoreChat('user', `Selected Strategy: ${DomainDelegationStrategy[strategy]}`);
-    
-    const proto = LlmFacade.createSelectStrategy(strategy);
-    this.transport.send(proto);
+    const protocolBufferEvent = LlmFacade.createSelectStrategy(strategy);
+    this.transportService.send(protocolBufferEvent);
   }
 
   public submitReview(accepted: boolean): void {
@@ -183,10 +253,8 @@ export class ChatStateService {
     if (!branch) return;
     
     this.pendingReviewBranch.set(null);
-    // Explicitly record the user's branch decision in the main chat feed
     this.appendCoreChat('user', `Review for ${branch}: ${accepted ? 'ACCEPTED' : 'REJECTED'}`);
-    
-    const proto = LlmFacade.createReviewDecision(branch, accepted);
-    this.transport.send(proto);
+    const protocolBufferEvent = LlmFacade.createReviewDecision(branch, accepted);
+    this.transportService.send(protocolBufferEvent);
   }
 }

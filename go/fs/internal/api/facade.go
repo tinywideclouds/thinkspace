@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -12,11 +13,11 @@ import (
 )
 
 // --- Domain Types ---
-// These ensure the rest of the app never imports the Protobuf package directly.
 
-type SpaceInfo struct {
-	ID   string
-	Name string
+type SpaceState struct {
+	ID           string
+	Name         string
+	IsConfigured bool
 }
 
 type InboundEvent struct {
@@ -29,6 +30,7 @@ type InboundEvent struct {
 type SubmitPromptPayload struct {
 	Text    string
 	SpaceID string
+	ChatID  string
 }
 
 type SelectStrategyPayload struct {
@@ -58,36 +60,55 @@ func NewEventFacade() *EventFacade {
 	}
 }
 
-// Outbound Serialization
+func (f *EventFacade) MarshalRESTSpaces(spaces []SpaceState) ([]byte, error) {
+	var rawSpaces []json.RawMessage
+
+	for _, s := range spaces {
+		pbSpace := &pb.SpaceInfo{
+			Id:           s.ID,
+			Name:         s.Name,
+			IsConfigured: s.IsConfigured,
+		}
+
+		b, err := f.marshaler.Marshal(pbSpace)
+		if err != nil {
+			return nil, err
+		}
+		rawSpaces = append(rawSpaces, b)
+	}
+
+	if rawSpaces == nil {
+		rawSpaces = make([]json.RawMessage, 0)
+	}
+
+	return json.Marshal(rawSpaces)
+}
+
+func (f *EventFacade) MarshalAvailableSpaces(spaces []SpaceState) ([]byte, error) {
+	var pbSpaces []*pb.SpaceInfo
+	for _, s := range spaces {
+		pbSpaces = append(pbSpaces, &pb.SpaceInfo{
+			Id:           s.ID,
+			Name:         s.Name,
+			IsConfigured: s.IsConfigured,
+		})
+	}
+
+	event := &pb.WSEvent{
+		Payload: &pb.WSEvent_AvailableSpaces{
+			AvailableSpaces: &pb.AvailableSpacesPayload{
+				Spaces: pbSpaces,
+			},
+		},
+	}
+	return f.marshaler.Marshal(event)
+}
 
 func (f *EventFacade) MarshalChatStream(text string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_ChatStream{
 			ChatStream: &pb.ChatStreamPayload{
 				Text: text,
-			},
-		},
-	}
-	return f.marshaler.Marshal(event)
-}
-
-func (f *EventFacade) MarshalDelegationStart(agentCount int, instructions string) ([]byte, error) {
-	event := &pb.WSEvent{
-		Payload: &pb.WSEvent_DelegationStart{
-			DelegationStart: &pb.DelegationStartPayload{
-				AgentCount:   int32(agentCount),
-				Instructions: instructions,
-			},
-		},
-	}
-	return f.marshaler.Marshal(event)
-}
-
-func (f *EventFacade) MarshalDelegationComplete(summary string) ([]byte, error) {
-	event := &pb.WSEvent{
-		Payload: &pb.WSEvent_DelegationComplete{
-			DelegationComplete: &pb.DelegationCompletePayload{
-				Summary: summary,
 			},
 		},
 	}
@@ -110,25 +131,6 @@ func (f *EventFacade) MarshalRequestReview(branch string) ([]byte, error) {
 		Payload: &pb.WSEvent_RequestReview{
 			RequestReview: &pb.RequestReviewPayload{
 				Branch: branch,
-			},
-		},
-	}
-	return f.marshaler.Marshal(event)
-}
-
-func (f *EventFacade) MarshalAvailableSpaces(spaces []SpaceInfo) ([]byte, error) {
-	var pbSpaces []*pb.SpaceInfo
-	for _, s := range spaces {
-		pbSpaces = append(pbSpaces, &pb.SpaceInfo{
-			Id:   s.ID,
-			Name: s.Name,
-		})
-	}
-
-	event := &pb.WSEvent{
-		Payload: &pb.WSEvent_AvailableSpaces{
-			AvailableSpaces: &pb.AvailableSpacesPayload{
-				Spaces: pbSpaces,
 			},
 		},
 	}
@@ -170,8 +172,6 @@ func (f *EventFacade) MarshalFlowEvent(event flows.FlowEvent) ([]byte, error) {
 	return f.marshaler.Marshal(pbEvent)
 }
 
-// Inbound Deserialization
-
 func (f *EventFacade) UnmarshalInbound(data []byte) (*InboundEvent, error) {
 	var pbEvent pb.WSEvent
 	if err := f.unmarshaler.Unmarshal(data, &pbEvent); err != nil {
@@ -186,6 +186,7 @@ func (f *EventFacade) UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		domainEvent.SubmitPrompt = &SubmitPromptPayload{
 			Text:    payload.SubmitPrompt.Text,
 			SpaceID: payload.SubmitPrompt.SpaceId,
+			ChatID:  payload.SubmitPrompt.ChatId,
 		}
 	case *pb.WSEvent_SelectStrategy:
 		domainEvent.Type = "select_strategy"

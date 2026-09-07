@@ -9,32 +9,33 @@ import (
 	"google.golang.org/genai"
 )
 
-// ToolCall now generically captures ANY function call requested by the LLM.
+// ToolCall generically captures ANY function call requested by the LLM.
 type ToolCall struct {
 	Name string
 	Args map[string]any
 }
 
-type Manager struct {
+// Adapter bridges the ThinkSpace domain logic to the underlying GenAI client.
+type Adapter struct {
 	client ModelClient
 }
 
-func NewManager(client ModelClient) *Manager {
-	return &Manager{client: client}
+func NewAdapter(client ModelClient) *Adapter {
+	return &Adapter{client: client}
 }
 
 // GenerateStream dynamically accepts tools and the system prompt from the active ThinkSpace.
-func (m *Manager) GenerateStream(ctx context.Context, model string, systemPrompt string, tools []*genai.Tool, history []*genai.Content) iter.Seq2[*genai.GenerateContentResponse, error] {
+func (a *Adapter) GenerateStream(ctx context.Context, model string, systemPrompt string, tools []*genai.Tool, history []*genai.Content) iter.Seq2[*genai.GenerateContentResponse, error] {
 	config := &genai.GenerateContentConfig{
 		Tools:             tools,
 		Temperature:       genai.Ptr(float32(0.2)),
 		SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: systemPrompt}}},
 	}
-	return m.client.GenerateContentStream(ctx, model, history, config)
+	return a.client.GenerateContentStream(ctx, model, history, config)
 }
 
-// InterceptToolCalls is now completely domain-agnostic.
-func (m *Manager) InterceptToolCalls(chunk *genai.GenerateContentResponse) []ToolCall {
+// InterceptToolCalls parses the raw LLM chunk to extract domain-agnostic tool requests.
+func (a *Adapter) InterceptToolCalls(chunk *genai.GenerateContentResponse) []ToolCall {
 	var calls []ToolCall
 	if len(chunk.Candidates) == 0 || chunk.Candidates[0].Content == nil {
 		return calls
@@ -52,7 +53,7 @@ func (m *Manager) InterceptToolCalls(chunk *genai.GenerateContentResponse) []Too
 }
 
 // BuildHistory translates our domain events into the Google GenAI Content schema.
-func (m *Manager) BuildHistory(events []workspace.Event) []*genai.Content {
+func (a *Adapter) BuildHistory(events []workspace.Event) []*genai.Content {
 	var history []*genai.Content
 
 	for _, ev := range events {

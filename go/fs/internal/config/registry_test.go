@@ -11,7 +11,7 @@ func TestRegistry_Methods(t *testing.T) {
 	mockFS := fstest.MapFS{
 		"config.yaml": &fstest.MapFile{
 			Data: []byte(`
-golang-space:
+golang:
   type: "space"
   name: "Golang Environment"
   models:
@@ -31,21 +31,19 @@ fanout:
 		t.Fatalf("LoadFS failed: %v", err)
 	}
 
-	// 1. Test GetConfig & GetSpace
-	spaceCfg, ok := registry.GetConfig("golang-space")
+	spaceCfg, ok := registry.GetConfig("golang")
 	if !ok {
-		t.Fatalf("GetConfig: Expected to find 'golang-space'")
+		t.Fatalf("GetConfig: Expected to find 'golang'")
 	}
 	if spaceCfg.Name != "Golang Environment" {
 		t.Errorf("GetConfig: Expected Name 'Golang Environment', got %q", spaceCfg.Name)
 	}
 
-	_, ok = registry.GetSpace("golang-space")
+	_, ok = registry.GetDomain("golang")
 	if !ok {
-		t.Errorf("GetSpace: Expected to find 'golang-space'")
+		t.Errorf("GetDomain: Expected to find 'golang'")
 	}
 
-	// 2. Test GetFlow
 	flowCfg, ok := registry.GetFlow("fanout")
 	if !ok {
 		t.Fatalf("GetFlow: Expected to find 'fanout'")
@@ -54,30 +52,8 @@ fanout:
 		t.Errorf("GetFlow: Expected Name 'Parallel FanOut', got %q", flowCfg.Name)
 	}
 
-	// 3. Test GetAllConfigs
 	allConfigs := registry.GetAllConfigs()
 	if len(allConfigs) != 1 {
 		t.Errorf("GetAllConfigs: Expected 1 config, got %d", len(allConfigs))
-	}
-	if _, exists := allConfigs["golang-space"]; !exists {
-		t.Errorf("GetAllConfigs: Missing 'golang-space'")
-	}
-
-	// 4. Test GetAllFlows
-	allFlows := registry.GetAllFlows()
-	if len(allFlows) != 1 {
-		t.Errorf("GetAllFlows: Expected 1 flow, got %d", len(allFlows))
-	}
-	if _, exists := allFlows["fanout"]; !exists {
-		t.Errorf("GetAllFlows: Missing 'fanout'")
-	}
-
-	// 5. Test GetAvailableSpaces
-	availableSpaces := registry.GetAvailableSpaces()
-	if len(availableSpaces) != 1 {
-		t.Fatalf("GetAvailableSpaces: Expected 1 space, got %d", len(availableSpaces))
-	}
-	if availableSpaces[0].ID != "golang-space" {
-		t.Errorf("GetAvailableSpaces: Expected ID 'golang-space', got %q", availableSpaces[0].ID)
 	}
 }

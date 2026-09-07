@@ -48,8 +48,8 @@ func setupTestEnvironment(t *testing.T, factory EngineFactory, sharedCodebase bo
 
 func TestChatEngines(t *testing.T) {
 	engines := map[string]EngineFactory{
-		"GoGit":  func(dir string, shared bool) workspace.ChatEngine { return gitfs.NewGoGitChat(dir, shared) },
-		"GoExec": func(dir string, shared bool) workspace.ChatEngine { return gitfs.NewGoExecChat(dir, shared) },
+		"GoGitEngine":  func(dir string, shared bool) workspace.ChatEngine { return gitfs.NewGoGitEngine(dir, shared) },
+		"GoExecEngine": func(dir string, shared bool) workspace.ChatEngine { return gitfs.NewGoExecEngine(dir, shared) },
 	}
 
 	for name, factory := range engines {

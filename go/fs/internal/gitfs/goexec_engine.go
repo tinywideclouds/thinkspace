@@ -12,20 +12,19 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// GoExecChat implements the workspace.ChatEngine interface using the native Git CLI.
-type GoExecChat struct {
+// GoExecEngine implements the workspace.ChatEngine interface using the native Git CLI.
+type GoExecEngine struct {
 	workspaceRoot  string
 	sharedCodebase bool
 }
 
-func NewGoExecChat(workspaceRoot string, sharedCodebase bool) *GoExecChat {
-	return &GoExecChat{
+func NewGoExecEngine(workspaceRoot string, sharedCodebase bool) *GoExecEngine {
+	return &GoExecEngine{
 		workspaceRoot:  workspaceRoot,
 		sharedCodebase: sharedCodebase,
 	}
 }
 
-// runGit is a shared internal helper to execute git commands with the correct environment.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
@@ -48,7 +47,7 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func (c *GoExecChat) InitChat(ctx context.Context, chatID string) error {
+func (c *GoExecEngine) InitChat(ctx context.Context, chatID string) error {
 	if _, err := runGit(ctx, c.workspaceRoot, "rev-parse", "--git-dir"); err != nil {
 		if _, err := runGit(ctx, c.workspaceRoot, "init"); err != nil {
 			return err
@@ -65,7 +64,6 @@ func (c *GoExecChat) InitChat(ctx context.Context, chatID string) error {
 			return err
 		}
 	} else {
-		// Short-circuit if already on the branch
 		currentBranch, _ := runGit(ctx, c.workspaceRoot, "branch", "--show-current")
 		if currentBranch != threadBranch {
 			if _, err := runGit(ctx, c.workspaceRoot, "switch", threadBranch); err != nil {
@@ -77,7 +75,7 @@ func (c *GoExecChat) InitChat(ctx context.Context, chatID string) error {
 	return nil
 }
 
-func (c *GoExecChat) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+func (c *GoExecEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
 	if _, err := runGit(ctx, c.workspaceRoot, "add", "--all"); err != nil {
 		return "", err
 	}
@@ -87,7 +85,7 @@ func (c *GoExecChat) Snapshot(ctx context.Context, chatID string, message string
 	return runGit(ctx, c.workspaceRoot, "rev-parse", "HEAD")
 }
 
-func (c *GoExecChat) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+func (c *GoExecEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
 	sandboxDirectory, err := os.MkdirTemp("", fmt.Sprintf("sandbox-%s-*", candidateID))
 	if err != nil {
 		return nil, fmt.Errorf("creating temp sandbox dir: %w", err)
@@ -109,13 +107,13 @@ func (c *GoExecChat) SpawnCandidateSandbox(ctx context.Context, chatID string, c
 	}, nil
 }
 
-func (c *GoExecChat) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
+func (c *GoExecEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	_, err := runGit(ctx, c.workspaceRoot, "switch", candidateBranch)
 	return err
 }
 
-func (c *GoExecChat) ReadCandidateDiff(ctx context.Context, chatID string, candidateID string) (string, error) {
+func (c *GoExecEngine) ReadCandidateDiff(ctx context.Context, chatID string, candidateID string) (string, error) {
 	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 
@@ -126,7 +124,7 @@ func (c *GoExecChat) ReadCandidateDiff(ctx context.Context, chatID string, candi
 	return diff, nil
 }
 
-func (c *GoExecChat) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
+func (c *GoExecEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	tagName := fmt.Sprintf("proposal-%s", candidateID)
@@ -145,7 +143,7 @@ func (c *GoExecChat) Accept(ctx context.Context, chatID string, candidateID stri
 	return err
 }
 
-func (c *GoExecChat) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
+func (c *GoExecEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
 	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	tagName := fmt.Sprintf("proposal-%s", candidateID)
@@ -161,9 +159,6 @@ func (c *GoExecChat) Reject(ctx context.Context, chatID string, candidateID stri
 	return err
 }
 
-// --- Sandbox Virtual Environment ---
-
-// execSandbox implements the workspace.CandidateSandbox interface.
 type execSandbox struct {
 	mainRepoDirectory string
 	sandboxDirectory  string
@@ -172,8 +167,6 @@ type execSandbox struct {
 	sharedCodebase    bool
 }
 
-// normalizePath safely forces incoming paths into the configured execution root,
-// stripping out redundant prefixes if the test or prompt already supplied them.
 func (s *execSandbox) normalizePath(targetPath string) string {
 	slashPath := filepath.ToSlash(filepath.Clean(targetPath))
 	chatID := filepath.Base(s.chatDirectory)
@@ -229,13 +222,10 @@ func (s *execSandbox) ApplyDraft(ctx context.Context, message string) error {
 }
 
 func (s *execSandbox) DeliverForReview(ctx context.Context) error {
-	// Native worktrees are physically linked to the main database.
-	// Commits are instantly available to the factory without pushing.
 	return nil
 }
 
 func (s *execSandbox) TearDown(ctx context.Context) error {
-	// The sandbox is self-aware; it runs the command from its parent context securely.
 	_, err := runGit(ctx, s.mainRepoDirectory, "worktree", "remove", "--force", s.sandboxDirectory)
 	return err
 }

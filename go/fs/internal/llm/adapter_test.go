@@ -8,8 +8,8 @@ import (
 	"google.golang.org/genai"
 )
 
-func TestManager_BuildHistory(t *testing.T) {
-	mgr := llm.NewManager(nil)
+func TestAdapter_BuildHistory(t *testing.T) {
+	adapter := llm.NewAdapter(nil)
 
 	events := []workspace.Event{
 		{
@@ -37,7 +37,7 @@ func TestManager_BuildHistory(t *testing.T) {
 		},
 	}
 
-	history := mgr.BuildHistory(events)
+	history := adapter.BuildHistory(events)
 
 	if len(history) != 4 {
 		t.Fatalf("expected 4 history items, got %d", len(history))
@@ -57,8 +57,8 @@ func TestManager_BuildHistory(t *testing.T) {
 	}
 }
 
-func TestManager_InterceptToolCalls(t *testing.T) {
-	mgr := llm.NewManager(nil)
+func TestAdapter_InterceptToolCalls(t *testing.T) {
+	adapter := llm.NewAdapter(nil)
 
 	resp := &genai.GenerateContentResponse{
 		Candidates: []*genai.Candidate{
@@ -78,7 +78,7 @@ func TestManager_InterceptToolCalls(t *testing.T) {
 		},
 	}
 
-	calls := mgr.InterceptToolCalls(resp)
+	calls := adapter.InterceptToolCalls(resp)
 
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 tool call, got %d", len(calls))

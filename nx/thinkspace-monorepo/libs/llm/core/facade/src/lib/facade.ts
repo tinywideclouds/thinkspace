@@ -7,86 +7,65 @@ import {
 import { DomainEvent, DomainDelegationStrategy } from './domain-models';
 
 export class LlmFacade {
-  /**
-   * Translates an inbound Protobuf WSEvent into a clean DomainEvent.
-   * Leverages the `oneof` case for strict type inference.
-   */
-  static toDomain(proto: WSEvent): DomainEvent | null {
-    if (!proto.payload || proto.payload.case === undefined) {
+  static toDomain(protocolBufferEvent: WSEvent): DomainEvent | null {
+    if (!protocolBufferEvent.payload || protocolBufferEvent.payload.case === undefined) {
       return null;
     }
 
-    switch (proto.payload.case) {
+    switch (protocolBufferEvent.payload.case) {
       case 'chatStream':
-        return { type: 'chat_stream', text: proto.payload.value.text };
+        return { type: 'chat_stream', text: protocolBufferEvent.payload.value.text };
       
       case 'logMessage':
-        return { type: 'log_message', level: proto.payload.value.level, message: proto.payload.value.message };
-      
-      case 'delegationStart':
-        return { 
-          type: 'delegation_start', 
-          agentCount: proto.payload.value.agentCount, 
-          instructions: proto.payload.value.instructions 
-        };
-      
-      case 'delegationComplete':
-        return { type: 'delegation_complete', summary: proto.payload.value.summary };
-      
-      case 'agentStart':
-        return { 
-          type: 'agent_start', 
-          agentId: proto.payload.value.agentId, 
-          instructions: proto.payload.value.instructions 
-        };
+        return { type: 'log_message', level: protocolBufferEvent.payload.value.level, message: protocolBufferEvent.payload.value.message };
       
       case 'agentStream':
-        return { type: 'agent_stream', agentId: proto.payload.value.agentId, text: proto.payload.value.text };
-      
-      case 'agentComplete':
-        return { 
-          type: 'agent_complete', 
-          agentId: proto.payload.value.agentId, 
-          branch: proto.payload.value.branch, 
-          verified: proto.payload.value.verified 
-        };
+        return { type: 'agent_stream', agentId: protocolBufferEvent.payload.value.agentId, text: protocolBufferEvent.payload.value.text };
       
       case 'requestStrategy':
-        return { type: 'request_strategy', active: proto.payload.value.active };
+        return { type: 'request_strategy', active: protocolBufferEvent.payload.value.active };
       
       case 'requestReview':
-        return { type: 'request_review', branch: proto.payload.value.branch };
+        return { type: 'request_review', branch: protocolBufferEvent.payload.value.branch };
       
       case 'availableSpaces':
-        return { 
-          type: 'available_spaces', 
-          spaces: proto.payload.value.spaces.map(s => ({ id: s.id, name: s.name })) 
+        return { type: 'available_spaces', spaces: protocolBufferEvent.payload.value.spaces.map(space => ({ id: space.id, name: space.name })) };
+      
+      case 'flowEvent':
+        return {
+          type: 'flow_event',
+          flowId: protocolBufferEvent.payload.value.flowId,
+          eventType: protocolBufferEvent.payload.value.type,
+          timestamp: protocolBufferEvent.payload.value.timestamp,
+          taskId: protocolBufferEvent.payload.value.taskId,
+          agentCount: protocolBufferEvent.payload.value.agentCount,
+          agentId: protocolBufferEvent.payload.value.agentId,
+          agentIndex: protocolBufferEvent.payload.value.agentIndex,
+          instruction: protocolBufferEvent.payload.value.instruction,
+          status: protocolBufferEvent.payload.value.status,
+          attempt: protocolBufferEvent.payload.value.attempt,
+          trace: protocolBufferEvent.payload.value.trace,
+          candidateId: protocolBufferEvent.payload.value.candidateId,
+          passed: protocolBufferEvent.payload.value.passed
         };
       
       default:
-        console.warn(`[LlmFacade] Unhandled inbound proto case: ${proto.payload.case}`);
+        console.warn(`[LlmFacade] Unhandled inbound protocol buffer case: ${protocolBufferEvent.payload.case}`);
         return null;
     }
   }
 
-  /**
-   * Wraps a user prompt into the outbound Protobuf envelope safely using the schema.
-   */
-  static createSubmitPrompt(text: string, spaceId: string): WSEvent {
+  static createSubmitPrompt(text: string, spaceId: string, chatId: string): WSEvent {
     return create(WSEventSchema, {
       payload: {
         case: 'submitPrompt',
-        value: { text, spaceId }
+        value: { text, spaceId, chatId }
       }
     });
   }
 
-  /**
-   * Wraps a user's strategy selection into the outbound Protobuf envelope safely using the schema.
-   */
   static createSelectStrategy(strategy: DomainDelegationStrategy): WSEvent {
     const strategyId = strategy as unknown as DelegationStrategy;
-    
     return create(WSEventSchema, {
       payload: {
         case: 'selectStrategy',
@@ -95,9 +74,6 @@ export class LlmFacade {
     });
   }
 
-  /**
-   * Wraps a user's review decision into the outbound Protobuf envelope safely using the schema.
-   */
   static createReviewDecision(branch: string, accepted: boolean): WSEvent {
     return create(WSEventSchema, {
       payload: {

@@ -17,14 +17,14 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// GoGitChat implements the workspace.ChatEngine interface using the go-git library.
-type GoGitChat struct {
+// GoGitEngine implements the workspace.ChatEngine interface using the go-git library.
+type GoGitEngine struct {
 	workspaceRoot  string
 	sharedCodebase bool
 }
 
-func NewGoGitChat(workspaceRoot string, sharedCodebase bool) *GoGitChat {
-	return &GoGitChat{
+func NewGoGitEngine(workspaceRoot string, sharedCodebase bool) *GoGitEngine {
+	return &GoGitEngine{
 		workspaceRoot:  workspaceRoot,
 		sharedCodebase: sharedCodebase,
 	}
@@ -33,7 +33,7 @@ func NewGoGitChat(workspaceRoot string, sharedCodebase bool) *GoGitChat {
 // withFloatingLedger is a robust wrapper that fulfills the domain requirement
 // of floating uncommitted changes (like the conversation ledger). It explicitly
 // stashes them, forces a clean Git transition, and restores them to disk.
-func (c *GoGitChat) withFloatingLedger(worktree *git.Worktree, action func() error) error {
+func (c *GoGitEngine) withFloatingLedger(worktree *git.Worktree, action func() error) error {
 	status, err := worktree.Status()
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func (c *GoGitChat) withFloatingLedger(worktree *git.Worktree, action func() err
 	return nil
 }
 
-func (c *GoGitChat) InitChat(ctx context.Context, chatID string) error {
+func (c *GoGitEngine) InitChat(ctx context.Context, chatID string) error {
 	repository, err := git.PlainInit(c.workspaceRoot, false)
 	if err != nil && err != git.ErrRepositoryAlreadyExists {
 		return fmt.Errorf("initializing native git repository: %w", err)
@@ -107,7 +107,6 @@ func (c *GoGitChat) InitChat(ctx context.Context, chatID string) error {
 		return fmt.Errorf("resolving HEAD: %w", err)
 	}
 
-	// Short-circuit if we are already on the target branch to avoid timestamp/status bugs on startup
 	if headReference.Name() == threadBranch {
 		return nil
 	}
@@ -135,7 +134,7 @@ func (c *GoGitChat) InitChat(ctx context.Context, chatID string) error {
 	return nil
 }
 
-func (c *GoGitChat) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+func (c *GoGitEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
 	repository, err := git.PlainOpen(c.workspaceRoot)
 	if err != nil {
 		return "", fmt.Errorf("opening repository: %w", err)
@@ -165,7 +164,7 @@ func (c *GoGitChat) Snapshot(ctx context.Context, chatID string, message string)
 	return commitHash.String(), nil
 }
 
-func (c *GoGitChat) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+func (c *GoGitEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
 	sandboxDirectory, err := os.MkdirTemp("", fmt.Sprintf("sandbox-%s-*", candidateID))
 	if err != nil {
 		return nil, fmt.Errorf("creating temp sandbox directory: %w", err)
@@ -214,7 +213,7 @@ func (c *GoGitChat) SpawnCandidateSandbox(ctx context.Context, chatID string, ca
 	}, nil
 }
 
-func (c *GoGitChat) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
+func (c *GoGitEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
 	repository, err := git.PlainOpen(c.workspaceRoot)
 	if err != nil {
 		return fmt.Errorf("opening repository: %w", err)
@@ -226,7 +225,6 @@ func (c *GoGitChat) PreviewCandidate(ctx context.Context, chatID string, candida
 
 	candidateBranch := plumbing.NewBranchReferenceName(fmt.Sprintf("candidate/%s", candidateID))
 
-	// Safely float the ledger in memory and explicitly force the worktree to match the candidate
 	return c.withFloatingLedger(worktree, func() error {
 		return worktree.Checkout(&git.CheckoutOptions{
 			Branch: candidateBranch,
@@ -235,7 +233,7 @@ func (c *GoGitChat) PreviewCandidate(ctx context.Context, chatID string, candida
 	})
 }
 
-func (c *GoGitChat) ReadCandidateDiff(ctx context.Context, chatID string, candidateID string) (string, error) {
+func (c *GoGitEngine) ReadCandidateDiff(ctx context.Context, chatID string, candidateID string) (string, error) {
 	repository, err := git.PlainOpen(c.workspaceRoot)
 	if err != nil {
 		return "", fmt.Errorf("opening repository: %w", err)
@@ -282,7 +280,7 @@ func (c *GoGitChat) ReadCandidateDiff(ctx context.Context, chatID string, candid
 	return patch.String(), nil
 }
 
-func (c *GoGitChat) createAnnotatedTag(repository *git.Repository, targetHash plumbing.Hash, candidateID string, reason string) error {
+func (c *GoGitEngine) createAnnotatedTag(repository *git.Repository, targetHash plumbing.Hash, candidateID string, reason string) error {
 	tagName := fmt.Sprintf("proposal-%s", candidateID)
 
 	tagObj := &object.Tag{
@@ -313,7 +311,7 @@ func (c *GoGitChat) createAnnotatedTag(repository *git.Repository, targetHash pl
 	return repository.Storer.SetReference(reference)
 }
 
-func (c *GoGitChat) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
+func (c *GoGitEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	repository, err := git.PlainOpen(c.workspaceRoot)
 	if err != nil {
 		return fmt.Errorf("opening repository: %w", err)
@@ -331,24 +329,20 @@ func (c *GoGitChat) Accept(ctx context.Context, chatID string, candidateID strin
 		return fmt.Errorf("resolving candidate branch: %w", err)
 	}
 
-	// 1. Fast-forward the thread branch reference
 	fastForwardReference := plumbing.NewHashReference(threadBranch, candidateReference.Hash())
 	if err := repository.Storer.SetReference(fastForwardReference); err != nil {
 		return fmt.Errorf("fast-forwarding branch reference: %w", err)
 	}
 
-	// 2. Tag the acceptance permanently
 	if err := c.createAnnotatedTag(repository, candidateReference.Hash(), candidateID, fmt.Sprintf("ACCEPTED: %s", reason)); err != nil {
 		return fmt.Errorf("creating accepted tag: %w", err)
 	}
 
-	// 3. Update HEAD to symbolically point back to the thread branch
 	headReference := plumbing.NewSymbolicReference(plumbing.HEAD, threadBranch)
 	if err := repository.Storer.SetReference(headReference); err != nil {
 		return fmt.Errorf("updating HEAD reference: %w", err)
 	}
 
-	// 4. Force checkout the thread branch to guarantee file extraction, wrapping it to float the ledger
 	if err := c.withFloatingLedger(worktree, func() error {
 		return worktree.Checkout(&git.CheckoutOptions{
 			Branch: threadBranch,
@@ -362,7 +356,7 @@ func (c *GoGitChat) Accept(ctx context.Context, chatID string, candidateID strin
 	return nil
 }
 
-func (c *GoGitChat) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
+func (c *GoGitEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
 	repository, err := git.PlainOpen(c.workspaceRoot)
 	if err != nil {
 		return fmt.Errorf("opening repository: %w", err)
@@ -374,7 +368,6 @@ func (c *GoGitChat) Reject(ctx context.Context, chatID string, candidateID strin
 
 	threadBranch := plumbing.NewBranchReferenceName(fmt.Sprintf("chat/%s", chatID))
 
-	// Return to the thread branch safely
 	if err := c.withFloatingLedger(worktree, func() error {
 		return worktree.Checkout(&git.CheckoutOptions{
 			Branch: threadBranch,
@@ -398,9 +391,6 @@ func (c *GoGitChat) Reject(ctx context.Context, chatID string, candidateID strin
 	return nil
 }
 
-// --- Sandbox Virtual Environment ---
-
-// goGitSandbox implements the workspace.CandidateSandbox interface.
 type goGitSandbox struct {
 	workspaceRoot    string
 	sandboxDirectory string
@@ -409,8 +399,6 @@ type goGitSandbox struct {
 	sharedCodebase   bool
 }
 
-// normalizePath safely forces incoming paths into the configured execution root,
-// stripping out redundant prefixes if the test or prompt already supplied them.
 func (s *goGitSandbox) normalizePath(targetPath string) string {
 	slashPath := filepath.ToSlash(filepath.Clean(targetPath))
 	chatID := filepath.Base(s.chatDirectory)
@@ -468,7 +456,6 @@ func (s *goGitSandbox) ApplyDraft(ctx context.Context, message string) error {
 		return fmt.Errorf("getting sandbox worktree: %w", err)
 	}
 
-	// Force go-git to index newly created deeply nested directories
 	_, _ = worktree.Add(".")
 	if err := worktree.AddWithOptions(&git.AddOptions{All: true}); err != nil {
 		return fmt.Errorf("staging files in sandbox: %w", err)

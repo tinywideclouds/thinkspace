@@ -11,20 +11,26 @@ import (
 	"google.golang.org/genai"
 )
 
-// TraceEvent represents a line in the shadow ledger for the sub-agent.
 type TraceEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 	Prompt    string    `json:"prompt,omitempty"`
 	Generated string    `json:"generated,omitempty"`
 }
 
-// SubAgentFactory creates a SubAgentExecutor linked to a specific model.
-func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExecutor {
-	// The signature now strictly matches workspace.SubAgentExecutor using the virtual sandbox
+// NewSubAgentExecutor creates a SubAgentExecutor linked to a specific model and system instruction.
+func NewSubAgentExecutor(client ModelClient, modelName string, systemInstruction string) workspace.SubAgentExecutor {
 	return func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
 
+		var sysInstr *genai.Content
+		if systemInstruction != "" {
+			sysInstr = &genai.Content{
+				Parts: []*genai.Part{{Text: systemInstruction}},
+			}
+		}
+
 		config := &genai.GenerateContentConfig{
-			ResponseMIMEType: "application/json",
+			ResponseMIMEType:  "application/json",
+			SystemInstruction: sysInstr,
 		}
 
 		contents := []*genai.Content{{
@@ -66,7 +72,6 @@ func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExe
 			return fmt.Errorf("failed to parse sub-agent json: %w\nOutput was: %s", err, rawJSON)
 		}
 
-		// Write the generated files into the virtual sandbox environment
 		for relPath, content := range files {
 			cleanPath := filepath.Clean(relPath)
 			if err := sandbox.WriteFile(ctx, cleanPath, []byte(content)); err != nil {
@@ -74,7 +79,6 @@ func SubAgentFactory(client ModelClient, modelName string) workspace.SubAgentExe
 			}
 		}
 
-		// Read the existing trace ledger (if any) and append the new event
 		traceData, _ := sandbox.ReadFile(ctx, "trace.jsonl")
 
 		event := TraceEvent{

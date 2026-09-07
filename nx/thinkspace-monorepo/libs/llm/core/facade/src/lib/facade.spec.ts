@@ -7,18 +7,18 @@ import { DomainDelegationStrategy } from './domain-models';
 describe('LlmFacade', () => {
   describe('toDomain (Inbound)', () => {
     it('should map a chat stream event correctly', () => {
-      const proto = create(WSEventSchema, {
-  payload: {
-    case: 'chatStream',
-    value: { text: 'Hello from model' }
-  }
-});
-      const domain = LlmFacade.toDomain(proto);
-      expect(domain).toEqual({ type: 'chat_stream', text: 'Hello from model' });
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'chatStream',
+          value: { text: 'Hello from model' }
+        }
+      });
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({ type: 'chat_stream', text: 'Hello from model' });
     });
 
     it('should map an available spaces event correctly', () => {
-      const proto = create(WSEventSchema, {
+      const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'availableSpaces',
           value: {
@@ -30,8 +30,8 @@ describe('LlmFacade', () => {
         }
       });
 
-      const domain = LlmFacade.toDomain(proto);
-      expect(domain).toEqual({
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
         type: 'available_spaces',
         spaces: [
           { id: 'golang', name: 'Go Developer' },
@@ -40,40 +40,81 @@ describe('LlmFacade', () => {
       });
     });
 
+    it('should map a flow event correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'flowEvent',
+          value: {
+            flowId: 'flow-123',
+            type: 'flow_status',
+            timestamp: '2026-09-02T15:00:00Z',
+            taskId: 'task-1',
+            agentCount: 2,
+            agentId: 'agent-1',
+            agentIndex: 1,
+            instruction: 'Do work',
+            status: 'running_tests',
+            attempt: 2,
+            trace: 'compile error',
+            candidateId: 'cand-1',
+            passed: false
+          }
+        }
+      });
+
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'flow_event',
+        flowId: 'flow-123',
+        eventType: 'flow_status',
+        timestamp: '2026-09-02T15:00:00Z',
+        taskId: 'task-1',
+        agentCount: 2,
+        agentId: 'agent-1',
+        agentIndex: 1,
+        instruction: 'Do work',
+        status: 'running_tests',
+        attempt: 2,
+        trace: 'compile error',
+        candidateId: 'cand-1',
+        passed: false
+      });
+    });
+
     it('should return null for undefined payload or case', () => {
-      const emptyProto = create(WSEventSchema);
-      expect(LlmFacade.toDomain(emptyProto)).toBeNull();
+      const emptyProtocolBufferEvent = create(WSEventSchema);
+      expect(LlmFacade.toDomain(emptyProtocolBufferEvent)).toBeNull();
     });
   });
 
   describe('Outbound Builders', () => {
     it('should create a valid SubmitPrompt WSEvent', () => {
-      const proto = LlmFacade.createSubmitPrompt('Write a test', 'golang');
+      const protocolBufferEvent = LlmFacade.createSubmitPrompt('Write a test', 'golang', 'test-chat');
       
-      expect(proto.payload.case).toBe('submitPrompt');
-      if (proto.payload.case === 'submitPrompt') {
-        expect(proto.payload.value.text).toBe('Write a test');
-        expect(proto.payload.value.spaceId).toBe('golang');
+      expect(protocolBufferEvent.payload.case).toBe('submitPrompt');
+      if (protocolBufferEvent.payload.case === 'submitPrompt') {
+        expect(protocolBufferEvent.payload.value.text).toBe('Write a test');
+        expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
+        expect(protocolBufferEvent.payload.value.chatId).toBe('test-chat');
       }
     });
 
     it('should create a valid SelectStrategy WSEvent', () => {
-      const proto = LlmFacade.createSelectStrategy(DomainDelegationStrategy.REFINE);
+      const protocolBufferEvent = LlmFacade.createSelectStrategy(DomainDelegationStrategy.REFINE);
       
-      expect(proto.payload.case).toBe('selectStrategy');
-      if (proto.payload.case === 'selectStrategy') {
-        // Asserting it maps correctly to the underlying proto enum value (4)
-        expect(proto.payload.value.strategyId).toBe(DelegationStrategy.REFINE);
+      expect(protocolBufferEvent.payload.case).toBe('selectStrategy');
+      if (protocolBufferEvent.payload.case === 'selectStrategy') {
+        expect(protocolBufferEvent.payload.value.strategyId).toBe(DelegationStrategy.REFINE);
       }
     });
 
     it('should create a valid ReviewDecision WSEvent', () => {
-      const proto = LlmFacade.createReviewDecision('candidate/123', true);
+      const protocolBufferEvent = LlmFacade.createReviewDecision('candidate/123', true);
       
-      expect(proto.payload.case).toBe('reviewDecision');
-      if (proto.payload.case === 'reviewDecision') {
-        expect(proto.payload.value.branch).toBe('candidate/123');
-        expect(proto.payload.value.accepted).toBe(true);
+      expect(protocolBufferEvent.payload.case).toBe('reviewDecision');
+      if (protocolBufferEvent.payload.case === 'reviewDecision') {
+        expect(protocolBufferEvent.payload.value.branch).toBe('candidate/123');
+        expect(protocolBufferEvent.payload.value.accepted).toBe(true);
       }
     });
   });

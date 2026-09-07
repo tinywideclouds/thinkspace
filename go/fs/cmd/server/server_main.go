@@ -23,13 +23,12 @@ import (
 func main() {
 	port := flag.Int("port", 8080, "Port for the ThinkSpace WebServer")
 	rootName := flag.String("root", "thinkspace-root", "Root directory for the ThinkSpace repositories")
-	spaceName := flag.String("space", "sandbox", "The think space to use")
-	chatName := flag.String("chat", "default-chat", "Initial chat thread to use")
 	engineType := flag.String("engine", "gogit", "State engine backend ('gogit' or 'exec')")
+
+	useSkeleton := flag.Bool("use-skeleton", false, "DEV SHORTCUT: Seed local directories using the internal skeleton configuration")
 	flag.Parse()
 
 	rootMode := true
-
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
@@ -42,39 +41,61 @@ func main() {
 	}
 	modelClient := llm.NewGenAIClient(client)
 
-	homeDir, err := os.UserHomeDir()
+	homeDirectory, err := os.UserHomeDir()
 	if err != nil {
 		logger.Error("Failed to get home directory", "error", err)
 		os.Exit(1)
 	}
 
-	repoRoot := filepath.Join(homeDir, "Documents", *rootName, *spaceName)
-	configsDir := filepath.Join(homeDir, "Documents", "thinkspace", "configs")
-	_ = os.MkdirAll(repoRoot, 0755)
+	baseRoot := filepath.Join(homeDirectory, "Documents", *rootName)
+	configurationsDirectory := filepath.Join(baseRoot, "configs")
 
-	var stateEngine workspace.ChatEngine
-	switch *engineType {
-	case "exec":
-		stateEngine = gitfs.NewGoExecChat(repoRoot, rootMode)
-	default:
-		stateEngine = gitfs.NewGoGitChat(repoRoot, rootMode)
+	// Ensure base directories exist physically
+	_ = os.MkdirAll(configurationsDirectory, 0755)
+
+	config.ScaffoldDefaults(logger, configurationsDirectory)
+
+	factory := func(repoRoot string) workspace.ChatEngine {
+		if *engineType == "exec" {
+			return gitfs.NewGoExecEngine(repoRoot, rootMode)
+		}
+		return gitfs.NewGoGitEngine(repoRoot, rootMode)
 	}
+
+	serviceManager := workspace.NewServiceManager(logger, baseRoot, factory)
 
 	registry := config.NewRegistry()
-	if err := registry.LoadDirectory(configsDir); err != nil {
-		logger.Error("Failed to load configs", "error", err)
+	if err := registry.LoadDirectory(configurationsDirectory); err != nil {
+		logger.Error("Failed to load configurations", "error", err)
 	}
 
-	llmMgr := llm.NewManager(modelClient)
+	if *useSkeleton {
+		config.ApplyDevSkeleton(logger, serviceManager)
+	}
+
+	var supportedDomains []string
+	for domain := range registry.GetAllConfigs() {
+		supportedDomains = append(supportedDomains, domain)
+	}
+	appConfig := workspace.AppConfig{
+		SupportedDomains: supportedDomains,
+	}
+
+	llmAdapter := llm.NewAdapter(modelClient)
 	fanOutFlow := flows.NewFanOutFlow(logger)
-	workspaceService := workspace.NewService(logger, stateEngine, repoRoot)
 
-	srv := api.NewServer(logger, registry, workspaceService, llmMgr, fanOutFlow, modelClient, *chatName)
+	mux := http.NewServeMux()
 
-	serverAddr := fmt.Sprintf(":%d", *port)
-	logger.Info("🚀 ThinkSpace Server listening", "addr", serverAddr)
+	managementAPI := api.NewManagementAPI(registry, serviceManager, appConfig)
+	managementAPI.RegisterHandlers(mux)
 
-	if err := http.ListenAndServe(serverAddr, srv.Handler()); err != nil {
+	webSocketServer := api.NewServer(logger, registry, serviceManager, llmAdapter, fanOutFlow, modelClient)
+	webSocketServer.RegisterHandlers(mux)
+
+	serverAddress := fmt.Sprintf(":%d", *port)
+	logger.Info("🚀 ThinkSpace Server listening", "addr", serverAddress)
+
+	if err := http.ListenAndServe(serverAddress, mux); err != nil {
 		logger.Error("Server stopped", "error", err)
 	}
 }

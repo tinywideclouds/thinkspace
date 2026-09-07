@@ -85,6 +85,7 @@ func (f *FanOutFlow) Execute(
 	type result struct {
 		candidateID string
 		err         error
+		record      workspace.AgentRecord
 	}
 	results := make(chan result, len(tasks))
 
@@ -186,6 +187,19 @@ func (f *FanOutFlow) Execute(
 				return
 			}
 
+			// Capture data for the Flow Receipt
+			diff, _ := service.ReadCandidate(ctx, thread, candidateID)
+			traceBytes, _ := sandbox.ReadFile(ctx, "trace.jsonl") // Contains raw payload prompts & outputs
+
+			record := workspace.AgentRecord{
+				AgentID:           task.AgentID,
+				Passed:            passed,
+				Instruction:       task.Instruction,
+				RawPayload:        string(traceBytes),
+				VerificationTrace: finalTrace,
+				StateDelta:        diff,
+			}
+
 			emitter.Emit(FlowEvent{
 				FlowID:      flowCtx.FlowID,
 				Type:        FlowComplete,
@@ -197,19 +211,22 @@ func (f *FanOutFlow) Execute(
 				Trace:       finalTrace,
 			})
 
-			results <- result{candidateID: fmt.Sprintf("candidate/%s", candidateID), err: nil}
+			results <- result{candidateID: fmt.Sprintf("candidate/%s", candidateID), err: nil, record: record}
 		}(i+1, task)
 	}
 
 	// 6. Aggregate Results
 	var branches []string
 	var errs []error
+	var records []workspace.AgentRecord
+
 	for i := 0; i < len(tasks); i++ {
 		res := <-results
 		if res.err != nil {
 			errs = append(errs, res.err)
 		} else {
 			branches = append(branches, res.candidateID)
+			records = append(records, res.record)
 		}
 	}
 
@@ -217,8 +234,26 @@ func (f *FanOutFlow) Execute(
 		return nil, fmt.Errorf("fanout completed with %d fatal system errors", len(errs))
 	}
 
+	summary := fmt.Sprintf("Successfully generated %d candidate branches.", len(branches))
+
+	// 7. Save Flow Receipt
+	taskDescription := "FanOut Execution"
+	if insts, ok := args["agent_instructions"]; ok {
+		taskDescription = fmt.Sprintf("%v", insts)
+	}
+
+	receipt := workspace.FlowReceipt{
+		FlowID:    flowCtx.FlowID,
+		TaskID:    thread.ID,
+		Timestamp: time.Now().UTC(),
+		Task:      taskDescription,
+		Agents:    records,
+		Summary:   summary,
+	}
+	_ = service.SaveReceipt(ctx, thread, receipt)
+
 	return &FlowResult{
 		Branches: branches,
-		Summary:  fmt.Sprintf("Successfully generated %d candidate branches.", len(branches)),
+		Summary:  summary,
 	}, nil
 }

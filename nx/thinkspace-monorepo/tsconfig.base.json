@@ -35,7 +35,8 @@
       "@org/contexter-data-access": [
         "./libs/contexter/data-access/src/index.ts"
       ],
-      "@org/contexter-feature": ["./libs/contexter/feature/src/index.ts"]
+      "@org/contexter-feature": ["./libs/contexter/feature/src/index.ts"],
+      "@org/llm-feature-chat": ["./libs/llm/feature/chat/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

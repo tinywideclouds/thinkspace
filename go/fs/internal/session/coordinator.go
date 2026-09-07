@@ -23,45 +23,43 @@ const (
 
 type UserInterface interface {
 	OnTextChunk(text string)
-	OnDelegationStart(agentCount int, instructions string)
-	OnDelegationComplete(summary string)
 	ChooseNextStep() DelegationStrategy
 	ReviewCandidate(branch string) (accepted bool)
 }
 
 type Coordinator struct {
-	logger         *slog.Logger
-	service        *workspace.Service
-	llmMgr         *llm.Manager
-	executor       workspace.SubAgentExecutor
-	fanOutFlow     flows.Flow
-	emitter        flows.FlowEmitter
-	spaceID        string
-	baseAgentRules string
-	flowCfg        flows.FlowConfig
+	logger            *slog.Logger
+	workspaceService  *workspace.Service
+	llmAdapter        *llm.Adapter
+	executor          workspace.SubAgentExecutor
+	fanOutFlow        flows.Flow
+	emitter           flows.FlowEmitter
+	spaceID           string
+	baseAgentRules    string
+	flowConfiguration flows.FlowConfig
 }
 
 func NewCoordinator(
 	logger *slog.Logger,
-	service *workspace.Service,
-	llmMgr *llm.Manager,
+	workspaceService *workspace.Service,
+	llmAdapter *llm.Adapter,
 	executor workspace.SubAgentExecutor,
 	fanOutFlow flows.Flow,
 	emitter flows.FlowEmitter,
 	spaceID string,
 	baseAgentRules string,
-	flowCfg flows.FlowConfig,
+	flowConfiguration flows.FlowConfig,
 ) *Coordinator {
 	return &Coordinator{
-		logger:         logger,
-		service:        service,
-		llmMgr:         llmMgr,
-		executor:       executor,
-		fanOutFlow:     fanOutFlow,
-		emitter:        emitter,
-		spaceID:        spaceID,
-		baseAgentRules: baseAgentRules,
-		flowCfg:        flowCfg,
+		logger:            logger,
+		workspaceService:  workspaceService,
+		llmAdapter:        llmAdapter,
+		executor:          executor,
+		fanOutFlow:        fanOutFlow,
+		emitter:           emitter,
+		spaceID:           spaceID,
+		baseAgentRules:    baseAgentRules,
+		flowConfiguration: flowConfiguration,
 	}
 }
 
@@ -70,15 +68,15 @@ func (c *Coordinator) ExecuteTurn(
 	thread *workspace.Thread,
 	thinkSpace workspace.ThinkSpace,
 	history []*genai.Content,
-	ui UserInterface,
+	userInterface UserInterface,
 ) error {
-	turnCtx, cancel := context.WithTimeout(ctx, thinkSpace.TurnTimeout())
+	turnContext, cancel := context.WithTimeout(ctx, thinkSpace.TurnTimeout())
 	defer cancel()
 
 	managerModel := thinkSpace.Model(workspace.ModelCategoryManager)
 
-	stream := c.llmMgr.GenerateStream(
-		turnCtx,
+	stream := c.llmAdapter.GenerateStream(
+		turnContext,
 		managerModel,
 		thinkSpace.SystemPrompt(),
 		thinkSpace.Tools(),
@@ -96,19 +94,19 @@ func (c *Coordinator) ExecuteTurn(
 		if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
 			for _, part := range chunk.Candidates[0].Content.Parts {
 				if part.Text != "" {
-					ui.OnTextChunk(part.Text)
+					userInterface.OnTextChunk(part.Text)
 					fullModelResponse.WriteString(part.Text)
 				}
 			}
 		}
 
-		calls := c.llmMgr.InterceptToolCalls(chunk)
+		calls := c.llmAdapter.InterceptToolCalls(chunk)
 		interceptedTools = append(interceptedTools, calls...)
 	}
 
 	if fullModelResponse.Len() > 0 {
-		if err := c.service.LogModelResponse(turnCtx, thread, fullModelResponse.String()); err != nil {
-			c.logger.ErrorContext(turnCtx, "failed to log response", "error", err)
+		if err := c.workspaceService.LogModelResponse(turnContext, thread, fullModelResponse.String()); err != nil {
+			c.logger.ErrorContext(turnContext, "failed to log response", "error", err)
 		}
 		history = append(history, &genai.Content{
 			Role:  "model",
@@ -118,55 +116,48 @@ func (c *Coordinator) ExecuteTurn(
 
 	for _, call := range interceptedTools {
 		if call.Name == "propose_change" {
-			countFloat, _ := call.Args["agent_count"].(float64)
-			agentCount := int(countFloat)
-
-			instructionStr := fmt.Sprintf("Spawning %d agents to propose implementations.", agentCount)
-			ui.OnDelegationStart(agentCount, instructionStr)
-
-			flowCtx := flows.FlowContext{
+			flowContext := flows.FlowContext{
 				FlowID:         fmt.Sprintf("fanout-%s", thread.ID),
 				SpaceID:        c.spaceID,
 				BaseAgentRules: c.baseAgentRules,
 			}
 
 			result, err := c.fanOutFlow.Execute(
-				turnCtx,
-				c.service,
+				turnContext,
+				c.workspaceService,
 				thread,
 				thinkSpace,
 				call.Args,
-				c.flowCfg,
-				flowCtx,
+				c.flowConfiguration,
+				flowContext,
 				c.emitter,
 				c.executor,
 				thinkSpace.Verifier(),
 			)
 
 			if err != nil {
-				c.logger.ErrorContext(turnCtx, "delegation flow failed", "error", err)
+				c.logger.ErrorContext(turnContext, "delegation flow failed", "error", err)
 				continue
 			}
 
-			ui.OnDelegationComplete(result.Summary)
 			if len(result.Branches) == 0 {
 				continue
 			}
 
 			branchesToReview := result.Branches
 
-			strategy := ui.ChooseNextStep()
+			strategy := userInterface.ChooseNextStep()
 
 			if strategy == StrategySkip {
 				for _, branch := range branchesToReview {
 					candidateID := strings.TrimPrefix(branch, "candidate/")
-					_ = c.service.ResolveCandidate(turnCtx, thread, candidateID, false, "Auto-rejected (Review Skipped)")
+					_ = c.workspaceService.ResolveCandidate(turnContext, thread, candidateID, false, "Auto-rejected (Review Skipped)")
 				}
 				continue
 			}
 
 			if strategy == StrategyReview || strategy == StrategyRefine {
-				branchesToReview = c.executeLLMReviewPhase(turnCtx, thread, thinkSpace, history, ui, strategy, result.Branches)
+				branchesToReview = c.executeLLMReviewPhase(turnContext, thread, thinkSpace, history, userInterface, strategy, result.Branches)
 			}
 
 			hasAcceptedAny := false
@@ -174,17 +165,17 @@ func (c *Coordinator) ExecuteTurn(
 				candidateID := strings.TrimPrefix(branch, "candidate/")
 
 				if hasAcceptedAny {
-					_ = c.service.ResolveCandidate(turnCtx, thread, candidateID, false, "Auto-rejected (Another candidate was accepted)")
+					_ = c.workspaceService.ResolveCandidate(turnContext, thread, candidateID, false, "Auto-rejected (Another candidate was accepted)")
 					continue
 				}
 
-				if err := c.service.PreviewCandidate(turnCtx, thread, candidateID); err != nil {
-					c.logger.ErrorContext(turnCtx, "preview checkout failed", "error", err)
-					_ = c.service.ResolveCandidate(turnCtx, thread, candidateID, false, "Auto-rejected (Preview checkout failed)")
+				if err := c.workspaceService.PreviewCandidate(turnContext, thread, candidateID); err != nil {
+					c.logger.ErrorContext(turnContext, "preview checkout failed", "error", err)
+					_ = c.workspaceService.ResolveCandidate(turnContext, thread, candidateID, false, "Auto-rejected (Preview checkout failed)")
 					continue
 				}
 
-				accept := ui.ReviewCandidate(branch)
+				accept := userInterface.ReviewCandidate(branch)
 
 				reason := "Rejected via triage"
 				if accept {
@@ -192,14 +183,14 @@ func (c *Coordinator) ExecuteTurn(
 					hasAcceptedAny = true
 				}
 
-				if err := c.service.ResolveCandidate(turnCtx, thread, candidateID, accept, reason); err != nil {
-					c.logger.ErrorContext(turnCtx, "failed to resolve candidate", "error", err)
+				if err := c.workspaceService.ResolveCandidate(turnContext, thread, candidateID, accept, reason); err != nil {
+					c.logger.ErrorContext(turnContext, "failed to resolve candidate", "error", err)
 				}
 			}
 		}
 	}
 
-	_, err := c.service.Checkpoint(turnCtx, thread, "End of session turn")
+	_, err := c.workspaceService.Checkpoint(turnContext, thread, "End of session turn")
 	return err
 }
 
@@ -208,7 +199,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 	thread *workspace.Thread,
 	thinkSpace workspace.ThinkSpace,
 	history []*genai.Content,
-	ui UserInterface,
+	userInterface UserInterface,
 	strategy DelegationStrategy,
 	candidateBranches []string,
 ) []string {
@@ -229,7 +220,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 
 		ledgerPromptBuilder.WriteString(fmt.Sprintf("* [`%s`](#branch:%s)\n", branch, branch))
 
-		diff, err := c.service.ReadCandidate(ctx, thread, candidateID)
+		diff, err := c.workspaceService.ReadCandidate(ctx, thread, candidateID)
 		if err != nil || diff == "" {
 			diff = "// No readable diff generated or error fetching diff."
 		}
@@ -240,24 +231,24 @@ func (c *Coordinator) executeLLMReviewPhase(
 	ledgerPrompt := ledgerPromptBuilder.String()
 	llmPrompt := ledgerPrompt + "\n\n### Code Diffs\n\n" + diffsBuilder.String()
 
-	if err := c.service.LogUserMessage(ctx, thread, ledgerPrompt); err != nil {
+	if err := c.workspaceService.LogUserMessage(ctx, thread, ledgerPrompt); err != nil {
 		c.logger.ErrorContext(ctx, "failed to log evaluation prompt to ledger", "error", err)
 	}
 
-	evalHistory := make([]*genai.Content, len(history))
-	copy(evalHistory, history)
-	evalHistory = append(evalHistory, &genai.Content{
+	evaluationHistory := make([]*genai.Content, len(history))
+	copy(evaluationHistory, history)
+	evaluationHistory = append(evaluationHistory, &genai.Content{
 		Role:  "user",
 		Parts: []*genai.Part{{Text: llmPrompt}},
 	})
 
-	ui.OnTextChunk("\n\n🤖 Manager evaluating candidates...\n")
+	userInterface.OnTextChunk("\n\n🤖 Manager evaluating candidates...\n")
 
 	managerModel := thinkSpace.Model(workspace.ModelCategoryManager)
-	evalStream := c.llmMgr.GenerateStream(ctx, managerModel, thinkSpace.SystemPrompt(), nil, evalHistory)
+	evaluationStream := c.llmAdapter.GenerateStream(ctx, managerModel, thinkSpace.SystemPrompt(), nil, evaluationHistory)
 
 	var evaluationResponse strings.Builder
-	for chunk, err := range evalStream {
+	for chunk, err := range evaluationStream {
 		if err != nil {
 			c.logger.ErrorContext(ctx, "evaluation stream failed", "error", err)
 			return candidateBranches
@@ -265,7 +256,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 		if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
 			for _, part := range chunk.Candidates[0].Content.Parts {
 				if part.Text != "" {
-					ui.OnTextChunk(part.Text)
+					userInterface.OnTextChunk(part.Text)
 					evaluationResponse.WriteString(part.Text)
 				}
 			}
@@ -273,36 +264,36 @@ func (c *Coordinator) executeLLMReviewPhase(
 	}
 
 	if evaluationResponse.Len() > 0 {
-		_ = c.service.LogModelResponse(ctx, thread, evaluationResponse.String())
+		_ = c.workspaceService.LogModelResponse(ctx, thread, evaluationResponse.String())
 	}
 
 	if strategy == StrategyReview {
 		return candidateBranches
 	}
 
-	ui.OnTextChunk("\n\n🚀 Synthesizing final candidate based on evaluation...\n")
+	userInterface.OnTextChunk("\n\n🚀 Synthesizing final candidate based on evaluation...\n")
 
-	refineArgs := map[string]any{
+	refinementArguments := map[string]any{
 		"agent_count": float64(1),
 		"agent_instructions": []any{
 			fmt.Sprintf("Synthesize a final implementation based on this architectural evaluation:\n\n%s", evaluationResponse.String()),
 		},
 	}
 
-	flowCtx := flows.FlowContext{
+	flowContext := flows.FlowContext{
 		FlowID:         fmt.Sprintf("refine-%s", thread.ID),
 		SpaceID:        c.spaceID,
 		BaseAgentRules: c.baseAgentRules,
 	}
 
-	refineResult, err := c.fanOutFlow.Execute(
+	refinementResult, err := c.fanOutFlow.Execute(
 		ctx,
-		c.service,
+		c.workspaceService,
 		thread,
 		thinkSpace,
-		refineArgs,
-		c.flowCfg,
-		flowCtx,
+		refinementArguments,
+		c.flowConfiguration,
+		flowContext,
 		c.emitter,
 		c.executor,
 		thinkSpace.Verifier(),
@@ -310,12 +301,10 @@ func (c *Coordinator) executeLLMReviewPhase(
 
 	if err != nil {
 		c.logger.ErrorContext(ctx, "refinement flow failed", "error", err)
-		ui.OnTextChunk("\n\n⚠️ Refinement orchestration failed. Falling back to original candidates.\n")
+		userInterface.OnTextChunk("\n\n⚠️ Refinement orchestration failed. Falling back to original candidates.\n")
 		return candidateBranches
 	}
 
-	ui.OnDelegationComplete(refineResult.Summary)
-
-	finalBranches := append(refineResult.Branches, candidateBranches...)
+	finalBranches := append(refinementResult.Branches, candidateBranches...)
 	return finalBranches
 }

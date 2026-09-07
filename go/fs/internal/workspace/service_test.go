@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -172,5 +174,49 @@ func TestService_ProposeAndResolveCandidate(t *testing.T) {
 
 	if !mockEngine.rejectCalled {
 		t.Errorf("Expected ChatEngine.Reject to be called")
+	}
+}
+
+func TestService_Receipts(t *testing.T) {
+	svc, _, _ := setupServiceTest(t)
+	ctx := context.Background()
+
+	thread, _ := svc.StartThread(ctx, "receipt-thread")
+
+	receipt := workspace.FlowReceipt{
+		FlowID:    "flow-999",
+		TaskID:    thread.ID,
+		Timestamp: time.Now().UTC(),
+		Task:      "Test Serialization",
+		Summary:   "Saved successfully",
+		Agents: []workspace.AgentRecord{
+			{
+				AgentID:     "agent-1",
+				Passed:      true,
+				Instruction: "Do work",
+			},
+		},
+	}
+
+	// Test Saving
+	if err := svc.SaveReceipt(ctx, thread, receipt); err != nil {
+		t.Fatalf("SaveReceipt failed: %v", err)
+	}
+
+	// Test Retrieving
+	data, err := svc.GetReceipt(ctx, thread, "flow-999")
+	if err != nil {
+		t.Fatalf("GetReceipt failed: %v", err)
+	}
+
+	xmlStr := string(data)
+	if !strings.Contains(xmlStr, `FlowID="flow-999"`) {
+		t.Errorf("Expected FlowID in XML, got: %s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, `<Task>Test Serialization</Task>`) {
+		t.Errorf("Expected Task description in XML, got: %s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, `AgentID="agent-1"`) {
+		t.Errorf("Expected AgentRecord in XML, got: %s", xmlStr)
 	}
 }

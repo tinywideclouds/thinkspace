@@ -2,6 +2,7 @@ package llm_test
 
 import (
 	"context"
+	"iter"
 	"strings"
 	"testing"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
+
+// --- Mocks ---
 
 type mockSandbox struct {
 	files map[string][]byte
@@ -38,14 +41,45 @@ func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error { re
 func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { return nil }
 func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
 
+// spyModelClient implements ModelClient and captures the arguments passed to GenerateContentStream.
+type spyModelClient struct {
+	responses       []*genai.GenerateContentResponse
+	err             error
+	capturedModel   string
+	capturedHistory []*genai.Content
+	capturedConfig  *genai.GenerateContentConfig
+}
+
+func (m *spyModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
+	m.capturedModel = model
+	m.capturedHistory = history
+	m.capturedConfig = config
+
+	return func(yield func(*genai.GenerateContentResponse, error) bool) {
+		if m.err != nil {
+			yield(nil, m.err)
+			return
+		}
+		for _, resp := range m.responses {
+			if !yield(resp, nil) {
+				return
+			}
+		}
+	}
+}
+
+// --- Tests ---
+
 func TestSubAgentFactory_Execution(t *testing.T) {
 	ctx := context.Background()
 	sandbox := newMockSandbox()
 
-	jsonPayload := `{"main.go": "package main\n"}`
+	domainSystemPrompt := "You must place all Go files in the src/ directory."
+	taskInstruction := "write a main file"
+	jsonPayload := `{"src/main.go": "package main\n"}`
 
-	mockClient := &MockModelClient{
-		Responses: []*genai.GenerateContentResponse{
+	spyClient := &spyModelClient{
+		responses: []*genai.GenerateContentResponse{
 			{
 				Candidates: []*genai.Candidate{
 					{
@@ -60,15 +94,34 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 		},
 	}
 
-	executor := llm.SubAgentFactory(mockClient, "test-worker")
+	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", domainSystemPrompt)
 	tokenChan := make(chan workspace.AgentToken, 10)
 
-	err := executor(ctx, "write a main file", sandbox, 1, tokenChan)
+	err := executor(ctx, taskInstruction, sandbox, 1, tokenChan)
 	if err != nil {
 		t.Fatalf("executor failed: %v", err)
 	}
 	close(tokenChan)
 
+	// 1. Assert the AI was configured with the domain's System Prompt
+	if spyClient.capturedConfig == nil || spyClient.capturedConfig.SystemInstruction == nil {
+		t.Fatalf("expected SystemInstruction to be populated in the SDK config")
+	}
+	actualSysPrompt := spyClient.capturedConfig.SystemInstruction.Parts[0].Text
+	if actualSysPrompt != domainSystemPrompt {
+		t.Errorf("expected system prompt %q, got %q", domainSystemPrompt, actualSysPrompt)
+	}
+
+	// 2. Assert the AI was passed the specific agent instructions
+	if len(spyClient.capturedHistory) == 0 {
+		t.Fatalf("expected history to contain the task instructions")
+	}
+	actualInstruction := spyClient.capturedHistory[0].Parts[0].Text
+	if actualInstruction != taskInstruction {
+		t.Errorf("expected task instruction %q, got %q", taskInstruction, actualInstruction)
+	}
+
+	// 3. Assert the token stream multiplexing works
 	var streamedText strings.Builder
 	for token := range tokenChan {
 		if token.AgentID != 1 {
@@ -81,22 +134,24 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 		t.Errorf("expected streamed text to be '%s', got '%s'", jsonPayload, streamedText.String())
 	}
 
-	content, exists := sandbox.files["main.go"]
+	// 4. Assert the physical sandbox correctly interpreted the JSON payload
+	content, exists := sandbox.files["src/main.go"]
 	if !exists {
-		t.Fatalf("expected main.go to be generated in sandbox")
+		t.Fatalf("expected src/main.go to be generated in sandbox")
 	}
 	if string(content) != "package main\n" {
 		t.Errorf("unexpected file content: %s", string(content))
 	}
 
+	// 5. Assert the trace ledger logged the execution accurately
 	traceContent, exists := sandbox.files["trace.jsonl"]
 	if !exists {
 		t.Fatalf("expected trace.jsonl to be generated in sandbox")
 	}
-	if !strings.Contains(string(traceContent), "write a main file") {
+	if !strings.Contains(string(traceContent), taskInstruction) {
 		t.Errorf("trace.jsonl missing prompt: %s", string(traceContent))
 	}
-	if !strings.Contains(string(traceContent), "main.go") {
+	if !strings.Contains(string(traceContent), "src/main.go") {
 		t.Errorf("trace.jsonl missing generated JSON: %s", string(traceContent))
 	}
 }
@@ -107,8 +162,8 @@ func TestSubAgentFactory_InvalidJSON(t *testing.T) {
 
 	invalidPayload := `{"main.go": ` // missing closing brackets/quotes
 
-	mockClient := &MockModelClient{
-		Responses: []*genai.GenerateContentResponse{
+	spyClient := &spyModelClient{
+		responses: []*genai.GenerateContentResponse{
 			{
 				Candidates: []*genai.Candidate{
 					{
@@ -123,7 +178,7 @@ func TestSubAgentFactory_InvalidJSON(t *testing.T) {
 		},
 	}
 
-	executor := llm.SubAgentFactory(mockClient, "test-worker")
+	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", "Mock system instructions")
 	tokenChan := make(chan workspace.AgentToken, 10)
 
 	err := executor(ctx, "write bad json", sandbox, 1, tokenChan)

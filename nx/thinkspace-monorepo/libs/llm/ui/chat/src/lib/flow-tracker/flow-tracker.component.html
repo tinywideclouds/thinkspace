@@ -1,0 +1,45 @@
+<div style="display: flex; flex-direction: column; gap: 12px; padding: 12px; background: #f8f9fa; border-top: 1px solid #dee2e6; height: 100%; overflow-y: auto;">
+  <h3 style="margin: 0; font-size: 14px; color: #495057; text-transform: uppercase; letter-spacing: 0.5px;">
+    🏭 Factory Floor
+  </h3>
+  
+  @if (flowsArray().length === 0) {
+    <div style="color: #adb5bd; font-size: 13px; font-style: italic;">No active flows.</div>
+  }
+
+  @for (flow of flowsArray(); track flow.flowId) {
+    <div style="border: 1px solid #ced4da; border-radius: 6px; background: #ffffff; padding: 12px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #f1f3f5; padding-bottom: 8px;">
+        <strong style="font-size: 13px; color: #343a40;">
+          Flow: {{ flow.flowId.split('-').pop() }} 
+          <span style="font-weight: normal; color: #868e96;">({{ flow.agentCount }} agents)</span>
+        </strong>
+        <span [style.color]="flow.status === 'running' ? '#f59f00' : '#2b8a3e'" style="font-size: 12px; font-weight: bold; text-transform: uppercase;">
+          {{ flow.status === 'running' ? '⏳ Running' : '✅ Completed' }}
+        </span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+        @for (agent of flow.agentsArray; track agent.agentId) {
+          <div style="padding: 10px; border-radius: 4px; background: #f1f3f5; border-left: 3px solid"
+               [style.border-left-color]="getAgentColor(agent)">
+            
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+              <strong style="font-size: 12px; color: #495057;">Agent {{ agent.agentIndex }}</strong>
+              <span style="font-size: 11px; color: #868e96;">Attempt {{ agent.attempt }}</span>
+            </div>
+            
+            <div style="font-size: 11px; color: #495057; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" [title]="agent.instruction">
+              {{ agent.instruction }}
+            </div>
+            
+            <div style="font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px;"
+                 [style.color]="getAgentColor(agent)">
+              {{ getAgentIcon(agent) }} {{ formatStatus(agent.status) }}
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+  }
+</div>

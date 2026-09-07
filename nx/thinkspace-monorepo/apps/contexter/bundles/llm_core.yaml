@@ -34,3 +34,4 @@ files:
   - libs\llm\core\transport\src\test-setup.ts
   - libs\llm\core\transport\src\lib\transport.service.spec.ts
   - libs\llm\core\transport\src\lib\transport.service.ts
+last_context: llm_core_02.md
