@@ -90,7 +90,7 @@ describe('ChatStateService', () => {
     
     expect(mockTransportService.send).toHaveBeenCalled();
     const chatHistory = service.coreChat();
-    expect(chatHistory.length).toBe(2);
+    expect(chatHistory.length).toBe(1); // the llm system now gives back true state here instead of assuming 'manager is thinking'
     expect(chatHistory[0].source).toBe('user');
     expect(chatHistory[0].content).toBe('Refactor this app');
     
@@ -143,7 +143,6 @@ describe('ChatStateService', () => {
   it('should track agent stream by safely auto-initializing the activeAgents map', () => {
     service.connect('ws://test');
     
-    // We removed agentStart, so we test that agentStream handles missing agent records cleanly
     webSocketSubject.next(create(WSEventSchema, { 
       payload: { case: 'agentStream', value: { agentId: 1, text: 'func main() {}' } } 
     }));
@@ -151,5 +150,38 @@ describe('ChatStateService', () => {
     const finalAgent = service.activeAgents().get(1);
     expect(finalAgent?.stream).toBe('func main() {}');
     expect(finalAgent?.status).toBe('running');
+  });
+
+  it('should inject flow card immediately on flow_start and update it on flow_complete', () => {
+    service.connect('ws://test');
+    
+    const startEvent = create(WSEventSchema, { payload: { case: 'flowEvent', value: { type: 'flow_start', flowId: 'flow-123', taskId: 'test', agentCount: 1 } } });
+    webSocketSubject.next(startEvent);
+
+    expect(service.coreChat().length).toBe(1);
+    expect(service.coreChat()[0].source).toBe('flow_card');
+    expect(service.coreChat()[0].status).toBe('running');
+
+    const completeEvent = create(WSEventSchema, { payload: { case: 'flowEvent', value: { type: 'flow_complete', flowId: 'flow-123', agentCount: 1 } } });
+    webSocketSubject.next(completeEvent);
+
+    expect(service.coreChat().length).toBe(1);
+    expect(service.coreChat()[0].status).toBe('completed');
+  });
+
+  it('should maintain an append-only timeline for agents', () => {
+    service.connect('ws://test');
+    
+    webSocketSubject.next(create(WSEventSchema, { payload: { case: 'flowEvent', value: { type: 'flow_start', flowId: 'f1', taskId: 't1', agentCount: 1 } } }));
+    
+    webSocketSubject.next(create(WSEventSchema, { payload: { case: 'flowEvent', value: { flowId: 'f1', agentId: 'a1', status: 'executing' } } }));
+    webSocketSubject.next(create(WSEventSchema, { payload: { case: 'flowEvent', value: { flowId: 'f1', agentId: 'a1', status: 'running_tests' } } }));
+    webSocketSubject.next(create(WSEventSchema, { payload: { case: 'flowEvent', value: { flowId: 'f1', agentId: 'a1', trace: 'timeout error' } } }));
+
+    const agent = service.flowStates().get('f1')?.agents.get('a1');
+    expect(agent?.timeline.length).toBe(3);
+    expect(agent?.timeline[0].message).toContain('executing');
+    expect(agent?.timeline[2].isError).toBe(true);
+    expect(agent?.timeline[2].message).toContain('timeout error');
   });
 });

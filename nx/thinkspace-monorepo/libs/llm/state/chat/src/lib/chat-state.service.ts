@@ -9,7 +9,8 @@ export interface ChatItem {
   id: string;
   source: 'user' | 'model' | 'system' | 'flow_card';
   content: string;
-  flowId?: string; 
+  flowId?: string;
+  status?: 'running' | 'completed'; 
 }
 
 export interface LogItem {
@@ -28,6 +29,13 @@ export interface AgentState {
   verified?: boolean;
 }
 
+export interface TimelineEntry {
+  id: string;
+  timestamp: number;
+  message: string;
+  isError: boolean;
+}
+
 export interface FlowAgentState {
   agentId: string;
   agentIndex: number;
@@ -36,6 +44,7 @@ export interface FlowAgentState {
   attempt: number;
   trace: string;
   passed: boolean;
+  timeline: TimelineEntry[];
 }
 
 export interface FlowState {
@@ -108,8 +117,6 @@ export class ChatStateService {
     }
 
     this.appendCoreChat('user', text);
-    // the llm system now gives back true state here instead of assuming this.
-    // this.appendCoreChat('system', '🤖 Manager is thinking...');
     
     const protocolBufferEvent = LlmFacade.createSubmitPrompt(text, spaceId, chatId);
     this.transportService.send(protocolBufferEvent);
@@ -134,7 +141,6 @@ export class ChatStateService {
   private handleEvent(event: DomainEvent): void {
     switch (event.type) {
       case 'available_spaces':
-        // Legacy support: Handled by WorkspaceStateService
         break;
       case 'chat_stream':
         this.appendToLastModelMessage(event.text);
@@ -171,6 +177,7 @@ export class ChatStateService {
       const updatedMap = new Map(currentFlows);
       let flow = updatedMap.get(event.flowId);
 
+      // Inject the flow instantly on start so the inspector is accessible live
       if (event.eventType === 'flow_start') {
         flow = {
           flowId: event.flowId,
@@ -181,18 +188,25 @@ export class ChatStateService {
           agents: new Map()
         };
         updatedMap.set(event.flowId, flow);
+
+        this.coreChat.update(chatHistory => [...chatHistory, { 
+          id: crypto.randomUUID(), 
+          source: 'flow_card', 
+          content: 'Orchestrating Agents...', 
+          flowId: event.flowId,
+          status: 'running'
+        }]);
       }
 
       if (event.eventType === 'flow_complete' && flow) {
         flow.completedCount++;
         if (flow.completedCount === flow.agentCount && flow.status !== 'completed') {
           flow.status = 'completed';
-          this.coreChat.update(chatHistory => [...chatHistory, { 
-            id: crypto.randomUUID(), 
-            source: 'flow_card', 
-            content: 'Orchestration Flow Completed', 
-            flowId: event.flowId 
-          }]);
+          
+          // Update the live card to completed
+          this.coreChat.update(chatHistory => chatHistory.map(item => 
+            item.flowId === event.flowId ? { ...item, status: 'completed', content: 'Orchestration Flow Completed' } : item
+          ));
         }
       }
 
@@ -201,18 +215,31 @@ export class ChatStateService {
       if (event.agentId) {
         const agent = flow.agents.get(event.agentId) || {
           agentId: event.agentId,
-          agentIndex: event.agentIndex,
+          agentIndex: event.agentIndex || 0,
           instruction: '',
           status: 'starting',
           attempt: 1,
           trace: '',
-          passed: false
+          passed: false,
+          timeline: []
         };
 
+        const currentAttempt = event.attempt || agent.attempt;
         if (event.instruction) agent.instruction = event.instruction;
-        if (event.status) agent.status = event.status;
+
+        // Append-only state logging
+        if (event.status && event.status !== agent.status) {
+          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${currentAttempt}] Status: ${event.status}`, isError: false });
+          agent.status = event.status;
+        }
+        
+        // Append-only error logging
+        if (event.trace) {
+          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${currentAttempt}] Error: ${event.trace}`, isError: true });
+          agent.trace = event.trace;
+        }
+
         if (event.attempt) agent.attempt = event.attempt;
-        if (event.trace) agent.trace = event.trace;
         if (event.passed !== undefined) agent.passed = event.passed;
 
         flow.agents.set(event.agentId, agent);

@@ -68,4 +68,5 @@ files:
   - ..\..\go\fs\internal\config\scaffold.go
   - ..\..\go\fs\internal\llm\adapter_test.go
   - ..\..\go\fs\internal\llm\adapter.go
+  - ..\..\go\fs\internal\config\bootstrap.go
 last_context: llm_golang_02.md

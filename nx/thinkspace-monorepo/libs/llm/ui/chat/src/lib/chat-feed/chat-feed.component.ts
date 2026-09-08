@@ -13,6 +13,7 @@ import { ChatFlowCardComponent } from '../chat-flow-card/chat-flow-card.componen
         @if (item.source === 'flow_card' && item.flowId) {
           <llm-chat-flow-card 
             [flowId]="item.flowId" 
+            [status]="item.status || 'completed'"
             (inspect)="inspectFlow.emit($event)">
           </llm-chat-flow-card>
         } @else {

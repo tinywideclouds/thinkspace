@@ -6,7 +6,9 @@ import { Component, input, output } from '@angular/core';
   template: `
     <div style="background: #e9ecef; border: 1px solid #ced4da; border-radius: 8px; padding: 12px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center;">
       <div>
-        <strong style="color: #495057; display: block; font-size: 14px;">⚙️ Orchestration Flow</strong>
+        <strong style="color: #495057; display: block; font-size: 14px;">
+          {{ status() === 'running' ? '⏳' : '✅' }} Orchestration Flow
+        </strong>
         <span style="color: #868e96; font-size: 12px; font-family: monospace;">{{ flowId() }}</span>
       </div>
       <button 
@@ -21,5 +23,6 @@ import { Component, input, output } from '@angular/core';
 })
 export class ChatFlowCardComponent {
   flowId = input.required<string>();
+  status = input<'running' | 'completed'>('completed');
   inspect = output<string>();
 }

@@ -1,7 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FlowTrackerComponent, FlowView } from './flow-tracker.component';
+import { FlowTrackerComponent } from './flow-tracker.component';
 import { ComponentRef } from '@angular/core';
 import { describe, beforeEach, it, expect } from 'vitest';
+import { FlowState } from '@org/llm-state-chat';
 
 describe('FlowTrackerComponent', () => {
   let component: FlowTrackerComponent;
@@ -17,11 +18,12 @@ describe('FlowTrackerComponent', () => {
     component = fixture.componentInstance;
     componentRef = fixture.componentRef;
     
-    const mockMap = new Map<string, FlowView>();
+    const mockMap = new Map<string, FlowState>();
     mockMap.set('flow-1', {
       flowId: 'flow-1',
       taskId: 'task-1',
       agentCount: 1,
+      completedCount: 0,
       status: 'running',
       agents: new Map([
         ['agent-1', {
@@ -31,7 +33,10 @@ describe('FlowTrackerComponent', () => {
           status: 'running_tests',
           attempt: 1,
           trace: '',
-          passed: false
+          passed: false,
+          timeline: [
+            { id: '1', timestamp: Date.now(), message: '[Attempt 1] Status: running_tests', isError: false }
+          ]
         }]
       ])
     });
@@ -40,20 +45,19 @@ describe('FlowTrackerComponent', () => {
     fixture.detectChanges();
   });
 
-  it('should format status strings cleanly', () => {
-    expect(component.formatStatus('executing_instructions')).toBe('Executing Instructions');
+  it('should compute flowsArray sorted by running status', () => {
+    const flows = component.flowsArray();
+    expect(flows.length).toBe(1);
+    expect(flows[0].flowId).toBe('flow-1');
+    expect(flows[0].agentsArray.length).toBe(1);
+    expect(flows[0].agentsArray[0].agentId).toBe('agent-1');
   });
 
-  it('should render the active flows', () => {
+  it('should render the active flows as a terminal feed', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.textContent).toContain('Flow: 1');
     expect(compiled.textContent).toContain('Agent 1');
-    expect(compiled.textContent).toContain('Running Tests');
-  });
-
-  it('should return correct colors based on agent state', () => {
-    expect(component.getAgentColor({ passed: true } as any)).toBe('#2b8a3e');
-    expect(component.getAgentColor({ trace: 'error' } as any)).toBe('#e03131');
-    expect(component.getAgentColor({ status: 'running_tests' } as any)).toBe('#339af0');
+    expect(compiled.textContent).toContain('Write a loop');
+    expect(compiled.textContent).toContain('[Attempt 1] Status: running_tests');
   });
 });
