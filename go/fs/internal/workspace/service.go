@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 )
 
 // Service orchestrates the workspace lifecycle using the ChatEngine.
@@ -18,21 +20,23 @@ type Service struct {
 	logger        *slog.Logger
 	engine        ChatEngine
 	workspaceRoot string
+	bus           *chat.EventBus
 }
 
-func NewService(logger *slog.Logger, engine ChatEngine, workspaceRoot string) *Service {
+func NewService(logger *slog.Logger, engine ChatEngine, workspaceRoot string, bus *chat.EventBus) *Service {
 	return &Service{
 		logger:        logger,
 		engine:        engine,
 		workspaceRoot: workspaceRoot,
+		bus:           bus,
 	}
 }
 
-func (s *Service) PreviewCandidate(ctx context.Context, thread *Thread, candidateID string) error {
+func (s *Service) PreviewCandidate(ctx context.Context, thread *chat.Thread, candidateID string) error {
 	return s.engine.PreviewCandidate(ctx, thread.ID, candidateID)
 }
 
-func (s *Service) ResolveCandidate(ctx context.Context, thread *Thread, candidateID string, accept bool, reason string) error {
+func (s *Service) ResolveCandidate(ctx context.Context, thread *chat.Thread, candidateID string, accept bool, reason string) error {
 	if accept {
 		if err := s.engine.Accept(ctx, thread.ID, candidateID, reason); err != nil {
 			return fmt.Errorf("accepting candidate: %w", err)
@@ -50,7 +54,7 @@ func (s *Service) ResolveCandidate(ctx context.Context, thread *Thread, candidat
 	return nil
 }
 
-func (s *Service) StartThread(ctx context.Context, id string) (*Thread, error) {
+func (s *Service) StartThread(ctx context.Context, id string) (*chat.Thread, error) {
 	threadDir := filepath.Join(s.workspaceRoot, "chats", id)
 	ledgerPath := filepath.Join(threadDir, "conversation.jsonl")
 
@@ -69,15 +73,16 @@ func (s *Service) StartThread(ctx context.Context, id string) (*Thread, error) {
 		f.Close()
 	}
 
-	return &Thread{
+	return &chat.Thread{
 		ID:         id,
+		SpaceID:    filepath.Base(s.workspaceRoot),
 		Branch:     "chat/" + id,
 		LedgerPath: ledgerPath,
 		Dir:        threadDir,
 	}, nil
 }
 
-func (s *Service) ProposeCandidate(ctx context.Context, thread *Thread, toolName string, files map[string][]byte) (*Candidate, error) {
+func (s *Service) ProposeCandidate(ctx context.Context, thread *chat.Thread, toolName string, files map[string][]byte) (*Candidate, error) {
 	now := time.Now().UTC()
 	candidateID := fmt.Sprintf("%s-%d", toolName, now.Unix())
 
@@ -125,26 +130,7 @@ func (s *Service) ProposeCandidate(ctx context.Context, thread *Thread, toolName
 	}, nil
 }
 
-func (s *Service) AppendEvent(ctx context.Context, thread *Thread, ev Event) error {
-	b, err := json.Marshal(ev)
-	if err != nil {
-		return fmt.Errorf("marshaling event: %w", err)
-	}
-
-	f, err := os.OpenFile(thread.LedgerPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("opening ledger: %w", err)
-	}
-	defer f.Close()
-
-	if _, err := f.Write(append(b, '\n')); err != nil {
-		return fmt.Errorf("writing event: %w", err)
-	}
-
-	return nil
-}
-
-func (s *Service) Checkpoint(ctx context.Context, thread *Thread, reason string) (string, error) {
+func (s *Service) Checkpoint(ctx context.Context, thread *chat.Thread, reason string) (string, error) {
 	s.logger.DebugContext(ctx, "checkpointing thread state", slog.String("thread_id", thread.ID))
 
 	msg := fmt.Sprintf("chore(ledger): %s", reason)
@@ -156,8 +142,8 @@ func (s *Service) Checkpoint(ctx context.Context, thread *Thread, reason string)
 	return sha, nil
 }
 
-func (s *Service) LoadEvents(ctx context.Context, thread *Thread) ([]Event, error) {
-	var events []Event
+func (s *Service) LoadEvents(ctx context.Context, thread *chat.Thread) ([]chat.Event, error) {
+	var events []chat.Event
 
 	file, err := os.Open(thread.LedgerPath)
 	if err != nil {
@@ -172,7 +158,7 @@ func (s *Service) LoadEvents(ctx context.Context, thread *Thread) ([]Event, erro
 			continue
 		}
 
-		var ev Event
+		var ev chat.Event
 		if err := json.Unmarshal(line, &ev); err != nil {
 			s.logger.WarnContext(ctx, "skipping malformed ledger entry", slog.String("error", err.Error()))
 			continue
@@ -187,70 +173,45 @@ func (s *Service) LoadEvents(ctx context.Context, thread *Thread) ([]Event, erro
 	return events, nil
 }
 
-func (s *Service) LogUserPrompt(ctx context.Context, thread *Thread, content string) error {
-	ev := Event{
-		ID:        fmt.Sprintf("usr-%d", time.Now().UnixNano()),
-		Timestamp: time.Now().UTC(),
-		Type:      EventPrompt,
-		Content:   content,
-	}
-	return s.AppendEvent(ctx, thread, ev)
+func (s *Service) LogUserPrompt(ctx context.Context, thread *chat.Thread, content string) error {
+	event := chat.NewEvent(chat.EventPrompt, content)
+	return s.bus.Publish(ctx, thread, event)
 }
 
-func (s *Service) LogUserMessage(ctx context.Context, thread *Thread, content string) error {
-	ev := Event{
-		ID:        fmt.Sprintf("usr-%d", time.Now().UnixNano()),
-		Timestamp: time.Now().UTC(),
-		Type:      EventPrompt,
-		Content:   content,
-	}
-	return s.AppendEvent(ctx, thread, ev)
+func (s *Service) LogUserMessage(ctx context.Context, thread *chat.Thread, content string) error {
+	event := chat.NewEvent(chat.EventPrompt, content)
+	return s.bus.Publish(ctx, thread, event)
 }
 
-func (s *Service) LogModelResponse(ctx context.Context, thread *Thread, content string) error {
-	ev := Event{
-		ID:        fmt.Sprintf("mdl-%d", time.Now().UnixNano()),
-		Timestamp: time.Now().UTC(),
-		Type:      EventModel,
-		Content:   content,
-	}
-	return s.AppendEvent(ctx, thread, ev)
+func (s *Service) LogModelResponse(ctx context.Context, thread *chat.Thread, content string) error {
+	event := chat.NewEvent(chat.EventModel, content)
+	return s.bus.Publish(ctx, thread, event)
 }
 
-func (s *Service) LogProposal(ctx context.Context, thread *Thread, candidateID string, files []string) error {
-	ev := Event{
-		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
-		Timestamp: time.Now().UTC(),
-		Type:      EventCandidate,
-		Content:   fmt.Sprintf("Proposed files: %s", strings.Join(files, ", ")),
-		Metadata: map[string]string{
-			"proposal_uid": candidateID,
-			"files":        strings.Join(files, ","),
-		},
+func (s *Service) LogProposal(ctx context.Context, thread *chat.Thread, candidateID string, files []string) error {
+	event := chat.NewEvent(chat.EventCandidate, fmt.Sprintf("Proposed files: %s", strings.Join(files, ", ")))
+	event.Metadata = map[string]string{
+		"proposal_uid": candidateID,
+		"files":        strings.Join(files, ","),
 	}
-	return s.AppendEvent(ctx, thread, ev)
+	return s.bus.Publish(ctx, thread, event)
 }
 
-func (s *Service) LogResolution(ctx context.Context, thread *Thread, candidateID string, accepted bool, reason string) error {
+func (s *Service) LogResolution(ctx context.Context, thread *chat.Thread, candidateID string, accepted bool, reason string) error {
 	status := "REJECTED"
 	if accepted {
 		status = "ACCEPTED"
 	}
-	ev := Event{
-		ID:        fmt.Sprintf("evt-%d", time.Now().UnixNano()),
-		Timestamp: time.Now().UTC(),
-		Type:      EventResolution,
-		Content:   fmt.Sprintf("Proposal %s %s. Reason: %s", candidateID, status, reason),
-		Metadata: map[string]string{
-			"proposal_uid": candidateID,
-			"status":       status,
-			"reason":       reason,
-		},
+	event := chat.NewEvent(chat.EventResolution, fmt.Sprintf("Proposal %s %s. Reason: %s", candidateID, status, reason))
+	event.Metadata = map[string]string{
+		"proposal_uid": candidateID,
+		"status":       status,
+		"reason":       reason,
 	}
-	return s.AppendEvent(ctx, thread, ev)
+	return s.bus.Publish(ctx, thread, event)
 }
 
-func (s *Service) ReadCandidate(ctx context.Context, thread *Thread, candidateID string) (string, error) {
+func (s *Service) ReadCandidate(ctx context.Context, thread *chat.Thread, candidateID string) (string, error) {
 	s.logger.DebugContext(ctx, "reading candidate contents", slog.String("candidate_id", candidateID))
 
 	diff, err := s.engine.ReadCandidateDiff(ctx, thread.ID, candidateID)
@@ -269,7 +230,7 @@ func (s *Service) WorkspaceRoot() string {
 	return s.workspaceRoot
 }
 
-func (s *Service) SaveReceipt(ctx context.Context, thread *Thread, receipt FlowReceipt) error {
+func (s *Service) SaveReceipt(ctx context.Context, thread *chat.Thread, receipt FlowReceipt) error {
 	receiptDir := filepath.Join(thread.Dir, "receipts")
 	if err := os.MkdirAll(receiptDir, 0755); err != nil {
 		return fmt.Errorf("creating receipts directory: %w", err)
@@ -284,7 +245,7 @@ func (s *Service) SaveReceipt(ctx context.Context, thread *Thread, receipt FlowR
 	return os.WriteFile(path, append([]byte(xml.Header), b...), 0644)
 }
 
-func (s *Service) GetReceipt(ctx context.Context, thread *Thread, flowID string) ([]byte, error) {
+func (s *Service) GetReceipt(ctx context.Context, thread *chat.Thread, flowID string) ([]byte, error) {
 	path := filepath.Join(thread.Dir, "receipts", fmt.Sprintf("%s.xml", flowID))
 	return os.ReadFile(path)
 }

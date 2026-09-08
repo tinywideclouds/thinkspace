@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -105,7 +106,11 @@ func setupServiceTest(t *testing.T) (*workspace.Service, *mockChatEngine, string
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	mockEngine := &mockChatEngine{}
 	workspaceRoot := t.TempDir()
-	svc := workspace.NewService(logger, mockEngine, workspaceRoot)
+
+	// Inject the EventBus into the service wrapper
+	bus := chat.NewEventBus()
+
+	svc := workspace.NewService(logger, mockEngine, workspaceRoot, bus)
 	return svc, mockEngine, workspaceRoot
 }
 
@@ -198,12 +203,10 @@ func TestService_Receipts(t *testing.T) {
 		},
 	}
 
-	// Test Saving
 	if err := svc.SaveReceipt(ctx, thread, receipt); err != nil {
 		t.Fatalf("SaveReceipt failed: %v", err)
 	}
 
-	// Test Retrieving
 	data, err := svc.GetReceipt(ctx, thread, "flow-999")
 	if err != nil {
 		t.Fatalf("GetReceipt failed: %v", err)

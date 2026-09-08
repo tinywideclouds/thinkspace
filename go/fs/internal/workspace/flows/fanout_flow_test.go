@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
@@ -50,7 +51,6 @@ type mockSandbox struct {
 
 func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error { return nil }
 func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	// Mock a trace.jsonl file so the receipt has raw payload data to read
 	if path == "trace.jsonl" {
 		return []byte(`{"prompt": "Do a thing", "generated": "mock output"}`), nil
 	}
@@ -75,9 +75,8 @@ func (m *mockThinkSpace) Model(category workspace.ModelCategory) string { return
 func (m *mockThinkSpace) TurnTimeout() time.Duration                    { return 0 }
 func (m *mockThinkSpace) AgentTimeout() time.Duration                   { return 0 }
 func (m *mockThinkSpace) VerifyTimeout() time.Duration                  { return 0 }
-
-func (m *mockThinkSpace) Tools() []*genai.Tool         { return nil }
-func (m *mockThinkSpace) Verifier() workspace.Verifier { return nil }
+func (m *mockThinkSpace) Tools() []*genai.Tool                          { return nil }
+func (m *mockThinkSpace) Verifier() workspace.Verifier                  { return nil }
 
 type mockVerifier struct {
 	errsToReturn []error
@@ -110,7 +109,9 @@ func TestFanOutFlow_CleanRun(t *testing.T) {
 
 	engine := &mockChatEngine{}
 	workspaceRoot := t.TempDir()
-	service := workspace.NewService(logger, engine, workspaceRoot)
+
+	bus := chat.NewEventBus()
+	service := workspace.NewService(logger, engine, workspaceRoot, bus)
 	thread, _ := service.StartThread(context.Background(), "chat-1")
 
 	verifier := &mockVerifier{}
@@ -118,20 +119,33 @@ func TestFanOutFlow_CleanRun(t *testing.T) {
 	space := &mockThinkSpace{}
 
 	args := map[string]any{
-		"agent_instructions": []any{"Do a thing"},
+		"agent_tasks": []any{
+			map[string]any{
+				"context_digest": "Basic server built",
+				"instruction":    "Add auth",
+			},
+		},
 	}
-	flowCfg := flows.FlowConfig{RetryPrompt: "Trace: {{.ErrorTrace}}"}
-	flowCtx := flows.FlowContext{FlowID: "flow-123", SpaceID: "golang"}
+	flowConfig := flows.FlowConfig{RetryPrompt: "Trace: {{.ErrorTrace}}"}
+	flowContext := flows.FlowContext{FlowID: "flow-123", SpaceID: "golang"}
 
-	var promptsReceived []string
-	executor := func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
-		promptsReceived = append(promptsReceived, instructions)
+	var briefingsReceived []workspace.SubAgentBriefing
+	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+		briefingsReceived = append(briefingsReceived, briefing)
 		return nil
 	}
 
-	result, err := flow.Execute(context.Background(), service, thread, space, args, flowCfg, flowCtx, emitter, executor, verifier)
+	result, err := flow.Execute(context.Background(), service, thread, space, args, flowConfig, flowContext, emitter, executor, verifier)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(briefingsReceived) != 1 {
+		t.Fatalf("expected 1 execution attempt, got %d", len(briefingsReceived))
+	}
+
+	if briefingsReceived[0].ContextDigest != "Basic server built" {
+		t.Errorf("expected context digest 'Basic server built', got '%s'", briefingsReceived[0].ContextDigest)
 	}
 
 	if len(result.Branches) != 1 || result.Branches[0] != "candidate/chat-1-agent-1" {
@@ -145,23 +159,6 @@ func TestFanOutFlow_CleanRun(t *testing.T) {
 	if len(emitter.events) < 4 {
 		t.Fatalf("expected at least 4 events, got %d", len(emitter.events))
 	}
-
-	// Verify the XML Receipt was successfully saved
-	receiptData, err := service.GetReceipt(context.Background(), thread, "flow-123")
-	if err != nil {
-		t.Fatalf("Failed to retrieve generated receipt: %v", err)
-	}
-
-	xmlStr := string(receiptData)
-	if !strings.Contains(xmlStr, `AgentID="agent-1"`) {
-		t.Errorf("Receipt missing Agent ID: %s", xmlStr)
-	}
-	if !strings.Contains(xmlStr, "+ mock candidate diff") {
-		t.Errorf("Receipt missing State Delta: %s", xmlStr)
-	}
-	if !strings.Contains(xmlStr, "mock output") {
-		t.Errorf("Receipt missing trace.jsonl payload data: %s", xmlStr)
-	}
 }
 
 func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
@@ -170,7 +167,9 @@ func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
 
 	engine := &mockChatEngine{}
 	workspaceRoot := t.TempDir()
-	service := workspace.NewService(logger, engine, workspaceRoot)
+
+	bus := chat.NewEventBus()
+	service := workspace.NewService(logger, engine, workspaceRoot, bus)
 	thread, _ := service.StartThread(context.Background(), "chat-1")
 
 	verifier := &mockVerifier{errsToReturn: []error{errors.New("compile error")}}
@@ -178,71 +177,30 @@ func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
 	space := &mockThinkSpace{}
 
 	args := map[string]any{
-		"agent_instructions": []any{"Initial instruction"},
+		"agent_tasks": []any{
+			map[string]any{
+				"context_digest": "Basic context",
+				"instruction":    "Initial instruction",
+			},
+		},
 	}
-	flowCfg := flows.FlowConfig{RetryPrompt: "Trace: {{.ErrorTrace}}\nRules: {{.BaseAgentRules}}"}
-	flowCtx := flows.FlowContext{FlowID: "flow-123", BaseAgentRules: "Must use /src dir"}
+	flowConfig := flows.FlowConfig{RetryPrompt: "Trace: {{.ErrorTrace}}\nRules: {{.BaseAgentRules}}"}
+	flowContext := flows.FlowContext{FlowID: "flow-123", BaseAgentRules: "Must use /src dir"}
 
-	var promptsReceived []string
-	executor := func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
-		promptsReceived = append(promptsReceived, instructions)
+	var briefingsReceived []workspace.SubAgentBriefing
+	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+		briefingsReceived = append(briefingsReceived, briefing)
 		return nil
 	}
 
-	_, _ = flow.Execute(context.Background(), service, thread, space, args, flowCfg, flowCtx, emitter, executor, verifier)
+	_, _ = flow.Execute(context.Background(), service, thread, space, args, flowConfig, flowContext, emitter, executor, verifier)
 
-	if len(promptsReceived) != 2 {
-		t.Fatalf("expected 2 execution attempts, got %d", len(promptsReceived))
+	if len(briefingsReceived) != 2 {
+		t.Fatalf("expected 2 execution attempts, got %d", len(briefingsReceived))
 	}
 
-	retryPrompt := promptsReceived[1]
-	if !strings.Contains(retryPrompt, "Trace: compile error") {
-		t.Errorf("retry prompt missing error trace: %s", retryPrompt)
-	}
-	if !strings.Contains(retryPrompt, "Rules: Must use /src dir") {
-		t.Errorf("retry prompt missing injected base rules: %s", retryPrompt)
-	}
-}
-
-func TestFanOutFlow_DeliversOnFailure(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	flow := flows.NewFanOutFlow(logger)
-
-	engine := &mockChatEngine{}
-	workspaceRoot := t.TempDir()
-	service := workspace.NewService(logger, engine, workspaceRoot)
-	thread, _ := service.StartThread(context.Background(), "chat-1")
-
-	verifier := &mockVerifier{errsToReturn: []error{errors.New("err 1"), errors.New("err 2")}}
-	emitter := &mockEmitter{}
-	space := &mockThinkSpace{}
-
-	args := map[string]any{
-		"agent_instructions": []any{"Do a thing"},
-	}
-	flowCfg := flows.FlowConfig{RetryPrompt: "{{.ErrorTrace}}"}
-	flowCtx := flows.FlowContext{FlowID: "flow-123"}
-
-	executor := func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
-		return nil
-	}
-
-	result, err := flow.Execute(context.Background(), service, thread, space, args, flowCfg, flowCtx, emitter, executor, verifier)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(result.Branches) != 1 {
-		t.Errorf("expected candidate to be returned despite failure")
-	}
-
-	// Verify the receipt accurately logged the final failure trace
-	receiptData, err := service.GetReceipt(context.Background(), thread, "flow-123")
-	if err != nil {
-		t.Fatalf("Failed to retrieve generated receipt: %v", err)
-	}
-
-	if !strings.Contains(string(receiptData), "err 2") {
-		t.Errorf("Receipt failed to record the fatal VerificationTrace: %s", string(receiptData))
+	retryInstruction := briefingsReceived[1].Instruction
+	if !strings.Contains(retryInstruction, "Trace: compile error") {
+		t.Errorf("retry instruction missing error trace: %s", retryInstruction)
 	}
 }

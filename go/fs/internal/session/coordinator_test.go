@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -77,7 +78,7 @@ type mockFlow struct {
 }
 
 func (m *mockFlow) Name() string { return "MockFlow" }
-func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier workspace.Verifier) (*flows.FlowResult, error) {
+func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *chat.Thread, space workspace.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier workspace.Verifier) (*flows.FlowResult, error) {
 	m.executeCalled = true
 	return &flows.FlowResult{
 		Branches: []string{"candidate/mock-123"},
@@ -115,7 +116,9 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	workspaceRoot := t.TempDir()
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot)
+
+	bus := chat.NewEventBus()
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
 	thread, _ := workspaceService.StartThread(ctx, "test-thread")
 
 	os.MkdirAll(filepath.Join(workspaceRoot, "chats", "test-thread"), 0755)
@@ -132,8 +135,11 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 									FunctionCall: &genai.FunctionCall{
 										Name: "propose_change",
 										Args: map[string]any{
-											"agent_count":        float64(2),
-											"agent_instructions": []any{"Do task A", "Do task B"},
+											"agent_count": float64(2),
+											"agent_tasks": []any{
+												map[string]any{"context_digest": "Context A", "instruction": "Do task A"},
+												map[string]any{"context_digest": "Context B", "instruction": "Do task B"},
+											},
 										},
 									},
 								},
@@ -147,7 +153,7 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 
 	llmAdapter := llm.NewAdapter(client)
 	flow := &mockFlow{}
-	executor := func(ctx context.Context, instructions string, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
+	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
 		return nil
 	}
 
@@ -185,7 +191,9 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	workspaceRoot := t.TempDir()
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot)
+
+	bus := chat.NewEventBus()
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
 	thread, _ := workspaceService.StartThread(ctx, "test-thread-skip")
 
 	client := &mockModelClient{
@@ -199,8 +207,10 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 									FunctionCall: &genai.FunctionCall{
 										Name: "propose_change",
 										Args: map[string]any{
-											"agent_count":        float64(1),
-											"agent_instructions": []any{"Test skip"},
+											"agent_count": float64(1),
+											"agent_tasks": []any{
+												map[string]any{"context_digest": "Skip context", "instruction": "Test skip"},
+											},
 										},
 									},
 								},

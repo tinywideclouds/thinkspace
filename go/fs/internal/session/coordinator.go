@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
@@ -65,7 +66,7 @@ func NewCoordinator(
 
 func (c *Coordinator) ExecuteTurn(
 	ctx context.Context,
-	thread *workspace.Thread,
+	thread *chat.Thread,
 	thinkSpace workspace.ThinkSpace,
 	history []*genai.Content,
 	userInterface UserInterface,
@@ -196,7 +197,7 @@ func (c *Coordinator) ExecuteTurn(
 
 func (c *Coordinator) executeLLMReviewPhase(
 	ctx context.Context,
-	thread *workspace.Thread,
+	thread *chat.Thread,
 	thinkSpace workspace.ThinkSpace,
 	history []*genai.Content,
 	userInterface UserInterface,
@@ -275,8 +276,11 @@ func (c *Coordinator) executeLLMReviewPhase(
 
 	refinementArguments := map[string]any{
 		"agent_count": float64(1),
-		"agent_instructions": []any{
-			fmt.Sprintf("Synthesize a final implementation based on this architectural evaluation:\n\n%s", evaluationResponse.String()),
+		"agent_tasks": []any{
+			map[string]any{
+				"context_digest": "Synthesize a final implementation based on the following architectural evaluation.",
+				"instruction":    evaluationResponse.String(),
+			},
 		},
 	}
 

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 	"uuid"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 )
 
 type EngineFactory func(repoRoot string) ChatEngine
@@ -47,12 +49,18 @@ func (m *ServiceManager) GetService(spaceID string) *Service {
 
 	spaceRoot := filepath.Join(m.baseRoot, spaceID)
 	engine := m.engineFactory(spaceRoot)
-	service := NewService(m.logger, engine, spaceRoot)
+
+	// Instantiate the Event Bus and attach the immutable disk ledger subscriber
+	bus := chat.NewEventBus()
+	bus.Subscribe(chat.NewLedgerSubscriber())
+
+	service := NewService(m.logger, engine, spaceRoot, bus)
 
 	m.services[spaceID] = service
 	return service
 }
 
+// ... (ListSpaces, GetSpaceState, UpdateSpaceState, ListChats, and CreateChat remain identical)
 func (m *ServiceManager) ListSpaces(ctx context.Context) ([]string, error) {
 	entries, err := os.ReadDir(m.baseRoot)
 	if err != nil {
@@ -71,7 +79,6 @@ func (m *ServiceManager) ListSpaces(ctx context.Context) ([]string, error) {
 	return spaces, nil
 }
 
-// GetSpaceState retrieves the persistent state of a physical space.
 func (m *ServiceManager) GetSpaceState(spaceID string) (SpaceState, error) {
 	var state SpaceState
 	path := filepath.Join(m.baseRoot, spaceID, "space.json")
@@ -83,12 +90,11 @@ func (m *ServiceManager) GetSpaceState(spaceID string) (SpaceState, error) {
 	return state, err
 }
 
-// UpdateSpaceState safely mutates the space's persistent state without overwriting other fields.
 func (m *ServiceManager) UpdateSpaceState(spaceID string, updateFn func(*SpaceState)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	state, _ := m.GetSpaceState(spaceID) // Ignore error; if missing, we start fresh
+	state, _ := m.GetSpaceState(spaceID)
 
 	updateFn(&state)
 
