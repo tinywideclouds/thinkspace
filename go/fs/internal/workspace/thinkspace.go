@@ -14,20 +14,28 @@ const (
 	ModelCategoryWorker  ModelCategory = "worker"
 )
 
+type ThinkSpaceRoles struct {
+	Manager string `yaml:"manager"`
+	Worker  string `yaml:"worker"`
+}
+
 // ThinkSpaceConfig represents the raw YAML configuration for a domain space.
 type ThinkSpaceConfig struct {
 	Type                         string                   `yaml:"type"`
 	Name                         string                   `yaml:"name"`
 	SystemPrompt                 string                   `yaml:"system_prompt"`
-	SubAgentSystemPrompt         string                   `yaml:"sub_agent_system_prompt"`
+	Roles                        ThinkSpaceRoles          `yaml:"roles"`
 	Models                       map[ModelCategory]string `yaml:"models"`
 	TurnTimeoutSeconds           int                      `yaml:"turn_timeout_seconds"`
 	AgentTimeoutSeconds          int                      `yaml:"agent_timeout_seconds"`
 	VerifyTimeoutSeconds         int                      `yaml:"verify_timeout_seconds"`
+	MaxWorkerTokens              int                      `yaml:"max_worker_tokens"`
 	ToolDescription              string                   `yaml:"tool_description"`
 	AgentCountDescription        string                   `yaml:"agent_count_description"`
 	AgentInstructionsDescription string                   `yaml:"agent_instructions_description"`
-	BaseAgentRules               string                   `yaml:"base_agent_rules"`
+	ContextDigestDescription     string                   `yaml:"context_digest_description"`
+	InstructionDescription       string                   `yaml:"instruction_description"`
+	WorkerRetryPrompt            string                   `yaml:"worker_retry_prompt"`
 }
 
 // ApplyDefaults sets reasonable timeouts if they are missing from the configuration.
@@ -43,15 +51,30 @@ func (c *ThinkSpaceConfig) ApplyDefaults() {
 	}
 }
 
-// ThinkSpace defines the contract for a language-specific or domain-specific environment.
+// Helper methods bound directly to the config struct.
+func (c ThinkSpaceConfig) ManagerSystemPrompt() string {
+	return c.SystemPrompt + "\n\n" + c.Roles.Manager
+}
+
+func (c ThinkSpaceConfig) WorkerSystemPrompt() string {
+	return c.SystemPrompt + "\n\n" + c.Roles.Worker
+}
+
+func (c ThinkSpaceConfig) TurnTimeout() time.Duration {
+	return time.Duration(c.TurnTimeoutSeconds) * time.Second
+}
+
+func (c ThinkSpaceConfig) AgentTimeout() time.Duration {
+	return time.Duration(c.AgentTimeoutSeconds) * time.Second
+}
+
+func (c ThinkSpaceConfig) VerifyTimeout() time.Duration {
+	return time.Duration(c.VerifyTimeoutSeconds) * time.Second
+}
+
+// ThinkSpace defines the highly stable contract for a domain-specific environment.
 type ThinkSpace interface {
-	Name() string
-	SystemPrompt() string
-	SubAgentSystemPrompt() string
-	Model(category ModelCategory) string
-	TurnTimeout() time.Duration
-	AgentTimeout() time.Duration
-	VerifyTimeout() time.Duration
+	Config() ThinkSpaceConfig
 	Tools() []*genai.Tool
 
 	// Verifier returns the domain-specific verification engine.

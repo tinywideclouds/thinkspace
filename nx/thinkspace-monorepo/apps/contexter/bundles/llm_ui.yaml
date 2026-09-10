@@ -24,4 +24,6 @@ files:
   - libs\llm\ui\chat\src\lib\flow-tracker\flow-tracker.component.ts
   - libs\llm\ui\chat\src\lib\chat-flow-card\chat-flow-card.component.spec.ts
   - libs\llm\ui\chat\src\lib\chat-flow-card\chat-flow-card.component.ts
+  - libs\llm\ui\chat\src\lib\chat-header\chat-header.component.spec.ts
+  - libs\llm\ui\chat\src\lib\chat-header\chat-header.component.ts
 last_context: llm_ui_04.md

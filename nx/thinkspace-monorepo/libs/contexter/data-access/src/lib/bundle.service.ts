@@ -11,6 +11,9 @@ export class BundleService {
   private readonly baseUrl = 'http://localhost:3333/api';
 
   readonly generatedBundle = signal<string>('');
+
+  readonly allowLargeFiles = signal<boolean>(false);
+  readonly skippedLargeFiles = signal<string[]>([]);
   
   readonly currentContextFilename = signal<string | null>(null);
   readonly nextContextFilename = signal<string>('context_001.md');
@@ -35,15 +38,15 @@ export class BundleService {
     }
   }
 
-  async generateBundle() {
-    const files = Array.from(this.selection.selectedFiles());
-    if (files.length === 0) return '';
-    const response = await firstValueFrom(
-      this.http.post<BundleResponse>(`${this.baseUrl}/generate`, { files })
-    );
-    this.generatedBundle.set(response.content);
-    return response.content;
-  }
+  // async generateBundle() {
+  //   const files = Array.from(this.selection.selectedFiles());
+  //   if (files.length === 0) return '';
+  //   const response = await firstValueFrom(
+  //     this.http.post<BundleResponse>(`${this.baseUrl}/generate`, { files })
+  //   );
+  //   this.generatedBundle.set(response.content);
+  //   return response.content;
+  // }
 
   async saveContextToDisk(markdown: string, filename?: string, description?: string) {
     if (!markdown) return null;
@@ -56,5 +59,22 @@ export class BundleService {
       this.currentContextFilename.set(res.filename);
     }
     return res;
+  }
+
+  // Update the generate function
+  async generateBundle() {
+    const files = Array.from(this.selection.selectedFiles());
+    if (files.length === 0) return '';
+    
+    const response = await firstValueFrom(
+      this.http.post<BundleResponse>(`${this.baseUrl}/generate`, { 
+        files,
+        allowLargeFiles: this.allowLargeFiles()
+      })
+    );
+    
+    this.generatedBundle.set(response.content);
+    this.skippedLargeFiles.set(response.skippedLargeFiles || []);
+    return response;
   }
 }

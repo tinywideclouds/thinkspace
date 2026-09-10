@@ -27,9 +27,11 @@ export interface ContextConfig {
 
 export interface BundleRequest {
   files: string[];
+  allowLargeFiles?: boolean;
 }
 
 export interface BundleResponse {
   content: string;
   count: number;
+  skippedLargeFiles?: string[];
 }

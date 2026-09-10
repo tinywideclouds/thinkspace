@@ -12,15 +12,24 @@ export async function validateFiles(files: string[]): Promise<string[]> {
   return missing;
 }
 
-export async function generateBundleContent(files: string[]): Promise<string> {
+export async function generateBundleContent(files: string[], allowLargeFiles = false): Promise<{content: string, skipped: string[]}> {
   let content = '';
+  const skipped: string[] = [];
+  
   for (const file of files) {
     try {
+      const stats = await fs.stat(file);
+      
+      if (!allowLargeFiles && stats.size > 1024 * 1024) {
+        skipped.push(file);
+        continue;
+      }
+      
       const fileContent = await fs.readFile(file, 'utf8');
       content += `\n\n### \`${file}\`\n\`\`\`\n${fileContent}\n\`\`\`\n`;
     } catch (e) {
-      content += `\n\n### \`${file}\`\n<!-- FILE NOT FOUND: ${file} -->\n`;
+      content += `\n\n### \`${file}\`\n<!-- FILE NOT FOUND OR UNREADABLE: ${file} -->\n`;
     }
   }
-  return content;
+  return { content, skipped };
 }

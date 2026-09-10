@@ -12,8 +12,6 @@ files:
   - ..\..\go\fs\cmd\bootstrap\clone_main.go
   - ..\..\go\fs\cmd\cli\main.go
   - ..\..\go\fs\cmd\server\server_main.go
-  - ..\..\go\fs\config\thinkspace\fanout.yaml
-  - ..\..\go\fs\config\thinkspace\golang.yaml
   - ..\..\go\fs\internal\api\api.md
   - ..\..\go\fs\internal\api\emitter.go
   - ..\..\go\fs\internal\api\facade_test.go
@@ -34,8 +32,6 @@ files:
   - ..\..\go\fs\internal\gitfs\implementatoin.md
   - ..\..\go\fs\internal\llm\client.go
   - ..\..\go\fs\internal\llm\llm.md
-  - ..\..\go\fs\internal\llm\manager_test.go
-  - ..\..\go\fs\internal\llm\manager.go
   - ..\..\go\fs\internal\llm\mock_client_test.go
   - ..\..\go\fs\internal\llm\subagent_test.go
   - ..\..\go\fs\internal\llm\subagent.go
@@ -43,9 +39,6 @@ files:
   - ..\..\go\fs\internal\session\coordinator_test.go
   - ..\..\go\fs\internal\session\coordinator.go
   - ..\..\go\fs\internal\session\session.md
-  - ..\..\go\fs\internal\workspace\context_assembler.go
-  - ..\..\go\fs\internal\workspace\event_test.go
-  - ..\..\go\fs\internal\workspace\event.go
   - ..\..\go\fs\internal\workspace\manifest.go
   - ..\..\go\fs\internal\workspace\models.go
   - ..\..\go\fs\internal\workspace\service_test.go
@@ -69,4 +62,17 @@ files:
   - ..\..\go\fs\internal\config\registry_test.go
   - ..\..\go\fs\internal\workspace\manager_test.go
   - ..\..\go\fs\internal\workspace\manager.go
-last_context: llm_golang_02.md
+  - ..\..\go\fs\internal\chat\bus_test.go
+  - ..\..\go\fs\internal\chat\bus.go
+  - ..\..\go\fs\internal\chat\context_assembler_test.go
+  - ..\..\go\fs\internal\chat\context_assembler.go
+  - ..\..\go\fs\internal\chat\event_test.go
+  - ..\..\go\fs\internal\chat\event.go
+  - ..\..\go\fs\internal\chat\manifest.go
+  - ..\..\go\fs\internal\chat\models.go
+  - ..\..\go\fs\internal\chat\playback_test.go
+  - ..\..\go\fs\internal\chat\playback.go
+  - ..\..\go\fs\internal\config\scaffold.go
+  - ..\..\go\fs\internal\llm\adapter_test.go
+  - ..\..\go\fs\internal\llm\adapter.go
+last_context: llm_golang_09.md

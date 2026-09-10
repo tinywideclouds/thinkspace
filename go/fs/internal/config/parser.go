@@ -5,8 +5,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 // ConfigHeader allows us to peek at the YAML type before full unmarshaling.

@@ -43,5 +43,8 @@ func (g *GoVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSand
 		return fmt.Errorf("unit tests failed: %w\n%s", err, testOutput)
 	}
 
+	// 4. Cleanup Artifacts (Prevent Git pollution)
+	_, _ = sandbox.ExecuteCommand(verifyCtx, "go", "clean", "-C", "src")
+
 	return nil
 }

@@ -26,7 +26,7 @@ describe('WorkspaceStateService', () => {
   });
 
   it('should load spaces and automatically select the first one on instantiation', async () => {
-    // The constructor immediately calls loadSpaces(), so we expect the request right away.
+    // 1. Intercept the constructor's initial automatic request
     const spacesRequest = httpTestingController.expectOne('/api/spaces');
     expect(spacesRequest.request.method).toBe('GET');
     spacesRequest.flush([
@@ -34,13 +34,17 @@ describe('WorkspaceStateService', () => {
       { id: 'python', name: 'Python Developer', isConfigured: false }
     ]);
 
+    // Yield to the microtask queue so `await loadSpaces()` can proceed to trigger `loadChats()`
+    await Promise.resolve();
+
+    // 2. Intercept the subsequent loadChats request
     const chatsRequest = httpTestingController.expectOne('/api/spaces/golang/chats');
     expect(chatsRequest.request.method).toBe('GET');
     chatsRequest.flush([
       { id: 'chat-1', name: 'Test Chat', createdAt: '2026-09-07T00:00:00Z' }
     ]);
 
-    // Give the microtask queue a moment to resolve the async/await promises
+    // Yield again for the final state updates to apply
     await Promise.resolve();
 
     expect(service.spaces().length).toBe(2);
@@ -50,8 +54,9 @@ describe('WorkspaceStateService', () => {
   });
 
   it('should load chats for a specific space manually', async () => {
-    // Clear out the constructor's initial automatic requests first
+    // Clear out the constructor's initial automatic request first
     httpTestingController.expectOne('/api/spaces').flush([]);
+    await Promise.resolve();
 
     const loadPromise = service.loadChats('angular');
     
@@ -69,7 +74,9 @@ describe('WorkspaceStateService', () => {
   });
 
   it('should clear active chat if space has no chats', async () => {
+    // Clear out the constructor's initial automatic request first
     httpTestingController.expectOne('/api/spaces').flush([]);
+    await Promise.resolve();
 
     const loadPromise = service.loadChats('empty-space');
     
@@ -83,7 +90,9 @@ describe('WorkspaceStateService', () => {
   });
 
   it('should create a chat and set it as active', async () => {
+    // Clear out the constructor's initial automatic request first
     httpTestingController.expectOne('/api/spaces').flush([]);
+    await Promise.resolve();
 
     service.activeSpaceId.set('golang');
     service.chats.set([{ id: 'chat-1', name: 'Old Chat', createdAt: '2026-09-06T00:00:00Z' }]);

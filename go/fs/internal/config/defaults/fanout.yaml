@@ -1,6 +1,8 @@
 fanout:
   type: "flow"
-  description: "Delegate a coding task to parallel sub-agents."
+  description: "Delegate a specific coding task to parallel sub-agents."
   retry_prompt: |
-    Verification failed. Output trace:
+    Your previous attempt failed verification. Analyze the following trace and fix the specific errors. Do not rewrite the entire solution if only a localized fix is needed.
+    
+    Trace:
     {{.ErrorTrace}}

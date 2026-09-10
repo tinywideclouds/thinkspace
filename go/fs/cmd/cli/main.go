@@ -13,13 +13,14 @@ import (
 	"github.com/joho/godotenv"
 	"google.golang.org/genai"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cli"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 func main() {
@@ -94,12 +95,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	workerModel := activeThinkSpace.Model(workspace.ModelCategoryWorker)
-	llmAdapter := llm.NewAdapter(modelClient)
-	subAgentExecutor := llm.NewSubAgentExecutor(modelClient, workerModel, activeThinkSpace.SubAgentSystemPrompt())
-	fanOutFlow := flows.NewFanOutFlow(logger)
-	workspaceService := workspace.NewService(logger, stateEngine, repositoryRoot)
+	// Wire Domain Dependencies
+	bus := chat.NewEventBus()
+	bus.Subscribe(chat.NewLedgerSubscriber())
 
+	workerModel := activeThinkSpace.Config().Models[workspace.ModelCategoryWorker]
+	llmAdapter := llm.NewAdapter(modelClient)
+	subAgentExecutor := llm.NewSubAgentExecutor(modelClient, workerModel, activeThinkSpace.Config().WorkerSystemPrompt(), activeThinkSpace.Config().MaxWorkerTokens)
+	fanOutFlow := flows.NewFanOutFlow(logger)
+	workspaceService := workspace.NewService(logger, stateEngine, repositoryRoot, bus)
+
+	playbackEngine := chat.NewPlaybackEngine()
+	contextAssembler := chat.NewContextAssembler()
 	userInterface := cli.NewTerminalUI()
 
 	// CLI doesn't use WebSockets, so it purely relies on the SlogEmitter
@@ -113,7 +120,7 @@ func main() {
 		fanOutFlow,
 		emitter,
 		*domainName,
-		spaceConfiguration.BaseAgentRules,
+		spaceConfiguration.Roles.Worker,
 		flowConfiguration,
 	)
 
@@ -121,41 +128,30 @@ func main() {
 	fmt.Printf("📄 Active Domain: %s\n", *domainName)
 
 	threadDirectory := filepath.Join(repositoryRoot, "chats", *chatName)
-	ledgerPath := filepath.Join(threadDirectory, "conversation.jsonl")
-	var thread *workspace.Thread
-	var history []*genai.Content
-
+	isNewThread := false
 	if _, err := os.Stat(threadDirectory); os.IsNotExist(err) {
-		fmt.Printf("🌱 Creating new exploration thread: %s\n", *chatName)
-		thread, err = workspaceService.StartThread(ctx, *chatName)
-		if err != nil {
-			logger.Error("Failed to start thread", "error", err)
-			os.Exit(1)
-		}
+		isNewThread = true
+	}
 
+	thread, err := workspaceService.StartThread(ctx, *chatName)
+	if err != nil {
+		logger.Error("Failed to start thread", "error", err)
+		os.Exit(1)
+	}
+
+	if isNewThread {
+		fmt.Printf("🌱 Creating new exploration thread: %s\n", *chatName)
 		initialPrompt := "Generate a function to check if a point is in a unit circle. Fan this out to 2 agents using different mathematical approaches, and require unit tests."
 		fmt.Printf("💬 Initial Prompt: %s\n", initialPrompt)
 
 		_ = workspaceService.LogUserPrompt(ctx, thread, initialPrompt)
-		history = append(history, &genai.Content{Role: "user", Parts: []*genai.Part{{Text: initialPrompt}}})
-
 	} else {
 		fmt.Printf("📖 Resuming exploration thread: %s\n", *chatName)
-		thread = &workspace.Thread{
-			ID:         *chatName,
-			Branch:     fmt.Sprintf("chat/%s", *chatName),
-			LedgerPath: ledgerPath,
-			Dir:        threadDirectory,
-		}
 
-		events, err := workspaceService.LoadEvents(ctx, thread)
-		if err != nil {
-			logger.Error("Failed to load history", "error", err)
-			os.Exit(1)
+		graph, _, err := playbackEngine.LoadState(ctx, thread)
+		if err == nil {
+			fmt.Printf("Loaded %d historical turns.\n", len(graph.RecentEvents))
 		}
-
-		history = llmAdapter.BuildHistory(events)
-		fmt.Printf("Loaded %d historical turns.\n", len(history))
 
 		fmt.Print("\n> ")
 		reader := bufio.NewReader(os.Stdin)
@@ -168,7 +164,25 @@ func main() {
 		}
 
 		_ = workspaceService.LogUserPrompt(ctx, thread, input)
-		history = append(history, &genai.Content{Role: "user", Parts: []*genai.Part{{Text: input}}})
+	}
+
+	// Build the assembled LLM history from the persistent state
+	graph, manifest, err := playbackEngine.LoadState(ctx, thread)
+	if err != nil {
+		logger.Error("Failed to load playback state", "error", err)
+		os.Exit(1)
+	}
+
+	assemblyReq := chat.ContextAssemblyRequest{
+		Manifest:     manifest,
+		ActiveLenses: []string{},
+		RecentEvents: graph.RecentEvents,
+	}
+
+	history, err := contextAssembler.Build(assemblyReq)
+	if err != nil {
+		logger.Error("Failed to assemble context", "error", err)
+		os.Exit(1)
 	}
 
 	fmt.Println("\n🤖 Main Session Thinking...")

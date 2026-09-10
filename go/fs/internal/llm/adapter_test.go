@@ -3,32 +3,32 @@ package llm_test
 import (
 	"testing"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
 
 func TestAdapter_BuildHistory(t *testing.T) {
 	adapter := llm.NewAdapter(nil)
 
-	events := []workspace.Event{
+	events := []chat.Event{
 		{
-			Type:    workspace.EventPrompt,
+			Type:    chat.EventPrompt,
 			Content: "Hello",
 		},
 		{
-			Type:    workspace.EventModel,
+			Type:    chat.EventModel,
 			Content: "Hi there",
 		},
 		{
-			Type: workspace.EventCandidate,
+			Type: chat.EventCandidate,
 			Metadata: map[string]string{
 				"files":        "main.go",
 				"proposal_uid": "cand-123",
 			},
 		},
 		{
-			Type: workspace.EventResolution,
+			Type: chat.EventResolution,
 			Metadata: map[string]string{
 				"proposal_uid": "cand-123",
 				"status":       "ACCEPTED",

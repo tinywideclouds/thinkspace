@@ -101,7 +101,9 @@
       class="shrink-0"
       [config]="workspace.config()"
       [selectedCount]="selection.selectedFiles().size"
-      (generateContext)="bundle.generateBundle()"
+      [allowLargeFiles]="bundle.allowLargeFiles()"
+      (allowLargeFilesChange)="bundle.allowLargeFiles.set($event)"
+      (generateContext)="onGenerateContext()"
       (saveSelection)="selectionModalMode.set('save')"
       (loadSelection)="selectionModalMode.set('load')"
       (clearSelection)="selection.clearSelection()">

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"iter"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"google.golang.org/genai"
 )
 
@@ -53,29 +53,29 @@ func (a *Adapter) InterceptToolCalls(chunk *genai.GenerateContentResponse) []Too
 }
 
 // BuildHistory translates our domain events into the Google GenAI Content schema.
-func (a *Adapter) BuildHistory(events []workspace.Event) []*genai.Content {
+func (a *Adapter) BuildHistory(events []chat.Event) []*genai.Content {
 	var history []*genai.Content
 
 	for _, ev := range events {
 		switch ev.Type {
-		case workspace.EventPrompt:
+		case chat.EventPrompt:
 			history = append(history, &genai.Content{
 				Role:  "user",
 				Parts: []*genai.Part{{Text: ev.Content}},
 			})
-		case workspace.EventModel:
+		case chat.EventModel:
 			history = append(history, &genai.Content{
 				Role:  "model",
 				Parts: []*genai.Part{{Text: ev.Content}},
 			})
-		case workspace.EventCandidate:
+		case chat.EventCandidate:
 			// Inject the proposal knowledge as an action the model took
 			text := fmt.Sprintf("[Action Taken: Proposed files (%s) under proposal UID: %s]", ev.Metadata["files"], ev.Metadata["proposal_uid"])
 			history = append(history, &genai.Content{
 				Role:  "model",
 				Parts: []*genai.Part{{Text: text}},
 			})
-		case workspace.EventResolution:
+		case chat.EventResolution:
 			// Inject the outcome as feedback from the user/system
 			text := fmt.Sprintf("[System Feedback: Proposal %s was %s. Reason: %s]", ev.Metadata["proposal_uid"], ev.Metadata["status"], ev.Metadata["reason"])
 			history = append(history, &genai.Content{

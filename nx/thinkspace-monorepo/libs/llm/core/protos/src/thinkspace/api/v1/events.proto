@@ -19,6 +19,20 @@ message SpaceInfo {
   bool is_configured = 3;
 }
 
+message LedgerEvent {
+  string id = 1;
+  string timestamp = 2;
+  string type = 3;
+  string content = 4;
+  map<string, string> metadata = 5;
+}
+
+message DigestMeta {
+  string id = 1;
+  string summary = 2;
+  bool is_sticky = 3;
+}
+
 // --- Outbound Payloads (Server -> Client) ---
 message ChatStreamPayload {
   string text = 1;
@@ -32,6 +46,11 @@ message LogMessagePayload {
 message AgentStreamPayload {
   int32 agent_id = 1;
   string text = 2;
+}
+
+message SyncHistoryPayload {
+  repeated LedgerEvent recent_events = 1;
+  map<string, DigestMeta> digests = 2;
 }
 
 // Core System Payloads
@@ -94,6 +113,7 @@ message WSEvent {
     RequestStrategyPayload request_strategy = 8;
     RequestReviewPayload request_review = 9;
     AvailableSpacesPayload available_spaces = 10;
+    SyncHistoryPayload sync_history = 15;
 
     // The New Unified Flow Protocol
     FlowEventPayload flow_event = 14;

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace/spaces/golang"
 )
 

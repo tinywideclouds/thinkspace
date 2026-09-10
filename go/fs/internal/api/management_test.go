@@ -91,23 +91,22 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 
-	var result []map[string]interface{}
-	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
+	// Rely entirely on the Facade to decode the wire format into pure Go domain structs
+	facade := api.NewEventFacade()
+	spaces, err := facade.UnmarshalRESTSpaces(rr.Body.Bytes())
+	if err != nil {
+		t.Fatalf("failed to unmarshal response via facade: %v", err)
 	}
 
-	if len(result) != 2 {
-		t.Fatalf("expected 2 spaces, got %d", len(result))
+	if len(spaces) != 2 {
+		t.Fatalf("expected 2 spaces, got %d", len(spaces))
 	}
 
-	for _, s := range result {
-		id := s["id"].(string)
-		isConfigured := s["is_configured"].(bool)
-
-		if id == opSpace && !isConfigured {
+	for _, s := range spaces {
+		if s.ID == opSpace && !s.IsConfigured {
 			t.Errorf("expected operational space to be configured")
 		}
-		if id == unconfigSpace && isConfigured {
+		if s.ID == unconfigSpace && s.IsConfigured {
 			t.Errorf("expected missing state space to be unconfigured")
 		}
 	}

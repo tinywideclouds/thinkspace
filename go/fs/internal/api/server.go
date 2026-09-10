@@ -1,28 +1,26 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 
 	"github.com/coder/websocket"
-	"google.golang.org/genai"
-
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 type Server struct {
-	logger     *slog.Logger
-	registry   *config.Registry
-	manager    *workspace.ServiceManager
-	llmAdapter *llm.Adapter
-	flow       flows.Flow
-	client     llm.ModelClient
+	logger      *slog.Logger
+	registry    *config.Registry
+	manager     *workspace.ServiceManager
+	turnManager *session.TurnManager
 }
 
 func NewServer(
@@ -30,22 +28,20 @@ func NewServer(
 	registry *config.Registry,
 	manager *workspace.ServiceManager,
 	llmAdapter *llm.Adapter,
-	flow flows.Flow,
-	client llm.ModelClient,
+	fanOutFlow flows.Flow,
+	modelClient llm.ModelClient,
 ) *Server {
 	return &Server{
-		logger:     logger,
-		registry:   registry,
-		manager:    manager,
-		llmAdapter: llmAdapter,
-		flow:       flow,
-		client:     client,
+		logger:      logger,
+		registry:    registry,
+		manager:     manager,
+		turnManager: session.NewTurnManager(logger, registry, manager, llmAdapter, fanOutFlow, modelClient),
 	}
 }
 
 func (s *Server) RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/receipts/{chat_id}/{flow_id}", s.handleGetReceipt)
-	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/ws", s.HandleWebSocket)
 }
 
 func (s *Server) handleGetReceipt(w http.ResponseWriter, r *http.Request) {
@@ -59,9 +55,10 @@ func (s *Server) handleGetReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	service := s.manager.GetService(spaceID)
-	thread := &workspace.Thread{
-		ID:  chatID,
-		Dir: filepath.Join(service.WorkspaceRoot(), "chats", chatID),
+	thread := &chat.Thread{
+		ID:      chatID,
+		SpaceID: spaceID,
+		Dir:     filepath.Join(service.WorkspaceRoot(), "chats", chatID),
 	}
 
 	data, err := service.GetReceipt(r.Context(), thread, flowID)
@@ -74,22 +71,25 @@ func (s *Server) handleGetReceipt(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	socket, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	connection, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
 		s.logger.Error("WebSocket upgrade failed", "error", err)
 		return
 	}
-	defer socket.Close(websocket.StatusNormalClosure, "session ended")
+	defer connection.Close(websocket.StatusInternalError, "closing connection")
 
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	// 1. Restore the Token Streaming Channel for Sub-Agents
 	tokenChan := make(chan workspace.AgentToken, 100)
-
-	ui := NewWebSocketUI(ctx, socket, tokenChan)
 	facade := NewEventFacade()
+	ui := NewWebSocketUI(ctx, connection, tokenChan)
 
+	// 2. Restore the Initial Handshake (Available Spaces)
 	spaceIDs, _ := s.manager.ListSpaces(ctx)
 	var availableSpaces []SpaceState
 
@@ -115,105 +115,62 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if handshakeBytes, err := facade.MarshalAvailableSpaces(availableSpaces); err == nil {
-		_ = socket.Write(ctx, websocket.MessageText, handshakeBytes)
+		_ = connection.Write(ctx, websocket.MessageText, handshakeBytes)
 	}
 
+	// 3. Restore the Async Token Streamer
 	go func() {
 		for token := range tokenChan {
 			if streamBytes, err := facade.MarshalAgentStream(token.AgentID, token.Text); err == nil {
-				_ = socket.Write(ctx, websocket.MessageText, streamBytes)
+				_ = connection.Write(ctx, websocket.MessageText, streamBytes)
 			}
 		}
 	}()
 
+	// 4. The Main Event Loop
 	for {
-		_, data, err := socket.Read(ctx)
+		_, msgBytes, err := connection.Read(ctx)
 		if err != nil {
-			s.logger.Info("WebSocket client disconnected")
-			break
+			break // Client disconnected
 		}
 
-		inboundEvent, err := facade.UnmarshalInbound(data)
+		inbound, err := facade.UnmarshalInbound(msgBytes)
 		if err != nil {
-			s.logger.Error("Failed to unmarshal inbound message", "error", err)
+			s.logger.Warn("invalid websocket message", "error", err)
 			continue
 		}
 
-		switch inboundEvent.Type {
+		switch inbound.Type {
 		case "submit_prompt":
-			payload := inboundEvent.SubmitPrompt
+			payload := inbound.SubmitPrompt
 
-			if payload.SpaceID == "" || payload.ChatID == "" {
-				ui.OnTextChunk("⚠️ Server error: Missing space_id or chat_id in prompt.")
-				continue
-			}
-
-			// Resolve domain dynamically based on physical space state
-			spaceState, err := s.manager.GetSpaceState(payload.SpaceID)
-			if err != nil || spaceState.Domain == "" {
-				ui.OnTextChunk("⚠️ Server error: This ThinkSpace is missing its configuration state (space.json).")
-				continue
-			}
-
-			activeDomain, ok := s.registry.GetDomain(spaceState.Domain)
-			if !ok {
-				ui.OnTextChunk(fmt.Sprintf("⚠️ Server error: The required domain template '%s' is missing from the global registry.", spaceState.Domain))
-				continue
-			}
-
-			ui.OnTextChunk("\n🤖 The Manager is thinking...\n")
-
-			flowConfig, flowOk := s.registry.GetFlow("fanout")
-			if !flowOk {
-				s.logger.Error("critical error: fanout flow configuration not found in registry")
-				continue
-			}
-
-			go func(promptText string, domain workspace.ThinkSpace, spaceID string, chatID string, config flows.FlowConfig) {
-				service := s.manager.GetService(spaceID)
-
-				thread, err := service.StartThread(ctx, chatID)
-				if err != nil {
-					s.logger.Error("Failed to start thread", "error", err)
-					return
+			// UI Hydration using the current TurnManager
+			_, graph, manifest, err := s.turnManager.LoadThreadState(ctx, payload.SpaceID, payload.ChatID)
+			if err == nil {
+				if syncData, err := facade.MarshalSyncHistory(graph.RecentEvents, manifest.Digests); err == nil {
+					ui.SendSyncHistory(syncData)
 				}
+			}
 
-				_ = service.LogUserPrompt(ctx, thread, promptText)
-				history := []*genai.Content{
-					{Role: "user", Parts: []*genai.Part{{Text: promptText}}},
-				}
+			if payload.Text == "" {
+				continue
+			}
 
-				logEmitter := flows.NewSlogEmitter(s.logger)
-				webSocketEmitter := NewWebSocketEmitter(ctx, socket, facade)
-				multiEmitter := flows.MultiFlowEmitter{logEmitter, webSocketEmitter}
-
-				workerModel := domain.Model(workspace.ModelCategoryWorker)
-				workerRules := domain.SubAgentSystemPrompt()
-				executor := llm.NewSubAgentExecutor(s.client, workerModel, workerRules)
-
-				coordinator := session.NewCoordinator(
-					s.logger,
-					service,
-					s.llmAdapter,
-					executor,
-					s.flow,
-					multiEmitter,
-					spaceID,
-					workerRules,
-					config,
-				)
-
-				if err := coordinator.ExecuteTurn(ctx, thread, domain, history, ui); err != nil {
-					s.logger.Error("Coordinator execution failed", "error", err)
+			// Execution using the current TurnManager
+			emitter := NewWebSocketEmitter(ctx, connection, facade)
+			go func() {
+				if err := s.turnManager.ExecuteTurn(ctx, payload.SpaceID, payload.ChatID, payload.Text, ui, emitter); err != nil {
+					s.logger.Error("turn failed", "error", err)
 					ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ System Error: %v\n", err))
 				}
-			}(payload.Text, activeDomain, payload.SpaceID, payload.ChatID, flowConfig)
+			}()
 
+		// 5. Restore the Missing Interactive UI Routing
 		case "select_strategy":
-			ui.PushStrategy(inboundEvent.SelectStrategy.StrategyID)
+			ui.PushStrategy(inbound.SelectStrategy.StrategyID)
 
 		case "review_decision":
-			ui.PushReviewDecision(inboundEvent.ReviewDecision.Accepted)
+			ui.PushReviewDecision(inbound.ReviewDecision.Accepted)
 		}
 	}
 }

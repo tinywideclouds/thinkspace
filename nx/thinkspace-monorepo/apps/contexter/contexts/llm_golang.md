@@ -1891,7 +1891,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 func main() {
@@ -2069,7 +2069,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 func main() {
@@ -2191,7 +2191,7 @@ import (
 	"context"
 
 	"github.com/coder/websocket"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 // WebSocketEmitter pushes flow events directly to a connected frontend client.
@@ -2229,7 +2229,7 @@ import (
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 func TestEventFacade_MarshalFlowEvent(t *testing.T) {
@@ -2297,7 +2297,7 @@ import (
 
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 // --- Domain Types ---
@@ -2519,7 +2519,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 type mockModelClient struct{}
@@ -2638,7 +2638,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 type Server struct {
@@ -3253,7 +3253,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 // ConfigHeader allows us to peek at the YAML type before full unmarshaling.
@@ -3413,7 +3413,7 @@ import (
 	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace/spaces/golang"
 )
 
@@ -5197,7 +5197,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"google.golang.org/genai"
 )
 
@@ -5444,7 +5444,7 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"google.golang.org/genai"
 )
 
@@ -7216,7 +7216,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 // --- Mocks ---

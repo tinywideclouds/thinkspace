@@ -7,13 +7,11 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
-
-	"google.golang.org/genai"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"google.golang.org/genai"
 )
 
 // --- Mocks ---
@@ -68,15 +66,12 @@ func (m *mockSandbox) TearDown(ctx context.Context) error { return nil }
 
 type mockThinkSpace struct{}
 
-func (m *mockThinkSpace) Name() string                                  { return "mock" }
-func (m *mockThinkSpace) SystemPrompt() string                          { return "" }
-func (m *mockThinkSpace) SubAgentSystemPrompt() string                  { return "" }
-func (m *mockThinkSpace) Model(category workspace.ModelCategory) string { return "" }
-func (m *mockThinkSpace) TurnTimeout() time.Duration                    { return 0 }
-func (m *mockThinkSpace) AgentTimeout() time.Duration                   { return 0 }
-func (m *mockThinkSpace) VerifyTimeout() time.Duration                  { return 0 }
-func (m *mockThinkSpace) Tools() []*genai.Tool                          { return nil }
-func (m *mockThinkSpace) Verifier() workspace.Verifier                  { return nil }
+func (m *mockThinkSpace) Config() workspace.ThinkSpaceConfig {
+	return workspace.ThinkSpaceConfig{}
+}
+
+func (m *mockThinkSpace) Tools() []*genai.Tool         { return nil }
+func (m *mockThinkSpace) Verifier() workspace.Verifier { return nil }
 
 type mockVerifier struct {
 	errsToReturn []error

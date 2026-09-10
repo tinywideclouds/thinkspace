@@ -4,7 +4,7 @@ import {
   WSEventSchema,
   DelegationStrategy 
 } from '@org/llm-core-protos';
-import { DomainEvent, DomainDelegationStrategy } from './domain-models';
+import { DomainEvent, DomainDelegationStrategy, DomainDigestMeta } from './domain-models';
 
 export class LlmFacade {
   static toDomain(protocolBufferEvent: WSEvent): DomainEvent | null {
@@ -31,6 +31,22 @@ export class LlmFacade {
       case 'availableSpaces':
         return { type: 'available_spaces', spaces: protocolBufferEvent.payload.value.spaces.map(space => ({ id: space.id, name: space.name })) };
       
+      case 'syncHistory':
+        return {
+          type: 'sync_history',
+          recentEvents: protocolBufferEvent.payload.value.recentEvents.map(e => ({
+            id: e.id,
+            timestamp: e.timestamp,
+            type: e.type,
+            content: e.content,
+            metadata: e.metadata
+          })),
+          digests: Object.entries(protocolBufferEvent.payload.value.digests).reduce((acc, [key, val]) => {
+            acc[key] = { id: val.id, summary: val.summary, isSticky: val.isSticky };
+            return acc;
+          }, {} as Record<string, DomainDigestMeta>)
+        };
+
       case 'flowEvent':
         return {
           type: 'flow_event',

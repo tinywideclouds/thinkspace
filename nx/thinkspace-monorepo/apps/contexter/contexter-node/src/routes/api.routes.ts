@@ -33,7 +33,8 @@ apiRouter.get('/tree', async (req, res) => {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const nodes = entries.map(entry => ({
       name: entry.name,
-      path: path.join(dir, entry.name),
+      // Normalize paths to POSIX for consistent frontend string matching
+      path: path.join(dir, entry.name).replace(/\\/g, '/'),
       isDirectory: entry.isDirectory()
     }));
     res.json(nodes);
@@ -66,8 +67,9 @@ apiRouter.post('/validate', async (req, res) => {
 
 apiRouter.post('/generate', async (req, res) => {
   try {
-    const content = await generateBundleContent(req.body.files);
-    res.json({ content, count: req.body.files.length });
+    const { files, allowLargeFiles } = req.body;
+    const { content, skipped } = await generateBundleContent(files, allowLargeFiles);
+    res.json({ content, count: files.length - skipped.length, skippedLargeFiles: skipped });
   } catch (error) {
     res.status(500).json({ error: 'Failed to generate payload' });
   }

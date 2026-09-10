@@ -16,53 +16,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-func TestServer_WebSocketHandshake(t *testing.T) {
-	mux, expectedSpaceID, manager := setupTestServer(t)
-	httpServer := httptest.NewServer(mux)
-	defer httpServer.Close()
-
-	// Provision valid state so handshake passes isConfigured check
-	_ = manager.UpdateSpaceState(expectedSpaceID, func(s *workspace.SpaceState) { s.Domain = "golang" })
-
-	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatalf("failed to dial websocket: %v", err)
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
-
-	_, data, err := conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("failed to read handshake event: %v", err)
-	}
-
-	var payload struct {
-		AvailableSpaces struct {
-			Spaces []struct {
-				ID           string `json:"id"`
-				Name         string `json:"name"`
-				IsConfigured bool   `json:"isConfigured"`
-			} `json:"spaces"`
-		} `json:"availableSpaces"`
-	}
-
-	if err := json.Unmarshal(data, &payload); err != nil {
-		t.Fatalf("failed to unmarshal payload: %v (data: %s)", err, string(data))
-	}
-
-	if len(payload.AvailableSpaces.Spaces) != 1 || payload.AvailableSpaces.Spaces[0].ID != expectedSpaceID {
-		t.Errorf("expected 1 space with ID %s, got %+v", expectedSpaceID, payload.AvailableSpaces.Spaces)
-	}
-
-	if !payload.AvailableSpaces.Spaces[0].IsConfigured {
-		t.Errorf("expected space to be configured because state was provided")
-	}
-}
-
 func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -96,6 +49,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 
 	<-uiReady
 
+	// Test 1: OnTextChunk routing
 	go func() {
 		ui.OnTextChunk("hello world")
 	}()
@@ -118,6 +72,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Errorf("expected text 'hello world', got '%s'", chatPayload.ChatStream.Text)
 	}
 
+	// Test 2: ChooseNextStep Blocking and Channel Push
 	strategyChosen := make(chan session.DelegationStrategy)
 	go func() {
 		strategyChosen <- ui.ChooseNextStep()
@@ -150,5 +105,19 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for strategy channel to unblock")
+	}
+
+	// Test 3: SendSyncHistory Direct Payload Routing
+	go func() {
+		ui.SendSyncHistory([]byte(`{"type":"sync_history"}`))
+	}()
+
+	_, data, err = conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("failed to read sync history: %v", err)
+	}
+
+	if string(data) != `{"type":"sync_history"}` {
+		t.Errorf("expected sync history payload, got '%s'", string(data))
 	}
 }

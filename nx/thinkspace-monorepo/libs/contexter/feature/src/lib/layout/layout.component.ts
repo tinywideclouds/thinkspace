@@ -67,6 +67,18 @@ export class LayoutComponent {
     this.bundle.loadDefaults();
   }
 
+  async onGenerateContext() {
+    await this.bundle.generateBundle();
+    const skipped = this.bundle.skippedLargeFiles();
+    
+    if (skipped.length > 0) {
+      this.showSnackbar(
+        `Skipped ${skipped.length} large file(s). Check 'Allow files > 1MB' to include them.`, 
+        'error'
+      );
+    }
+  }
+
   onChangeRoot(event: Event) {
     const newRoot = (event.target as HTMLInputElement).value.trim() || './';
     this.workspace.loadDirectory(newRoot);

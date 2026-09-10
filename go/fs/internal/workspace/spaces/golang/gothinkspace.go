@@ -1,8 +1,6 @@
 package golang
 
 import (
-	"time"
-
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
@@ -19,32 +17,8 @@ func NewGoThinkSpace(cfg workspace.ThinkSpaceConfig) *GoThinkSpace {
 	}
 }
 
-func (s *GoThinkSpace) Name() string {
-	return s.config.Name
-}
-
-func (s *GoThinkSpace) SystemPrompt() string {
-	return s.config.SystemPrompt
-}
-
-func (s *GoThinkSpace) SubAgentSystemPrompt() string {
-	return s.config.SubAgentSystemPrompt
-}
-
-func (s *GoThinkSpace) Model(category workspace.ModelCategory) string {
-	return s.config.Models[category]
-}
-
-func (s *GoThinkSpace) TurnTimeout() time.Duration {
-	return time.Duration(s.config.TurnTimeoutSeconds) * time.Second
-}
-
-func (s *GoThinkSpace) AgentTimeout() time.Duration {
-	return time.Duration(s.config.AgentTimeoutSeconds) * time.Second
-}
-
-func (s *GoThinkSpace) VerifyTimeout() time.Duration {
-	return time.Duration(s.config.VerifyTimeoutSeconds) * time.Second
+func (s *GoThinkSpace) Config() workspace.ThinkSpaceConfig {
+	return s.config
 }
 
 func (s *GoThinkSpace) Tools() []*genai.Tool {
@@ -61,15 +35,26 @@ func (s *GoThinkSpace) Tools() []*genai.Tool {
 								Type:        genai.TypeInteger,
 								Description: s.config.AgentCountDescription,
 							},
-							"agent_instructions": {
+							"agent_tasks": {
 								Type:        genai.TypeArray,
 								Description: s.config.AgentInstructionsDescription,
 								Items: &genai.Schema{
-									Type: genai.TypeString,
+									Type: genai.TypeObject,
+									Properties: map[string]*genai.Schema{
+										"context_digest": {
+											Type:        genai.TypeString,
+											Description: s.config.ContextDigestDescription,
+										},
+										"instruction": {
+											Type:        genai.TypeString,
+											Description: s.config.InstructionDescription,
+										},
+									},
+									Required: []string{"context_digest", "instruction"},
 								},
 							},
 						},
-						Required: []string{"agent_count", "agent_instructions"},
+						Required: []string{"agent_count", "agent_tasks"},
 					},
 				},
 			},
@@ -79,5 +64,5 @@ func (s *GoThinkSpace) Tools() []*genai.Tool {
 
 // Verifier returns the domain-specific verification engine.
 func (s *GoThinkSpace) Verifier() workspace.Verifier {
-	return NewGoVerifier(s.VerifyTimeout())
+	return NewGoVerifier(s.config.VerifyTimeout())
 }

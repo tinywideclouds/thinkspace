@@ -40,6 +40,33 @@ describe('LlmFacade', () => {
       });
     });
 
+    it('should map a sync history event correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'syncHistory',
+          value: {
+            recentEvents: [
+              { id: '1', timestamp: '2026-09-02T15:00:00Z', type: 'prompt', content: 'test', metadata: { key: 'val' } }
+            ],
+            digests: {
+              'abc': { id: 'abc', summary: 'test digest', isSticky: true }
+            }
+          }
+        }
+      });
+
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'sync_history',
+        recentEvents: [
+          { id: '1', timestamp: '2026-09-02T15:00:00Z', type: 'prompt', content: 'test', metadata: { key: 'val' } }
+        ],
+        digests: {
+          'abc': { id: 'abc', summary: 'test digest', isSticky: true }
+        }
+      });
+    });
+
     it('should map a flow event correctly', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {

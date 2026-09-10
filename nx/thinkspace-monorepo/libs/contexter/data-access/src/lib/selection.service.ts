@@ -25,8 +25,13 @@ export class SelectionService {
   }
 
   updateLastContextFilename(filename: string) {
-    if (this.lastContextFilename() !== filename) {
-      this.lastContextFilename.set(filename);
+    const stripSequence = (name: string) => name.replace(/_\d+(\.[^.]+)$/, '$1');
+    
+    const oldName = this.lastContextFilename();
+    this.lastContextFilename.set(filename);
+    
+    // Only mark as changed if the base name actually differs
+    if (!oldName || stripSequence(oldName) !== stripSequence(filename)) {
       this.markChanged();
     }
   }
@@ -117,14 +122,34 @@ export class SelectionService {
         this.http.get<{files: string[], description?: string, last_context?: string}>(`${this.baseUrl}/selections/${filename}`)
       );
       
-      const files = payload.files || [];
+      const rawFiles = payload.files || [];
+      // Normalize Windows backslashes to POSIX forward slashes for internal processing
+      const files = rawFiles.map(f => f.replace(/\\/g, '/'));
+      
       this.selectedFiles.set(new Set(files));
       this.validateSelection();
       
+      // Calculate max upward traversal using normalized forward slashes
+      const maxUp = files.reduce((max, f) => {
+        const match = f.match(/^(\.\.\/)+/);
+        return match ? Math.max(max, match[0].match(/\.\.\//g)!.length) : max;
+      }, 0);
+
+      const currentRoot = this.workspace.currentRoot();
+      if (maxUp > 0 && (currentRoot === './' || currentRoot.startsWith('../'))) {
+        const requiredRoot = '../'.repeat(maxUp).slice(0, -1);
+        if (currentRoot !== requiredRoot) {
+          await this.workspace.loadDirectory(requiredRoot);
+        }
+      } else if (maxUp === 0 && currentRoot.startsWith('../')) {
+        await this.workspace.loadDirectory('./');
+      }
+
       const dirsToLoad = new Set<string>();
       for (const file of files) {
+        // We only check for '/' now since we normalized everything
         for (let i = 0; i < file.length; i++) {
-          if (file[i] === '/' || file[i] === '\\') {
+          if (file[i] === '/') {
             const dir = file.substring(0, i);
             if (dir && dir !== '.') dirsToLoad.add(dir);
           }

@@ -10,4 +10,6 @@ files:
   - libs\llm\state\chat\src\test-setup.ts
   - libs\llm\state\chat\src\lib\chat-state.service.spec.ts
   - libs\llm\state\chat\src\lib\chat-state.service.ts
-last_context: llm_state.md
+  - libs\llm\state\chat\src\lib\workspace-state.service.spec.ts
+  - libs\llm\state\chat\src\lib\workspace-state.service.ts
+last_context: llm_state_10.md

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/coder/websocket"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 type WebSocketEmitter struct {

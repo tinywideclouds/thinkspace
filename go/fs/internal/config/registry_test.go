@@ -14,9 +14,17 @@ func TestRegistry_Methods(t *testing.T) {
 golang:
   type: "space"
   name: "Golang Environment"
+  max_worker_tokens: 8192
+  tool_description: "mock tool"
+  agent_count_description: "mock count"
+  agent_instructions_description: "mock inst array"
+  context_digest_description: "mock digest"
+  instruction_description: "mock instruction"
+  worker_retry_prompt: "mock retry prompt"
   models:
     manager: "gemini-3.6-flash"
-  base_agent_rules: "Must use /src"
+  roles:
+    worker: "Must use /src"
 
 fanout:
   type: "flow"
@@ -38,22 +46,10 @@ fanout:
 	if spaceCfg.Name != "Golang Environment" {
 		t.Errorf("GetConfig: Expected Name 'Golang Environment', got %q", spaceCfg.Name)
 	}
-
-	_, ok = registry.GetDomain("golang")
-	if !ok {
-		t.Errorf("GetDomain: Expected to find 'golang'")
+	if spaceCfg.Roles.Worker != "Must use /src" {
+		t.Errorf("GetConfig: Expected Worker Role 'Must use /src', got %q", spaceCfg.Roles.Worker)
 	}
-
-	flowCfg, ok := registry.GetFlow("fanout")
-	if !ok {
-		t.Fatalf("GetFlow: Expected to find 'fanout'")
-	}
-	if flowCfg.Name != "Parallel FanOut" {
-		t.Errorf("GetFlow: Expected Name 'Parallel FanOut', got %q", flowCfg.Name)
-	}
-
-	allConfigs := registry.GetAllConfigs()
-	if len(allConfigs) != 1 {
-		t.Errorf("GetAllConfigs: Expected 1 config, got %d", len(allConfigs))
+	if spaceCfg.WorkerRetryPrompt != "mock retry prompt" {
+		t.Errorf("GetConfig: Expected WorkerRetryPrompt 'mock retry prompt', got %q", spaceCfg.WorkerRetryPrompt)
 	}
 }

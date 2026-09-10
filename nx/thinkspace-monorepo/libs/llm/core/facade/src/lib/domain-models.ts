@@ -15,10 +15,23 @@ export interface DomainFlowEvent {
   passed: boolean;
 }
 
-// Added the standalone SpaceInfo interface
 export interface SpaceInfo {
   id: string;
   name: string;
+}
+
+export interface DomainLedgerEvent {
+  id: string;
+  timestamp: string;
+  type: string;
+  content: string;
+  metadata: Record<string, string>;
+}
+
+export interface DomainDigestMeta {
+  id: string;
+  summary: string;
+  isSticky: boolean;
 }
 
 export type DomainEvent =
@@ -31,7 +44,8 @@ export type DomainEvent =
   | { type: 'agent_complete'; agentId: number; branch: string; verified: boolean }
   | { type: 'request_strategy'; active: boolean }
   | { type: 'request_review'; branch: string }
-  | { type: 'available_spaces'; spaces: SpaceInfo[] } // Updated to use the interface
+  | { type: 'available_spaces'; spaces: SpaceInfo[] }
+  | { type: 'sync_history'; recentEvents: DomainLedgerEvent[]; digests: Record<string, DomainDigestMeta> }
   | DomainFlowEvent;
 
 export enum DomainDelegationStrategy {

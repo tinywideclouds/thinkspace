@@ -13,10 +13,11 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 )
 
 type mockModelClient struct{}
@@ -28,11 +29,22 @@ func (m *mockModelClient) GenerateContentStream(ctx context.Context, model strin
 type dummyFlow struct{}
 
 func (f *dummyFlow) Name() string { return "dummy" }
-func (f *dummyFlow) Execute(ctx context.Context, service *workspace.Service, thread *workspace.Thread, space workspace.ThinkSpace, arguments map[string]any, flowConfig flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier workspace.Verifier) (*flows.FlowResult, error) {
+
+func (f *dummyFlow) Execute(
+	ctx context.Context,
+	service *workspace.Service,
+	thread *chat.Thread,
+	space workspace.ThinkSpace,
+	arguments map[string]any,
+	flowConfig flows.FlowConfig,
+	flowContext flows.FlowContext,
+	emitter flows.FlowEmitter,
+	executor workspace.SubAgentExecutor,
+	verifier workspace.Verifier,
+) (*flows.FlowResult, error) {
 	return &flows.FlowResult{}, nil
 }
 
-// setupTestServer returns a registered mux, the expected space ID, and the manager for downstream state testing.
 func setupTestServer(t *testing.T) (*http.ServeMux, string, *workspace.ServiceManager) {
 	tempDir := t.TempDir()
 	configsDir := filepath.Join(tempDir, "configs")
@@ -50,6 +62,9 @@ func setupTestServer(t *testing.T) (*http.ServeMux, string, *workspace.ServiceMa
   type: space
   name: test-domain
   system_prompt: "You are a test assistant."
+  roles:
+    manager: "manager rules"
+    worker: "worker rules"
   models:
     manager: "gemini-test-manager"
     worker: "gemini-test-worker"

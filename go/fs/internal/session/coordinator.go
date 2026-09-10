@@ -8,8 +8,8 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 	"google.golang.org/genai"
 )
 
@@ -71,15 +71,15 @@ func (c *Coordinator) ExecuteTurn(
 	history []*genai.Content,
 	userInterface UserInterface,
 ) error {
-	turnContext, cancel := context.WithTimeout(ctx, thinkSpace.TurnTimeout())
+	turnContext, cancel := context.WithTimeout(ctx, thinkSpace.Config().TurnTimeout())
 	defer cancel()
 
-	managerModel := thinkSpace.Model(workspace.ModelCategoryManager)
+	managerModel := thinkSpace.Config().Models[workspace.ModelCategoryManager]
 
 	stream := c.llmAdapter.GenerateStream(
 		turnContext,
 		managerModel,
-		thinkSpace.SystemPrompt(),
+		thinkSpace.Config().ManagerSystemPrompt(),
 		thinkSpace.Tools(),
 		history,
 	)
@@ -115,12 +115,21 @@ func (c *Coordinator) ExecuteTurn(
 		})
 	}
 
+	var executedAnyFlow bool
+	var flowSummary strings.Builder
+
 	for _, call := range interceptedTools {
 		if call.Name == "propose_change" {
+			executedAnyFlow = true
 			flowContext := flows.FlowContext{
 				FlowID:         fmt.Sprintf("fanout-%s", thread.ID),
 				SpaceID:        c.spaceID,
 				BaseAgentRules: c.baseAgentRules,
+			}
+
+			activeFlowConfig := c.flowConfiguration
+			if thinkSpace.Config().WorkerRetryPrompt != "" {
+				activeFlowConfig.RetryPrompt = thinkSpace.Config().WorkerRetryPrompt
 			}
 
 			result, err := c.fanOutFlow.Execute(
@@ -129,7 +138,7 @@ func (c *Coordinator) ExecuteTurn(
 				thread,
 				thinkSpace,
 				call.Args,
-				c.flowConfiguration,
+				activeFlowConfig,
 				flowContext,
 				c.emitter,
 				c.executor,
@@ -138,21 +147,34 @@ func (c *Coordinator) ExecuteTurn(
 
 			if err != nil {
 				c.logger.ErrorContext(turnContext, "delegation flow failed", "error", err)
+				flowSummary.WriteString(fmt.Sprintf("- System Error: Delegation flow failed: %v\n", err))
 				continue
 			}
 
 			if len(result.Branches) == 0 {
+				flowSummary.WriteString("- All sub-agents failed to produce verifiable candidates.\n")
 				continue
 			}
 
 			branchesToReview := result.Branches
-
 			strategy := userInterface.ChooseNextStep()
+
+			strategyNames := map[DelegationStrategy]string{
+				StrategySkip:   "Skip / Abort",
+				StrategyManual: "Manual Review",
+				StrategyReview: "Assisted Review",
+				StrategyRefine: "Refine (Manager synthesized final version)",
+			}
+
+			// Log strategy choice to ledger for historical context
+			_ = c.workspaceService.LogUserMessage(turnContext, thread, fmt.Sprintf("[User selected triage strategy: %s]", strategyNames[strategy]))
+			flowSummary.WriteString(fmt.Sprintf("- User selected triage strategy: %s\n", strategyNames[strategy]))
 
 			if strategy == StrategySkip {
 				for _, branch := range branchesToReview {
 					candidateID := strings.TrimPrefix(branch, "candidate/")
 					_ = c.workspaceService.ResolveCandidate(turnContext, thread, candidateID, false, "Auto-rejected (Review Skipped)")
+					flowSummary.WriteString(fmt.Sprintf("- Candidate %s was Auto-Rejected.\n", candidateID))
 				}
 				continue
 			}
@@ -167,27 +189,75 @@ func (c *Coordinator) ExecuteTurn(
 
 				if hasAcceptedAny {
 					_ = c.workspaceService.ResolveCandidate(turnContext, thread, candidateID, false, "Auto-rejected (Another candidate was accepted)")
+					flowSummary.WriteString(fmt.Sprintf("- Candidate %s was Auto-Rejected (conflict).\n", candidateID))
 					continue
 				}
 
 				if err := c.workspaceService.PreviewCandidate(turnContext, thread, candidateID); err != nil {
 					c.logger.ErrorContext(turnContext, "preview checkout failed", "error", err)
 					_ = c.workspaceService.ResolveCandidate(turnContext, thread, candidateID, false, "Auto-rejected (Preview checkout failed)")
+					flowSummary.WriteString(fmt.Sprintf("- Candidate %s was Auto-Rejected (checkout failed).\n", candidateID))
 					continue
 				}
 
 				accept := userInterface.ReviewCandidate(branch)
 
 				reason := "Rejected via triage"
+				status := "REJECTED"
 				if accept {
 					reason = "Accepted via triage"
+					status = "ACCEPTED"
 					hasAcceptedAny = true
 				}
+
+				flowSummary.WriteString(fmt.Sprintf("- Candidate %s was %s by the user.\n", candidateID, status))
 
 				if err := c.workspaceService.ResolveCandidate(turnContext, thread, candidateID, accept, reason); err != nil {
 					c.logger.ErrorContext(turnContext, "failed to resolve candidate", "error", err)
 				}
 			}
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Post-Flow Conversational Wrap-Up
+	// -------------------------------------------------------------------------
+	if executedAnyFlow {
+		userInterface.OnTextChunk("\n\n🤖 **Manager summarizing turn...**\n")
+
+		// We inject the flow trace directly into a synthetic prompt so the Manager can narrate the outcome.
+		wrapUpPrompt := fmt.Sprintf(
+			"The sub-agent orchestration flow is now complete. Here is the system trace of the outcome:\n\n%s\n\n"+
+				"Please provide a friendly, conversational wrap-up to the human user. Briefly explain what the agents built, "+
+				"mention the triage strategy we used (e.g., if we refined their outputs), and confirm the final outcome. "+
+				"Do NOT use any tools.", flowSummary.String(),
+		)
+
+		history = append(history, &genai.Content{
+			Role:  "user",
+			Parts: []*genai.Part{{Text: wrapUpPrompt}},
+		})
+
+		wrapUpStream := c.llmAdapter.GenerateStream(turnContext, managerModel, thinkSpace.Config().ManagerSystemPrompt(), nil, history)
+
+		var wrapUpResponse strings.Builder
+		for chunk, err := range wrapUpStream {
+			if err != nil {
+				c.logger.ErrorContext(turnContext, "wrap up stream failed", "error", err)
+				break
+			}
+			if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
+				for _, part := range chunk.Candidates[0].Content.Parts {
+					if part.Text != "" {
+						userInterface.OnTextChunk(part.Text)
+						wrapUpResponse.WriteString(part.Text)
+					}
+				}
+			}
+		}
+
+		if wrapUpResponse.Len() > 0 {
+			_ = c.workspaceService.LogModelResponse(turnContext, thread, wrapUpResponse.String())
 		}
 	}
 
@@ -243,10 +313,10 @@ func (c *Coordinator) executeLLMReviewPhase(
 		Parts: []*genai.Part{{Text: llmPrompt}},
 	})
 
-	userInterface.OnTextChunk("\n\n🤖 Manager evaluating candidates...\n")
+	userInterface.OnTextChunk("\n\n🤖 **Manager evaluating candidates...**\n")
 
-	managerModel := thinkSpace.Model(workspace.ModelCategoryManager)
-	evaluationStream := c.llmAdapter.GenerateStream(ctx, managerModel, thinkSpace.SystemPrompt(), nil, evaluationHistory)
+	managerModel := thinkSpace.Config().Models[workspace.ModelCategoryManager]
+	evaluationStream := c.llmAdapter.GenerateStream(ctx, managerModel, thinkSpace.Config().ManagerSystemPrompt(), nil, evaluationHistory)
 
 	var evaluationResponse strings.Builder
 	for chunk, err := range evaluationStream {
@@ -272,7 +342,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 		return candidateBranches
 	}
 
-	userInterface.OnTextChunk("\n\n🚀 Synthesizing final candidate based on evaluation...\n")
+	userInterface.OnTextChunk("\n\n🚀 **Synthesizing final candidate based on evaluation...**\n")
 
 	refinementArguments := map[string]any{
 		"agent_count": float64(1),
@@ -290,13 +360,18 @@ func (c *Coordinator) executeLLMReviewPhase(
 		BaseAgentRules: c.baseAgentRules,
 	}
 
+	activeFlowConfig := c.flowConfiguration
+	if thinkSpace.Config().WorkerRetryPrompt != "" {
+		activeFlowConfig.RetryPrompt = thinkSpace.Config().WorkerRetryPrompt
+	}
+
 	refinementResult, err := c.fanOutFlow.Execute(
 		ctx,
 		c.workspaceService,
 		thread,
 		thinkSpace,
 		refinementArguments,
-		c.flowConfiguration,
+		activeFlowConfig,
 		flowContext,
 		c.emitter,
 		c.executor,

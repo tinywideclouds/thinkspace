@@ -12,8 +12,8 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
 	"google.golang.org/genai"
 )
 
@@ -57,15 +57,19 @@ func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidat
 
 type mockThinkSpace struct{}
 
-func (m *mockThinkSpace) Name() string                                  { return "mock" }
-func (m *mockThinkSpace) SystemPrompt() string                          { return "system prompt" }
-func (m *mockThinkSpace) SubAgentSystemPrompt() string                  { return "sub agent prompt" }
-func (m *mockThinkSpace) Model(category workspace.ModelCategory) string { return "test-model" }
-func (m *mockThinkSpace) Tools() []*genai.Tool                          { return nil }
-func (m *mockThinkSpace) TurnTimeout() time.Duration                    { return 5 * time.Minute }
-func (m *mockThinkSpace) AgentTimeout() time.Duration                   { return 1 * time.Minute }
-func (m *mockThinkSpace) VerifyTimeout() time.Duration                  { return 15 * time.Second }
-func (m *mockThinkSpace) Verifier() workspace.Verifier                  { return &mockVerifier{} }
+func (m *mockThinkSpace) Config() workspace.ThinkSpaceConfig {
+	cfg := workspace.ThinkSpaceConfig{
+		Models: map[workspace.ModelCategory]string{
+			workspace.ModelCategoryManager: "test-manager",
+		},
+		TurnTimeoutSeconds: 300,
+	}
+	cfg.ApplyDefaults()
+	return cfg
+}
+
+func (m *mockThinkSpace) Tools() []*genai.Tool         { return nil }
+func (m *mockThinkSpace) Verifier() workspace.Verifier { return &mockVerifier{} }
 
 type mockVerifier struct{}
 

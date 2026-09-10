@@ -41,6 +41,10 @@ func (ui *WebSocketUI) sendBytes(data []byte) {
 	}
 }
 
+func (ui *WebSocketUI) SendSyncHistory(data []byte) {
+	ui.sendBytes(data)
+}
+
 func (ui *WebSocketUI) OnTextChunk(text string) {
 	if data, err := ui.facade.MarshalChatStream(text); err == nil {
 		ui.sendBytes(data)

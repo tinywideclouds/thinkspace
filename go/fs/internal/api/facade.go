@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+	"uuid"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
 // --- Domain Types ---
@@ -60,6 +62,38 @@ func NewEventFacade() *EventFacade {
 	}
 }
 
+func (f *EventFacade) MarshalSyncHistory(recentEvents []chat.Event, digests map[uuid.UUID]chat.DigestMeta) ([]byte, error) {
+	var pbEvents []*pb.LedgerEvent
+	for _, e := range recentEvents {
+		pbEvents = append(pbEvents, &pb.LedgerEvent{
+			Id:        e.ID.String(),
+			Timestamp: e.Timestamp.Format(time.RFC3339),
+			Type:      string(e.Type),
+			Content:   e.Content,
+			Metadata:  e.Metadata,
+		})
+	}
+
+	pbDigests := make(map[string]*pb.DigestMeta)
+	for id, d := range digests {
+		pbDigests[id.String()] = &pb.DigestMeta{
+			Id:       d.ID.String(),
+			Summary:  d.Summary,
+			IsSticky: d.IsSticky,
+		}
+	}
+
+	event := &pb.WSEvent{
+		Payload: &pb.WSEvent_SyncHistory{
+			SyncHistory: &pb.SyncHistoryPayload{
+				RecentEvents: pbEvents,
+				Digests:      pbDigests,
+			},
+		},
+	}
+	return f.marshaler.Marshal(event)
+}
+
 func (f *EventFacade) MarshalRESTSpaces(spaces []SpaceState) ([]byte, error) {
 	var rawSpaces []json.RawMessage
 
@@ -82,6 +116,28 @@ func (f *EventFacade) MarshalRESTSpaces(spaces []SpaceState) ([]byte, error) {
 	}
 
 	return json.Marshal(rawSpaces)
+}
+
+// UnmarshalRESTSpaces completes the Facade symmetry, hiding the protojson array parsing from tests
+func (f *EventFacade) UnmarshalRESTSpaces(data []byte) ([]SpaceState, error) {
+	var rawSpaces []json.RawMessage
+	if err := json.Unmarshal(data, &rawSpaces); err != nil {
+		return nil, err
+	}
+
+	var spaces []SpaceState
+	for _, raw := range rawSpaces {
+		var pbSpace pb.SpaceInfo
+		if err := f.unmarshaler.Unmarshal(raw, &pbSpace); err != nil {
+			return nil, err
+		}
+		spaces = append(spaces, SpaceState{
+			ID:           pbSpace.Id,
+			Name:         pbSpace.Name,
+			IsConfigured: pbSpace.IsConfigured,
+		})
+	}
+	return spaces, nil
 }
 
 func (f *EventFacade) MarshalAvailableSpaces(spaces []SpaceState) ([]byte, error) {
@@ -190,8 +246,24 @@ func (f *EventFacade) UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		}
 	case *pb.WSEvent_SelectStrategy:
 		domainEvent.Type = "select_strategy"
+
+		// Explicit Mapping to prevent off-by-one enum drift
+		var strategy session.DelegationStrategy
+		switch payload.SelectStrategy.StrategyId {
+		case pb.DelegationStrategy_DELEGATION_STRATEGY_SKIP:
+			strategy = session.StrategySkip
+		case pb.DelegationStrategy_DELEGATION_STRATEGY_MANUAL:
+			strategy = session.StrategyManual
+		case pb.DelegationStrategy_DELEGATION_STRATEGY_REVIEW:
+			strategy = session.StrategyReview
+		case pb.DelegationStrategy_DELEGATION_STRATEGY_REFINE:
+			strategy = session.StrategyRefine
+		default:
+			strategy = session.StrategyManual // Safe fallback
+		}
+
 		domainEvent.SelectStrategy = &SelectStrategyPayload{
-			StrategyID: session.DelegationStrategy(payload.SelectStrategy.StrategyId),
+			StrategyID: strategy,
 		}
 	case *pb.WSEvent_ReviewDecision:
 		domainEvent.Type = "review_decision"
