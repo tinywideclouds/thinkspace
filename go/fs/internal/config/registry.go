@@ -8,21 +8,21 @@ import (
 	"sync"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/spaces/golang"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces/golang"
 )
 
 type Registry struct {
 	mu      sync.RWMutex
-	domains map[string]workspace.ThinkSpace
-	configs map[string]workspace.ThinkSpaceConfig
+	domains map[string]spaces.ThinkSpace
+	configs map[string]spaces.ThinkSpaceConfig
 	flows   map[string]flows.FlowConfig
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
-		domains: make(map[string]workspace.ThinkSpace),
-		configs: make(map[string]workspace.ThinkSpaceConfig),
+		domains: make(map[string]spaces.ThinkSpace),
+		configs: make(map[string]spaces.ThinkSpaceConfig),
 		flows:   make(map[string]flows.FlowConfig),
 	}
 }
@@ -67,14 +67,14 @@ func (r *Registry) LoadFS(fsys fs.FS, dir string) error {
 	return nil
 }
 
-func (r *Registry) GetDomain(id string) (workspace.ThinkSpace, bool) {
+func (r *Registry) GetDomain(id string) (spaces.ThinkSpace, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	domain, ok := r.domains[id]
 	return domain, ok
 }
 
-func (r *Registry) GetConfig(id string) (workspace.ThinkSpaceConfig, bool) {
+func (r *Registry) GetConfig(id string) (spaces.ThinkSpaceConfig, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	cfg, ok := r.configs[id]
@@ -88,10 +88,10 @@ func (r *Registry) GetFlow(id string) (flows.FlowConfig, bool) {
 	return flow, ok
 }
 
-func (r *Registry) GetAllConfigs() map[string]workspace.ThinkSpaceConfig {
+func (r *Registry) GetAllConfigs() map[string]spaces.ThinkSpaceConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	res := make(map[string]workspace.ThinkSpaceConfig)
+	res := make(map[string]spaces.ThinkSpaceConfig)
 	for k, v := range r.configs {
 		res[k] = v
 	}

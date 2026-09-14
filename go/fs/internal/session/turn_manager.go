@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -112,7 +114,18 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return fmt.Errorf("assembling context: %w", err)
 	}
 
-	workerModel := thinkSpace.Config().Models[workspace.ModelCategoryWorker]
+	var promptBuilder strings.Builder
+	promptBuilder.WriteString("### THE MAPBOOK (WORKSPACE CONTEXT)\n")
+
+	if layers, err := thinkSpace.Mapbook().GenerateLayers(ctx, workspaceService.WorkspaceRoot()); err == nil {
+		for layerName, content := range layers {
+			promptBuilder.WriteString(fmt.Sprintf("--- %s Map ---\n%s\n\n", layerName, content))
+		}
+	}
+
+	dynamicSystemPrompt := thinkSpace.Config().ManagerSystemPrompt() + "\n\n" + promptBuilder.String()
+
+	workerModel := thinkSpace.Config().Models[spaces.ModelCategoryWorker]
 	executor := llm.NewSubAgentExecutor(tm.modelClient, workerModel, thinkSpace.Config().WorkerSystemPrompt(), thinkSpace.Config().MaxWorkerTokens)
 
 	coordinator := NewCoordinator(
@@ -127,5 +140,24 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		flowConfig,
 	)
 
-	return coordinator.ExecuteTurn(ctx, thread, thinkSpace, history, ui)
+	// Inject the dynamicMapbook system prompt into the thinkSpace wrapper specifically for this turn
+	wrappedThinkSpace := &dynamicThinkSpaceWrapper{
+		ThinkSpace:   thinkSpace,
+		systemPrompt: dynamicSystemPrompt,
+	}
+
+	return coordinator.ExecuteTurn(ctx, thread, wrappedThinkSpace, history, ui)
+}
+
+// dynamicThinkSpaceWrapper intercepts the ManagerSystemPrompt to inject Mapbook contexts at runtime.
+type dynamicThinkSpaceWrapper struct {
+	spaces.ThinkSpace
+	systemPrompt string
+}
+
+func (d *dynamicThinkSpaceWrapper) Config() spaces.ThinkSpaceConfig {
+	cfg := d.ThinkSpace.Config()
+	cfg.SystemPrompt = d.systemPrompt
+	cfg.Roles.Manager = "" // Already merged in TurnManager
+	return cfg
 }

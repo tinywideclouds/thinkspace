@@ -6,7 +6,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 )
 
 // ConfigHeader allows us to peek at the YAML type before full unmarshaling.
@@ -16,7 +16,7 @@ type ConfigHeader struct {
 
 // ParsedConfig holds the raw extracted configurations from a YAML file.
 type ParsedConfig struct {
-	Spaces map[string]workspace.ThinkSpaceConfig
+	Spaces map[string]spaces.ThinkSpaceConfig
 	Flows  map[string]flows.FlowConfig
 }
 
@@ -29,7 +29,7 @@ func ParseConfigBytes(data []byte) (*ParsedConfig, error) {
 	}
 
 	result := &ParsedConfig{
-		Spaces: make(map[string]workspace.ThinkSpaceConfig),
+		Spaces: make(map[string]spaces.ThinkSpaceConfig),
 		Flows:  make(map[string]flows.FlowConfig),
 	}
 
@@ -48,7 +48,7 @@ func ParseConfigBytes(data []byte) (*ParsedConfig, error) {
 			result.Flows[id] = cfg
 
 		case "space", "": // Default to space for backward compatibility
-			var cfg workspace.ThinkSpaceConfig
+			var cfg spaces.ThinkSpaceConfig
 			if err := node.Decode(&cfg); err != nil {
 				return nil, fmt.Errorf("failed to parse space '%s': %w", id, err)
 			}

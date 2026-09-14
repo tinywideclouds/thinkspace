@@ -1,23 +1,8 @@
-package workspace
+package spaces
 
 import (
 	"time"
-
-	"google.golang.org/genai"
 )
-
-// ModelCategory defines the role of an LLM in the orchestration process.
-type ModelCategory string
-
-const (
-	ModelCategoryManager ModelCategory = "manager"
-	ModelCategoryWorker  ModelCategory = "worker"
-)
-
-type ThinkSpaceRoles struct {
-	Manager string `yaml:"manager"`
-	Worker  string `yaml:"worker"`
-}
 
 // ThinkSpaceConfig represents the raw YAML configuration for a domain space.
 type ThinkSpaceConfig struct {
@@ -32,9 +17,11 @@ type ThinkSpaceConfig struct {
 	MaxWorkerTokens              int                      `yaml:"max_worker_tokens"`
 	ToolDescription              string                   `yaml:"tool_description"`
 	AgentCountDescription        string                   `yaml:"agent_count_description"`
+	AssignedTagsDescription      string                   `yaml:"assigned_tags_description"`
 	AgentInstructionsDescription string                   `yaml:"agent_instructions_description"`
 	ContextDigestDescription     string                   `yaml:"context_digest_description"`
 	InstructionDescription       string                   `yaml:"instruction_description"`
+	TargetFilesDescription       string                   `yaml:"target_files_description"`
 	WorkerRetryPrompt            string                   `yaml:"worker_retry_prompt"`
 }
 
@@ -70,13 +57,4 @@ func (c ThinkSpaceConfig) AgentTimeout() time.Duration {
 
 func (c ThinkSpaceConfig) VerifyTimeout() time.Duration {
 	return time.Duration(c.VerifyTimeoutSeconds) * time.Second
-}
-
-// ThinkSpace defines the highly stable contract for a domain-specific environment.
-type ThinkSpace interface {
-	Config() ThinkSpaceConfig
-	Tools() []*genai.Tool
-
-	// Verifier returns the domain-specific verification engine.
-	Verifier() Verifier
 }

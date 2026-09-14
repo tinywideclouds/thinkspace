@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -23,12 +24,12 @@ type Flow interface {
 		ctx context.Context,
 		service *workspace.Service,
 		thread *chat.Thread,
-		space workspace.ThinkSpace,
+		space spaces.ThinkSpace,
 		args map[string]any,
 		flowConfig FlowConfig,
 		flowContext FlowContext,
 		emitter FlowEmitter,
 		executor workspace.SubAgentExecutor,
-		verifier workspace.Verifier,
+		verifier spaces.Verifier,
 	) (*FlowResult, error)
 }

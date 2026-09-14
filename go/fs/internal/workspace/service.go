@@ -116,7 +116,8 @@ func (s *Service) ProposeCandidate(ctx context.Context, thread *chat.Thread, too
 		return nil, fmt.Errorf("previewing candidate: %w", err)
 	}
 
-	if err := s.LogProposal(ctx, thread, candidateID, fileList); err != nil {
+	description := fmt.Sprintf("Proposed files: %s", strings.Join(fileList, ", "))
+	if err := s.LogProposal(ctx, thread, candidateID, description, nil); err != nil {
 		s.logger.ErrorContext(ctx, "failed to log proposal", "error", err)
 	}
 
@@ -188,11 +189,11 @@ func (s *Service) LogModelResponse(ctx context.Context, thread *chat.Thread, con
 	return s.bus.Publish(ctx, thread, event)
 }
 
-func (s *Service) LogProposal(ctx context.Context, thread *chat.Thread, candidateID string, files []string) error {
-	event := chat.NewEvent(chat.EventCandidate, fmt.Sprintf("Proposed files: %s", strings.Join(files, ", ")))
+func (s *Service) LogProposal(ctx context.Context, thread *chat.Thread, candidateID string, description string, tags []string) error {
+	event := chat.NewEvent(chat.EventCandidate, description)
+	event.Tags = tags
 	event.Metadata = map[string]string{
 		"proposal_uid": candidateID,
-		"files":        strings.Join(files, ","),
 	}
 	return s.bus.Publish(ctx, thread, event)
 }

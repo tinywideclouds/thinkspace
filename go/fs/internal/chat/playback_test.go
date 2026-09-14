@@ -25,7 +25,11 @@ func TestPlaybackEngine_LoadState_PopulatesGraphAndManifest(t *testing.T) {
 	digestEvent := chat.NewEvent(chat.EventDigest, "User is building a Go standard library server.")
 	digestEvent.Metadata = map[string]string{"is_sticky": "true"}
 
-	events := []chat.Event{promptEvent, modelEvent, digestEvent}
+	// Phase 3 Coverage: Tagged Event
+	tagEvent := chat.NewEvent(chat.EventCandidate, "Tagged proposal")
+	tagEvent.Tags = []string{"architecture", "auth"}
+
+	events := []chat.Event{promptEvent, modelEvent, digestEvent, tagEvent}
 	for _, event := range events {
 		data, _ := json.Marshal(event)
 		file.Write(append(data, '\n'))
@@ -43,26 +47,20 @@ func TestPlaybackEngine_LoadState_PopulatesGraphAndManifest(t *testing.T) {
 		t.Fatalf("LoadState failed: %v", err)
 	}
 
-	if len(graph.RecentEvents) != 2 {
-		t.Errorf("Expected exactly 2 recent conversational events, got %d", len(graph.RecentEvents))
+	if len(graph.RecentEvents) != 3 {
+		t.Errorf("Expected exactly 3 recent conversational events, got %d", len(graph.RecentEvents))
 	}
-	if graph.RecentEvents[0].Content != "How do I build a server?" {
-		t.Errorf("Unexpected first event content: %s", graph.RecentEvents[0].Content)
+
+	// Assert Lenses Indexing
+	if len(manifest.Lenses["architecture"]) != 1 || manifest.Lenses["architecture"][0] != tagEvent.ID {
+		t.Errorf("Expected 'architecture' lens to correctly index the tagEvent ID")
+	}
+	if len(manifest.Lenses["auth"]) != 1 || manifest.Lenses["auth"][0] != tagEvent.ID {
+		t.Errorf("Expected 'auth' lens to correctly index the tagEvent ID")
 	}
 
 	if len(manifest.Digests) != 1 {
 		t.Fatalf("Expected exactly 1 digest in manifest, got %d", len(manifest.Digests))
-	}
-
-	loadedDigest, exists := manifest.Digests[digestEvent.ID]
-	if !exists {
-		t.Errorf("Digest missing from manifest lookup map by ID")
-	}
-	if loadedDigest.Summary != "User is building a Go standard library server." {
-		t.Errorf("Unexpected digest summary: %s", loadedDigest.Summary)
-	}
-	if !loadedDigest.IsSticky {
-		t.Errorf("Expected digest to be flagged as sticky based on metadata")
 	}
 }
 

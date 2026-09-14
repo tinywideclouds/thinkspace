@@ -17,22 +17,34 @@ func TestFanOutFlow_ParseTasks(t *testing.T) {
 		expected []SubAgentTask
 	}{
 		{
-			name: "Structured Object Tasks",
+			name: "Structured Object Tasks with Target Files",
 			args: map[string]any{
 				"agent_tasks": []any{
 					map[string]any{
 						"context_digest": "System uses Go 1.22",
 						"instruction":    "Build a mux",
+						"target_files":   []any{"src/main.go", "src/router.go"},
 					},
 					map[string]any{
 						"context_digest": "System uses Go 1.22",
 						"instruction":    "Build a gin router",
+						// Omitting target_files to ensure safe fallback
 					},
 				},
 			},
 			expected: []SubAgentTask{
-				{AgentID: "agent-1", ContextDigest: "System uses Go 1.22", Instruction: "Build a mux"},
-				{AgentID: "agent-2", ContextDigest: "System uses Go 1.22", Instruction: "Build a gin router"},
+				{
+					AgentID:       "agent-1",
+					ContextDigest: "System uses Go 1.22",
+					Instruction:   "Build a mux",
+					TargetFiles:   []string{"src/main.go", "src/router.go"},
+				},
+				{
+					AgentID:       "agent-2",
+					ContextDigest: "System uses Go 1.22",
+					Instruction:   "Build a gin router",
+					TargetFiles:   nil,
+				},
 			},
 		},
 		{
@@ -44,8 +56,8 @@ func TestFanOutFlow_ParseTasks(t *testing.T) {
 				},
 			},
 			expected: []SubAgentTask{
-				{AgentID: "agent-1", ContextDigest: "", Instruction: "Just build a mux"},
-				{AgentID: "agent-2", ContextDigest: "", Instruction: "Just build a gin router"},
+				{AgentID: "agent-1", ContextDigest: "", Instruction: "Just build a mux", TargetFiles: nil},
+				{AgentID: "agent-2", ContextDigest: "", Instruction: "Just build a gin router", TargetFiles: nil},
 			},
 		},
 		{

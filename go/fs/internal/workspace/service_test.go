@@ -12,6 +12,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
+// ... (Keep existing mocks: mockSandbox, mockChatEngine, setupServiceTest) ...
 type mockSandbox struct {
 	writeCalled    bool
 	readCalled     bool
@@ -107,13 +108,15 @@ func setupServiceTest(t *testing.T) (*workspace.Service, *mockChatEngine, string
 	mockEngine := &mockChatEngine{}
 	workspaceRoot := t.TempDir()
 
-	// Inject the EventBus into the service wrapper
 	bus := chat.NewEventBus()
+	// Must attach subscriber to physically write to disk for LoadEvents to work
+	bus.Subscribe(chat.NewLedgerSubscriber())
 
 	svc := workspace.NewService(logger, mockEngine, workspaceRoot, bus)
 	return svc, mockEngine, workspaceRoot
 }
 
+// ... (Keep existing TestService_StartThread, TestService_ProposeAndResolveCandidate, TestService_Receipts) ...
 func TestService_StartThread(t *testing.T) {
 	svc, mockEngine, _ := setupServiceTest(t)
 	ctx := context.Background()
@@ -221,5 +224,31 @@ func TestService_Receipts(t *testing.T) {
 	}
 	if !strings.Contains(xmlStr, `AgentID="agent-1"`) {
 		t.Errorf("Expected AgentRecord in XML, got: %s", xmlStr)
+	}
+}
+
+// Phase 3 Coverage: Verify Tags map safely to the event and persist to disk
+func TestService_LedgerTags(t *testing.T) {
+	svc, _, _ := setupServiceTest(t)
+	ctx := context.Background()
+
+	thread, _ := svc.StartThread(ctx, "tag-thread")
+
+	tags := []string{"ui", "frontend"}
+	if err := svc.LogProposal(ctx, thread, "cand-123", "Added UI", tags); err != nil {
+		t.Fatalf("LogProposal failed: %v", err)
+	}
+
+	events, err := svc.LoadEvents(ctx, thread)
+	if err != nil {
+		t.Fatalf("LoadEvents failed: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("expected exactly 1 event in ledger, got %d", len(events))
+	}
+
+	if len(events[0].Tags) != 2 || events[0].Tags[0] != "ui" {
+		t.Errorf("expected tags [ui, frontend] to be recovered from ledger, got %v", events[0].Tags)
 	}
 }

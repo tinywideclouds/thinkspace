@@ -44,18 +44,7 @@ files:
   - ../../go/fs/internal/workspace/service_test.go
   - ../../go/fs/internal/workspace/service.go
   - ../../go/fs/internal/workspace/state.go
-  - ../../go/fs/internal/workspace/thinkspace.go
-  - ../../go/fs/internal/workspace/verifier.go
   - ../../go/fs/internal/workspace/workspace.md
-  - ../../go/fs/internal/workspace/spaces/golang/gothinkspace_test.go
-  - ../../go/fs/internal/workspace/spaces/golang/gothinkspace.go
-  - ../../go/fs/internal/workspace/spaces/golang/verifier.go
-  - ../../go/fs/internal/workspace/flows/config.go
-  - ../../go/fs/internal/workspace/flows/emitter.go
-  - ../../go/fs/internal/workspace/flows/events.go
-  - ../../go/fs/internal/workspace/flows/fanout_flow_test.go
-  - ../../go/fs/internal/workspace/flows/fanout_flow.go
-  - ../../go/fs/internal/workspace/flows/flow.go
   - ../../go/fs/internal/workspace/receipts.go
   - ../../go/fs/internal/api/management_test.go
   - ../../go/fs/internal/api/management.go
@@ -81,4 +70,22 @@ files:
   - ../../go/fs/internal/chat/playback.go
   - ../../go/fs/internal/session/turn_manager_test.go
   - ../../go/fs/internal/session/turn_manager.go
-last_context: llm_golang_02.md
+  - ../../go/fs/internal/session/flows/config.go
+  - ../../go/fs/internal/session/flows/emitter.go
+  - ../../go/fs/internal/session/flows/events.go
+  - ../../go/fs/internal/session/flows/fanout_flow_test.go
+  - ../../go/fs/internal/session/flows/fanout_flow_unit_test.go
+  - ../../go/fs/internal/session/flows/fanout_flow.go
+  - ../../go/fs/internal/session/flows/flow.go
+  - ../../go/fs/internal/spaces/config.go
+  - ../../go/fs/internal/spaces/models.go
+  - ../../go/fs/internal/spaces/thinkspace.go
+  - ../../go/fs/internal/spaces/verifier.go
+  - ../../go/fs/internal/spaces/golang/assembler.go
+  - ../../go/fs/internal/spaces/golang/mapbook.go
+  - ../../go/fs/internal/spaces/golang/space_test.go
+  - ../../go/fs/internal/spaces/golang/space.go
+  - ../../go/fs/internal/spaces/golang/verifier.go
+  - ../../go/fs/internal/assembler/mapbook.go
+  - ../../go/fs/internal/assembler/workbench.go
+last_context: llm_golang_31.md

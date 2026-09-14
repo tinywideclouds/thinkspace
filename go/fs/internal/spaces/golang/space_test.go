@@ -3,13 +3,18 @@ package golang_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace/spaces/golang"
+	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces/golang"
 )
+
+// --- Mocks ---
 
 type mockSandbox struct {
 	files       map[string][]byte
@@ -73,13 +78,22 @@ func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { re
 func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
 
 func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
-	config := workspace.ThinkSpaceConfig{
-		Name:                 "golang",
-		VerifyTimeoutSeconds: verifyTimeout,
+	config := spaces.ThinkSpaceConfig{
+		Name:                         "golang",
+		VerifyTimeoutSeconds:         verifyTimeout,
+		ToolDescription:              "mock tool desc",
+		AgentCountDescription:        "mock count desc",
+		AssignedTagsDescription:      "mock tags desc",
+		AgentInstructionsDescription: "mock instructions desc",
+		ContextDigestDescription:     "mock digest desc",
+		InstructionDescription:       "mock instruction desc",
+		TargetFilesDescription:       "mock files desc",
 	}
 	config.ApplyDefaults()
 	return golang.NewGoThinkSpace(config)
 }
+
+// --- Verifier Tests ---
 
 func TestGoThinkSpace_Verify_ASTError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -91,7 +105,6 @@ func TestGoThinkSpace_Verify_ASTError(t *testing.T) {
 	sandbox.WriteFile(ctx, "src/go.mod", []byte("module test"))
 	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc invalid() {\n"))
 
-	// Updated to use the factory method
 	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected AST verification to fail on invalid code")
@@ -111,7 +124,6 @@ func TestGoThinkSpace_Verify_MissingGoMod(t *testing.T) {
 
 	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
 
-	// Updated to use the factory method
 	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to missing go.mod")
@@ -133,7 +145,6 @@ func TestGoThinkSpace_Verify_Success(t *testing.T) {
 	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
 	sandbox.WriteFile(ctx, "src/main_test.go", []byte("package main\nimport \"testing\"\nfunc TestMain(t *testing.T) {}\n"))
 
-	// Updated to use the factory method
 	err := space.Verifier().Verify(ctx, sandbox)
 	if err != nil {
 		t.Fatalf("Expected successful verification, got: %v", err)
@@ -151,7 +162,6 @@ func TestGoThinkSpace_Verify_TimeoutLoop(t *testing.T) {
 	sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n"))
 	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
 
-	// Updated to use the factory method
 	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to timeout")
@@ -159,5 +169,105 @@ func TestGoThinkSpace_Verify_TimeoutLoop(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("Expected timeout error, got: %v", err)
+	}
+}
+
+// --- Mapbook Tests ---
+
+func TestGolangMapbook_GenerateLayers(t *testing.T) {
+	ctx := context.Background()
+	workspaceRoot := t.TempDir()
+
+	// Scaffold a fake Go workspace
+	srcDir := filepath.Join(workspaceRoot, "src")
+	pkgDir := filepath.Join(srcDir, "api")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("failed to setup test directories: %v", err)
+	}
+
+	_ = os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0644)
+	_ = os.WriteFile(filepath.Join(pkgDir, "handler.go"), []byte("package api"), 0644)
+
+	book := golang.NewGolangMapbook()
+	layers, err := book.GenerateLayers(ctx, workspaceRoot)
+	if err != nil {
+		t.Fatalf("GenerateLayers failed: %v", err)
+	}
+
+	conceptual, ok := layers[assembler.LayerConceptual]
+	if !ok || !strings.Contains(conceptual, "Standard Go project layout") {
+		t.Errorf("missing or invalid conceptual layer")
+	}
+
+	structural, ok := layers[assembler.LayerStructural]
+	if !ok {
+		t.Fatalf("missing structural layer")
+	}
+
+	if !strings.Contains(structural, "src/main.go") {
+		t.Errorf("structural tree missing src/main.go, got: \n%s", structural)
+	}
+	if !strings.Contains(structural, "src/api/handler.go") {
+		t.Errorf("structural tree missing src/api/handler.go")
+	}
+}
+
+func TestGolangMapbook_GenerateLayers_NoSrcDirectory(t *testing.T) {
+	ctx := context.Background()
+	workspaceRoot := t.TempDir() // Empty directory without a /src folder
+
+	book := golang.NewGolangMapbook()
+	layers, err := book.GenerateLayers(ctx, workspaceRoot)
+	if err != nil {
+		t.Fatalf("GenerateLayers should gracefully handle missing src directory, but got: %v", err)
+	}
+
+	structural, ok := layers[assembler.LayerStructural]
+	if !ok {
+		t.Fatalf("missing structural layer")
+	}
+
+	// Should just contain the header with no files listed
+	if strings.Contains(structural, "- src/") {
+		t.Errorf("expected empty structural tree, got: %s", structural)
+	}
+}
+
+// --- Interface Contract Tests ---
+
+func TestGoThinkSpace_InterfaceContracts(t *testing.T) {
+	space := setupGoThinkSpace(t, 15)
+
+	if space.Config().Name != "golang" {
+		t.Errorf("Config() failed to return injected config")
+	}
+
+	if space.Verifier() == nil {
+		t.Errorf("Verifier() returned nil")
+	}
+
+	if space.Mapbook() == nil {
+		t.Errorf("Mapbook() returned nil")
+	}
+
+	tools := space.Tools()
+	if len(tools) != 1 {
+		t.Fatalf("Expected exactly 1 tool, got %d", len(tools))
+	}
+
+	funcDecl := tools[0].FunctionDeclarations[0]
+	if funcDecl.Name != "propose_change" {
+		t.Errorf("Expected tool name 'propose_change', got '%s'", funcDecl.Name)
+	}
+	if funcDecl.Description != "mock tool desc" {
+		t.Errorf("Tool description was not correctly mapped from config")
+	}
+
+	props := funcDecl.Parameters.Properties
+	if props["assigned_tags"].Description != "mock tags desc" {
+		t.Errorf("Schema property mapping failed for assigned_tags")
+	}
+	if props["agent_tasks"].Items.Properties["target_files"].Description != "mock files desc" {
+		t.Errorf("Schema property mapping failed for target_files inside agent_tasks")
 	}
 }

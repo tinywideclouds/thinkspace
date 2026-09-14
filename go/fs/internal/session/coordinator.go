@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
@@ -67,14 +69,14 @@ func NewCoordinator(
 func (c *Coordinator) ExecuteTurn(
 	ctx context.Context,
 	thread *chat.Thread,
-	thinkSpace workspace.ThinkSpace,
+	thinkSpace spaces.ThinkSpace,
 	history []*genai.Content,
 	userInterface UserInterface,
 ) error {
 	turnContext, cancel := context.WithTimeout(ctx, thinkSpace.Config().TurnTimeout())
 	defer cancel()
 
-	managerModel := thinkSpace.Config().Models[workspace.ModelCategoryManager]
+	managerModel := thinkSpace.Config().Models[spaces.ModelCategoryManager]
 
 	stream := c.llmAdapter.GenerateStream(
 		turnContext,
@@ -121,10 +123,24 @@ func (c *Coordinator) ExecuteTurn(
 	for _, call := range interceptedTools {
 		if call.Name == "propose_change" {
 			executedAnyFlow = true
+
+			// Generate a unique flow execution ID using native UUIDv7 to prevent branch/receipt collisions
+			uniqueFlowID := fmt.Sprintf("flow-%s", uuid.NewV7().String())
+
 			flowContext := flows.FlowContext{
-				FlowID:         fmt.Sprintf("fanout-%s", thread.ID),
+				FlowID:         uniqueFlowID,
 				SpaceID:        c.spaceID,
 				BaseAgentRules: c.baseAgentRules,
+			}
+
+			// Extract tags from the LLM tool call
+			var assignedTags []string
+			if rawTags, ok := call.Args["assigned_tags"].([]any); ok {
+				for _, rt := range rawTags {
+					if s, isStr := rt.(string); isStr {
+						assignedTags = append(assignedTags, s)
+					}
+				}
 			}
 
 			activeFlowConfig := c.flowConfiguration
@@ -154,6 +170,12 @@ func (c *Coordinator) ExecuteTurn(
 			if len(result.Branches) == 0 {
 				flowSummary.WriteString("- All sub-agents failed to produce verifiable candidates.\n")
 				continue
+			}
+
+			// Log the proposal event to the ledger so the LLM remembers it, complete with tags
+			for _, branch := range result.Branches {
+				candidateID := strings.TrimPrefix(branch, "candidate/")
+				_ = c.workspaceService.LogProposal(turnContext, thread, candidateID, fmt.Sprintf("Proposed branch %s via sub-agent fan-out.", branch), assignedTags)
 			}
 
 			branchesToReview := result.Branches
@@ -268,7 +290,7 @@ func (c *Coordinator) ExecuteTurn(
 func (c *Coordinator) executeLLMReviewPhase(
 	ctx context.Context,
 	thread *chat.Thread,
-	thinkSpace workspace.ThinkSpace,
+	thinkSpace spaces.ThinkSpace,
 	history []*genai.Content,
 	userInterface UserInterface,
 	strategy DelegationStrategy,
@@ -315,7 +337,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 
 	userInterface.OnTextChunk("\n\n🤖 **Manager evaluating candidates...**\n")
 
-	managerModel := thinkSpace.Config().Models[workspace.ModelCategoryManager]
+	managerModel := thinkSpace.Config().Models[spaces.ModelCategoryManager]
 	evaluationStream := c.llmAdapter.GenerateStream(ctx, managerModel, thinkSpace.Config().ManagerSystemPrompt(), nil, evaluationHistory)
 
 	var evaluationResponse strings.Builder

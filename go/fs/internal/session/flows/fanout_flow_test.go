@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
@@ -52,7 +54,11 @@ func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error)
 	if path == "trace.jsonl" {
 		return []byte(`{"prompt": "Do a thing", "generated": "mock output"}`), nil
 	}
-	return nil, nil
+	if path == "does/not/exist.go" {
+		return nil, errors.New("file not found")
+	}
+	// Return dummy data to simulate a successfully loaded target file
+	return []byte("mock physical file content"), nil
 }
 func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
 	return "", nil
@@ -66,12 +72,13 @@ func (m *mockSandbox) TearDown(ctx context.Context) error { return nil }
 
 type mockThinkSpace struct{}
 
-func (m *mockThinkSpace) Config() workspace.ThinkSpaceConfig {
-	return workspace.ThinkSpaceConfig{}
+func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
+	return spaces.ThinkSpaceConfig{}
 }
 
-func (m *mockThinkSpace) Tools() []*genai.Tool         { return nil }
-func (m *mockThinkSpace) Verifier() workspace.Verifier { return nil }
+func (m *mockThinkSpace) Tools() []*genai.Tool       { return nil }
+func (m *mockThinkSpace) Verifier() spaces.Verifier  { return nil }
+func (m *mockThinkSpace) Mapbook() assembler.Mapbook { return nil }
 
 type mockVerifier struct {
 	errsToReturn []error
@@ -98,7 +105,7 @@ func (m *mockEmitter) Emit(event flows.FlowEvent) {
 
 // --- Tests ---
 
-func TestFanOutFlow_CleanRun(t *testing.T) {
+func TestFanOutFlow_CleanRun_WithJITInjection(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	flow := flows.NewFanOutFlow(logger)
 
@@ -111,13 +118,14 @@ func TestFanOutFlow_CleanRun(t *testing.T) {
 
 	verifier := &mockVerifier{}
 	emitter := &mockEmitter{}
-	space := &mockThinkSpace{}
+	var space spaces.ThinkSpace = &mockThinkSpace{}
 
 	args := map[string]any{
 		"agent_tasks": []any{
 			map[string]any{
 				"context_digest": "Basic server built",
 				"instruction":    "Add auth",
+				"target_files":   []any{"src/main.go"},
 			},
 		},
 	}
@@ -139,20 +147,76 @@ func TestFanOutFlow_CleanRun(t *testing.T) {
 		t.Fatalf("expected 1 execution attempt, got %d", len(briefingsReceived))
 	}
 
-	if briefingsReceived[0].ContextDigest != "Basic server built" {
-		t.Errorf("expected context digest 'Basic server built', got '%s'", briefingsReceived[0].ContextDigest)
+	// Verify the physical file content from the Workbench was injected into the sub-agent digest
+	if !strings.Contains(briefingsReceived[0].ContextDigest, "mock physical file content") {
+		t.Errorf("expected JIT workbench content to be injected, got: %s", briefingsReceived[0].ContextDigest)
 	}
 
-	if len(result.Branches) != 1 || result.Branches[0] != "candidate/chat-1-agent-1" {
-		t.Errorf("expected candidate/chat-1-agent-1, got %v", result.Branches)
+	// Assert the new hierarchical branch naming convention
+	expectedBranch := "candidate/chat-1-flow-123-agent-1"
+	if len(result.Branches) != 1 || result.Branches[0] != expectedBranch {
+		t.Errorf("expected %s, got %v", expectedBranch, result.Branches)
 	}
 
 	if !engine.sandbox.delivered {
 		t.Errorf("expected sandbox to be delivered")
 	}
+}
 
-	if len(emitter.events) < 4 {
-		t.Fatalf("expected at least 4 events, got %d", len(emitter.events))
+func TestFanOutFlow_FailFast_HallucinatedFile(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	flow := flows.NewFanOutFlow(logger)
+
+	engine := &mockChatEngine{}
+	workspaceRoot := t.TempDir()
+
+	bus := chat.NewEventBus()
+	service := workspace.NewService(logger, engine, workspaceRoot, bus)
+	thread, _ := service.StartThread(context.Background(), "chat-1")
+
+	verifier := &mockVerifier{}
+	emitter := &mockEmitter{}
+	var space spaces.ThinkSpace = &mockThinkSpace{}
+
+	args := map[string]any{
+		"agent_tasks": []any{
+			map[string]any{
+				"context_digest": "Testing Fail-Fast",
+				"instruction":    "Edit the hallucinated file",
+				"target_files":   []any{"does/not/exist.go"},
+			},
+		},
+	}
+	flowConfig := flows.FlowConfig{}
+	flowContext := flows.FlowContext{FlowID: "flow-123", SpaceID: "golang"}
+
+	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+		t.Fatal("executor should never be called; flow should fail-fast beforehand")
+		return nil
+	}
+
+	_, err := flow.Execute(context.Background(), service, thread, space, args, flowConfig, flowContext, emitter, executor, verifier)
+
+	if err == nil {
+		t.Fatalf("expected fanout to fail due to fail-fast boundary, but it succeeded")
+	}
+
+	// FanOutFlow returns an aggregate error summary, not the raw error.
+	if !strings.Contains(err.Error(), "fatal system errors") {
+		t.Errorf("expected aggregate flow error, got: %v", err)
+	}
+
+	// Verify the FlowError event was successfully emitted to the frontend with the correct fail-fast trace
+	var foundErrorEvent bool
+	for _, e := range emitter.events {
+		if e.Type == flows.FlowError && strings.Contains(e.Trace, "fail-fast: requested target file") {
+			foundErrorEvent = true
+			break
+		}
+	}
+
+	if !foundErrorEvent {
+		t.Errorf("expected FlowError event with fail-fast file trace to be emitted")
 	}
 }
 
@@ -169,7 +233,7 @@ func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
 
 	verifier := &mockVerifier{errsToReturn: []error{errors.New("compile error")}}
 	emitter := &mockEmitter{}
-	space := &mockThinkSpace{}
+	var space spaces.ThinkSpace = &mockThinkSpace{}
 
 	args := map[string]any{
 		"agent_tasks": []any{

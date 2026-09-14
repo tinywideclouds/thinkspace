@@ -10,7 +10,9 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -25,6 +27,7 @@ type SubAgentTask struct {
 	AgentID       string
 	ContextDigest string
 	Instruction   string
+	TargetFiles   []string
 }
 
 type agentResult struct {
@@ -53,13 +56,13 @@ func (f *FanOutFlow) Execute(
 	ctx context.Context,
 	service *workspace.Service,
 	thread *chat.Thread,
-	space workspace.ThinkSpace,
+	space spaces.ThinkSpace,
 	args map[string]any,
 	flowConfig FlowConfig,
 	flowContext FlowContext,
 	emitter FlowEmitter,
 	executor workspace.SubAgentExecutor,
-	verifier workspace.Verifier,
+	verifier spaces.Verifier,
 ) (*FlowResult, error) {
 
 	tasks := f.parseTasks(args)
@@ -137,10 +140,21 @@ func (f *FanOutFlow) parseTasks(args map[string]any) []SubAgentTask {
 			if isMap {
 				digest, _ := taskMap["context_digest"].(string)
 				instruction, _ := taskMap["instruction"].(string)
+
+				var targetFiles []string
+				if rawFiles, hasFiles := taskMap["target_files"].([]any); hasFiles {
+					for _, fileRaw := range rawFiles {
+						if strFile, isStr := fileRaw.(string); isStr {
+							targetFiles = append(targetFiles, strFile)
+						}
+					}
+				}
+
 				tasks = append(tasks, SubAgentTask{
 					AgentID:       fmt.Sprintf("agent-%d", i+1),
 					ContextDigest: digest,
 					Instruction:   instruction,
+					TargetFiles:   targetFiles,
 				})
 			} else {
 				tasks = append(tasks, SubAgentTask{
@@ -167,7 +181,7 @@ func (f *FanOutFlow) runAgentPipeline(
 	agentIndex int,
 	emitter FlowEmitter,
 	executor workspace.SubAgentExecutor,
-	verifier workspace.Verifier,
+	verifier spaces.Verifier,
 ) agentResult {
 
 	agentLogger := f.logger.With("flow_id", flowContext.FlowID, "agent_id", task.AgentID)
@@ -181,13 +195,37 @@ func (f *FanOutFlow) runAgentPipeline(
 		Instruction: task.Instruction,
 	})
 
-	candidateID := fmt.Sprintf("%s-%s", flowContext.FlowID, task.AgentID)
+	// Enforce strict hierarchy: chat -> flow -> agent
+	candidateID := fmt.Sprintf("%s-%s-%s", thread.ID, flowContext.FlowID, task.AgentID)
+
 	sandbox, err := service.SpawnSandbox(ctx, thread.ID, candidateID)
 	if err != nil {
 		agentLogger.Error("failed to spawn sandbox", "error", err)
 		return agentResult{err: err}
 	}
 	defer sandbox.TearDown(ctx)
+
+	// --- THE UNIVERSAL JIT WORKBENCH ---
+	// Leverage the top-level assembler to read target files and fail fast on hallucinations.
+	workbench := assembler.NewWorkbench()
+	workbenchText, err := workbench.Build(ctx, sandbox, task.TargetFiles)
+	if err != nil {
+		agentLogger.Error("manager requested invalid target files", "error", err)
+
+		emitter.Emit(FlowEvent{
+			FlowID:     flowContext.FlowID,
+			Type:       FlowError,
+			Timestamp:  time.Now(),
+			AgentID:    task.AgentID,
+			AgentIndex: agentIndex,
+			Trace:      err.Error(),
+		})
+		return agentResult{err: err}
+	}
+
+	// Append physical target file context to the sub-agent digest
+	task.ContextDigest += workbenchText
+	// ----------------------------------
 
 	var passed bool
 	var finalTrace string
@@ -247,7 +285,7 @@ func (f *FanOutFlow) executeSingleAttempt(
 	attempt int,
 	emitter FlowEmitter,
 	executor workspace.SubAgentExecutor,
-	verifier workspace.Verifier,
+	verifier spaces.Verifier,
 	agentLogger *slog.Logger,
 	previousTrace string,
 ) (passed bool, finalTrace string) {

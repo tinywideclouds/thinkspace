@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
@@ -57,10 +59,10 @@ func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidat
 
 type mockThinkSpace struct{}
 
-func (m *mockThinkSpace) Config() workspace.ThinkSpaceConfig {
-	cfg := workspace.ThinkSpaceConfig{
-		Models: map[workspace.ModelCategory]string{
-			workspace.ModelCategoryManager: "test-manager",
+func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
+	cfg := spaces.ThinkSpaceConfig{
+		Models: map[spaces.ModelCategory]string{
+			spaces.ModelCategoryManager: "test-manager",
 		},
 		TurnTimeoutSeconds: 300,
 	}
@@ -68,8 +70,9 @@ func (m *mockThinkSpace) Config() workspace.ThinkSpaceConfig {
 	return cfg
 }
 
-func (m *mockThinkSpace) Tools() []*genai.Tool         { return nil }
-func (m *mockThinkSpace) Verifier() workspace.Verifier { return &mockVerifier{} }
+func (m *mockThinkSpace) Tools() []*genai.Tool       { return nil }
+func (m *mockThinkSpace) Verifier() spaces.Verifier  { return &mockVerifier{} }
+func (m *mockThinkSpace) Mapbook() assembler.Mapbook { return nil }
 
 type mockVerifier struct{}
 
@@ -82,7 +85,7 @@ type mockFlow struct {
 }
 
 func (m *mockFlow) Name() string { return "MockFlow" }
-func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *chat.Thread, space workspace.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier workspace.Verifier) (*flows.FlowResult, error) {
+func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *chat.Thread, space spaces.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier spaces.Verifier) (*flows.FlowResult, error) {
 	m.executeCalled = true
 	return &flows.FlowResult{
 		Branches: []string{"candidate/mock-123"},
@@ -122,6 +125,9 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 	workspaceRoot := t.TempDir()
 
 	bus := chat.NewEventBus()
+	// Must subscribe to write physical events so we can assert the ledger contents later
+	bus.Subscribe(chat.NewLedgerSubscriber())
+
 	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
 	thread, _ := workspaceService.StartThread(ctx, "test-thread")
 
@@ -139,7 +145,8 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 									FunctionCall: &genai.FunctionCall{
 										Name: "propose_change",
 										Args: map[string]any{
-											"agent_count": float64(2),
+											"assigned_tags": []any{"math", "core"}, // Phase 3 Coverage
+											"agent_count":   float64(2),
 											"agent_tasks": []any{
 												map[string]any{"context_digest": "Context A", "instruction": "Do task A"},
 												map[string]any{"context_digest": "Context B", "instruction": "Do task B"},
@@ -185,6 +192,20 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 
 	if userInterface.reviewedBranch != "candidate/mock-123" {
 		t.Errorf("Expected UI to review 'candidate/mock-123', got '%s'", userInterface.reviewedBranch)
+	}
+
+	// Verify the Coordinator successfully extracted assigned_tags and passed them to the ledger
+	events, _ := workspaceService.LoadEvents(ctx, thread)
+	foundTags := false
+	for _, ev := range events {
+		if ev.Type == chat.EventCandidate {
+			if len(ev.Tags) == 2 && ev.Tags[0] == "math" {
+				foundTags = true
+			}
+		}
+	}
+	if !foundTags {
+		t.Errorf("Expected candidate events in ledger to contain intercepted assigned_tags")
 	}
 }
 
