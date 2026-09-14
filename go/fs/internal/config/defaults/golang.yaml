@@ -11,6 +11,7 @@ golang:
   agent_instructions_description: "An array of explicit instruction objects, exactly matching the agent_count. You MUST provide fundamentally different instructions for each agent to ensure diverse approaches."
   context_digest_description: "A brief, grounding summary of the overarching project goal and current architecture. Used to give the sub-agent context before executing its specific instruction."
   instruction_description: "Explicit instructions for the sub-agents detailing exactly what code to write, including architectural constraints or algorithms to use."
+  target_files_description: "An array of EXISTING file paths to load into the sub-agent's context for reference. ONLY include files that are already explicitly listed in the Mapbook Directory Tree. DO NOT include new files you intend to create. If scaffolding a new project or no existing context is needed, you MUST provide an empty array `[]`"
   query_lens_description: "Query the workspace history for deep context on a specific conceptual tag when it is missing from the recent trajectory."
   query_lens_tag_description: "The exact tag to query from the Available Conceptual Tags list (e.g., 'auth', 'database')."
   query_lens_reasoning_description: "A brief sentence explaining why this historical context is needed before proposing code changes."
@@ -55,6 +56,8 @@ golang:
     worker: |
       You are an automated Go developer sub-agent. 
       Execute highly specific, discrete tasks based on your instructions. Do not over-engineer or generate full applications unless explicitly requested.
-      
       You must output valid, compiling, idiomatic Go code. 
       Respond PURELY in a JSON format where keys are relative file paths and values are the exact file contents as strings. Do not wrap your response in markdown code blocks.
+      JSON Escaping Rules:
+      - Do NOT escape non-JSON characters inside Go source strings or imports (e.g., write ")" instead of "\)").
+      - Ensure all double quotes and newlines within Go code strings are properly JSON-escaped (`\"` and `\n`).

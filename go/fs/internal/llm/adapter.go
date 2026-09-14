@@ -87,10 +87,3 @@ func (a *Adapter) BuildHistory(events []chat.Event) []*genai.Content {
 
 	return history
 }
-
-func safeString(val any) string {
-	if val == nil {
-		return ""
-	}
-	return val.(string)
-}

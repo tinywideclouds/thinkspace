@@ -129,6 +129,22 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		flowConfig,
 	)
 
+	// --- Observability: Manager LLM Payload ---
+	tm.logger.Info("=== MANAGER CONTEXT ASSEMBLY COMPLETE ===",
+		"system_prompt_length", len(dynamicSystemPrompt),
+		"history_length", len(history),
+	)
+
+	// Use Debug level for the massive text dumps so it doesn't permanently flood standard Info logs,
+	// but is easily accessible when we run with -v or debug mode.
+	tm.logger.Debug("--- MANAGER SYSTEM PROMPT ---\n" + dynamicSystemPrompt)
+	for i, h := range history {
+		if len(h.Parts) > 0 {
+			tm.logger.Debug(fmt.Sprintf("--- MANAGER HISTORY [%d] (%s) ---\n%s", i, h.Role, h.Parts[0].Text))
+		}
+	}
+	// ------------------------------------------
+
 	// Inject the fused dynamic system prompt for the Coordinator
 	wrappedThinkSpace := WrapSpace(thinkSpace, dynamicSystemPrompt)
 

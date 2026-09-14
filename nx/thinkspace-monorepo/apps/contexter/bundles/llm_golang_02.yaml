@@ -4,10 +4,8 @@ files:
   - ../../go/api/go.mod
   - ../../go/api/go.sum
   - ../../go/api/v1/events.pb.go
-  - ../../go/fs/.env
   - ../../go/fs/go.mod
   - ../../go/fs/go.sum
-  - ../../go/fs/cmd/command.md
   - ../../go/fs/cmd/readme.md
   - ../../go/fs/cmd/bootstrap/clone_main.go
   - ../../go/fs/cmd/cli/main.go
@@ -29,7 +27,6 @@ files:
   - ../../go/fs/internal/gitfs/engine.md
   - ../../go/fs/internal/gitfs/goexec_engine.go
   - ../../go/fs/internal/gitfs/gogit_engine.go
-  - ../../go/fs/internal/gitfs/implementatoin.md
   - ../../go/fs/internal/llm/client.go
   - ../../go/fs/internal/llm/llm.md
   - ../../go/fs/internal/llm/mock_client_test.go
@@ -60,8 +57,6 @@ files:
   - ../../go/fs/internal/config/defaults/skeleton.yaml
   - ../../go/fs/internal/chat/bus_test.go
   - ../../go/fs/internal/chat/bus.go
-  - ../../go/fs/internal/chat/context_assembler_test.go
-  - ../../go/fs/internal/chat/context_assembler.go
   - ../../go/fs/internal/chat/event_test.go
   - ../../go/fs/internal/chat/event.go
   - ../../go/fs/internal/chat/manifest.go
@@ -89,4 +84,10 @@ files:
   - ../../go/fs/internal/assembler/workbench.go
   - ../../go/fs/internal/assembler/workbench_test.go
   - ../../go/fs/internal/spaces/config_test.go
-last_context: llm_golang_31.md
+  - ../../go/fs/docs/context_fusion.md
+  - ../../go/fs/internal/chat/assembler_test.go
+  - ../../go/fs/internal/chat/assembler.go
+  - ../../go/fs/internal/gitfs/implementation.md
+  - ../../go/fs/internal/session/context_assembler_test.go
+  - ../../go/fs/internal/session/context_assembler.go
+last_context: llm_golang_35.md

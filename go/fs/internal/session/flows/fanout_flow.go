@@ -67,6 +67,17 @@ func (f *FanOutFlow) Execute(
 
 	tasks := f.parseTasks(args)
 
+	// --- Observability: Manager Request Logging ---
+	// This makes it explicitly clear on the service side what the Manager
+	// actually requested for its Read Dependency before we hit the file system.
+	for _, task := range tasks {
+		f.logger.Info("=== MANAGER DELEGATION REQUEST ===",
+			"agent_id", task.AgentID,
+			"target_files", fmt.Sprintf("%v", task.TargetFiles),
+		)
+	}
+	// ----------------------------------------------
+
 	emitter.Emit(FlowEvent{
 		FlowID:     flowContext.FlowID,
 		Type:       FlowStart,
@@ -106,8 +117,14 @@ func (f *FanOutFlow) Execute(
 		}
 	}
 
+	// We now return the explicitly concatenated error messages so the Coordinator
+	// can feed the exact fail-fast trace back to the Manager LLM.
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("fanout completed with %d fatal system errors", len(errs))
+		var errMsgs []string
+		for _, e := range errs {
+			errMsgs = append(errMsgs, e.Error())
+		}
+		return nil, fmt.Errorf("sub-agent execution aborted: %s", strings.Join(errMsgs, " ; "))
 	}
 
 	summary := fmt.Sprintf("Successfully generated %d candidate branches.", len(branches))
@@ -141,7 +158,8 @@ func (f *FanOutFlow) parseTasks(args map[string]any) []SubAgentTask {
 				digest, _ := taskMap["context_digest"].(string)
 				instruction, _ := taskMap["instruction"].(string)
 
-				var targetFiles []string
+				// Ensure targetFiles defaults to an empty slice, never nil, for clarity
+				targetFiles := make([]string, 0)
 				if rawFiles, hasFiles := taskMap["target_files"].([]any); hasFiles {
 					for _, fileRaw := range rawFiles {
 						if strFile, isStr := fileRaw.(string); isStr {
@@ -160,6 +178,7 @@ func (f *FanOutFlow) parseTasks(args map[string]any) []SubAgentTask {
 				tasks = append(tasks, SubAgentTask{
 					AgentID:     fmt.Sprintf("agent-%d", i+1),
 					Instruction: fmt.Sprintf("%v", raw),
+					TargetFiles: make([]string, 0),
 				})
 			}
 		}
@@ -195,7 +214,6 @@ func (f *FanOutFlow) runAgentPipeline(
 		Instruction: task.Instruction,
 	})
 
-	// Enforce strict hierarchy: chat -> flow -> agent
 	candidateID := fmt.Sprintf("%s-%s-%s", thread.ID, flowContext.FlowID, task.AgentID)
 
 	sandbox, err := service.SpawnSandbox(ctx, thread.ID, candidateID)
@@ -206,7 +224,6 @@ func (f *FanOutFlow) runAgentPipeline(
 	defer sandbox.TearDown(ctx)
 
 	// --- THE UNIVERSAL JIT WORKBENCH ---
-	// Leverage the top-level assembler to read target files and fail fast on hallucinations.
 	workbench := assembler.NewWorkbench()
 	workbenchText, err := workbench.Build(ctx, sandbox, task.TargetFiles)
 	if err != nil {
@@ -223,7 +240,6 @@ func (f *FanOutFlow) runAgentPipeline(
 		return agentResult{err: err}
 	}
 
-	// Append physical target file context to the sub-agent digest
 	task.ContextDigest += workbenchText
 	// ----------------------------------
 
@@ -328,6 +344,15 @@ func (f *FanOutFlow) executeSingleAttempt(
 		briefing.Instruction = buf.String()
 		agentLogger.Info("executing retry", "retry_instruction", briefing.Instruction)
 	}
+
+	// --- Observability: Sub-Agent Payload ---
+	agentLogger.Info("=== SUB-AGENT PAYLOAD ===",
+		"context_digest_length", len(briefing.ContextDigest),
+		"instruction_length", len(briefing.Instruction),
+	)
+	agentLogger.Debug("--- SUB-AGENT CONTEXT DIGEST ---\n" + briefing.ContextDigest)
+	agentLogger.Debug("--- SUB-AGENT INSTRUCTION ---\n" + briefing.Instruction)
+	// ----------------------------------------
 
 	emitter.Emit(FlowEvent{
 		FlowID:      flowContext.FlowID,

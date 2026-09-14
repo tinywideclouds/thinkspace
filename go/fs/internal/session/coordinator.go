@@ -162,7 +162,16 @@ func (c *Coordinator) ExecuteTurn(
 		if call.Name == "propose_change" {
 			err := c.executeProposeChange(turnContext, thread, thinkSpace, history, userInterface, call, managerModel)
 			if err != nil {
-				return err
+				// We explicitly catch the failure (like a Workbench fail-fast hallucination),
+				// push it into the LLM history, and loop so it can correct its tool call.
+				c.logger.WarnContext(turnContext, "tool execution failed, bouncing back to manager", "error", err)
+				userInterface.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** %v\nAsking Manager to self-correct...\n", err))
+
+				history = append(history, &genai.Content{
+					Role:  "user",
+					Parts: []*genai.Part{{Text: fmt.Sprintf("[System Tool Error: propose_change failed with: %v. Please review your requested target_files and parameters, and retry.]", err)}},
+				})
+				continue
 			}
 			break
 		}
@@ -217,6 +226,7 @@ func (c *Coordinator) executeProposeChange(
 		thinkSpace.Verifier(),
 	)
 
+	// If FanOutFlow fails (e.g., fail-fast file error), bubble it back immediately to ExecuteTurn
 	if err != nil {
 		c.logger.ErrorContext(turnContext, "delegation flow failed", "error", err)
 		return err
