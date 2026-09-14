@@ -100,7 +100,6 @@ func main() {
 	bus := chat.NewEventBus()
 	bus.Subscribe(chat.NewLedgerSubscriber())
 
-	// FIXED: Requesting ModelCategoryWorker from the new spaces package
 	workerModel := activeThinkSpace.Config().Models[spaces.ModelCategoryWorker]
 	llmAdapter := llm.NewAdapter(modelClient)
 	subAgentExecutor := llm.NewSubAgentExecutor(modelClient, workerModel, activeThinkSpace.Config().WorkerSystemPrompt(), activeThinkSpace.Config().MaxWorkerTokens)
@@ -108,7 +107,7 @@ func main() {
 	workspaceService := workspace.NewService(logger, stateEngine, repositoryRoot, bus)
 
 	playbackEngine := chat.NewPlaybackEngine()
-	contextAssembler := chat.NewContextAssembler()
+	contextAssembler := session.NewContextAssembler()
 	userInterface := cli.NewTerminalUI()
 
 	// CLI doesn't use WebSockets, so it purely relies on the SlogEmitter
@@ -175,21 +174,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	assemblyReq := chat.ContextAssemblyRequest{
+	assemblyReq := chat.AssemblyRequest{
 		Manifest:     manifest,
 		ActiveLenses: []string{},
 		RecentEvents: graph.RecentEvents,
 	}
 
-	history, err := contextAssembler.Build(assemblyReq)
+	dynamicSystemPrompt, history, err := contextAssembler.Build(ctx, activeThinkSpace, workspaceService.WorkspaceRoot(), assemblyReq)
 	if err != nil {
 		logger.Error("Failed to assemble context", "error", err)
 		os.Exit(1)
 	}
 
+	wrappedThinkSpace := session.WrapSpace(activeThinkSpace, dynamicSystemPrompt)
+
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	if err := coordinator.ExecuteTurn(ctx, thread, activeThinkSpace, history, userInterface); err != nil {
+	if err := coordinator.ExecuteTurn(ctx, thread, manifest, wrappedThinkSpace, history, userInterface); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)
 	}

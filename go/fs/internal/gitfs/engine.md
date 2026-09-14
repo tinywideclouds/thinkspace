@@ -1,6 +1,6 @@
 # GitFS State Engine
 
-The `gitfs` package provides file state and version control management for ThinkSpace. 
+The `gitfs` package provides file state and version control management for ThinkSpace.
 
 Instead of hardcoding a single Git strategy, the architecture is built around a pluggable `workspace.ChatEngine` interface. This interface defines the strict lifecycle contract (Spawn, Preview, Accept, Reject) required to orchestrate isolated agents, while allowing the underlying Git implementation to be swapped dynamically based on environment or performance requirements.
 
@@ -8,15 +8,15 @@ Instead of hardcoding a single Git strategy, the architecture is built around a 
 
 The package currently provides two concrete implementations of the `workspace.ChatEngine` interface:
 
-### 1. GoExec Engine (`GoExecChat`)
-This implementation shells out to the native OS-level Git CLI via `os/exec`. 
-* **Mechanics:** It heavily leverages native `git worktree` commands to instantly provision sandboxes linked to the main repository database. 
+### 1. GoExec Engine (`GoExecEngine`)
+This implementation shells out to the native OS-level Git CLI via `os/exec`.
+* **Mechanics:** It heavily leverages native `git worktree` commands to instantly provision sandboxes linked to the main repository database.
 * **Strengths:** It is the "gold standard" implementation. It handles complex worktree operations, untracked folder staging, and "floating" uncommitted ledgers seamlessly because it relies on the highly optimized, native Git binary.
 
-### 2. GoGit Engine (`GoGitChat`)
+### 2. GoGit Engine (`GoGitEngine`)
 This implementation uses the pure Go `github.com/go-git/go-git/v5` library.
 * **Mechanics:** It relies on in-memory object traversal and traditional `git clone` commands to provision sandboxes.
-* **Strengths:** It is highly portable and requires no external system dependencies (like an installed Git binary). 
+* **Strengths:** It is highly portable and requires no external system dependencies (like an installed Git binary).
 * **Limitations:** Because `go-git` lacks native support for floating unstaged changes during complex branch checkouts, this engine relies on an in-memory stashing mechanism (`withFloatingLedger`) to safely carry the `conversation.jsonl` file across branch transitions.
 
 ---
@@ -59,4 +59,4 @@ Accepting a candidate executes a fast-forward merge:
 
 ## Verification
 
-The engines are validated by a shared, black-box contract test suite (`engine_contract_test.go`). The suite iterates over both `GoGitChat` and `GoExecChat` factories, passing them through identical lifecycle simulations. This ensures that regardless of the underlying Git mechanics, both engines perfectly respect the `SharedCodebase` routing flag, float uncommitted ledgers without data loss, and enforce the exact same filesystem state upon acceptance or rejection.
+The engines are validated by a shared, black-box contract test suite (`engine_contract_test.go`). The suite iterates over both `GoGitEngine` and `GoExecEngine` factories, passing them through identical lifecycle simulations. This ensures that regardless of the underlying Git mechanics, both engines perfectly respect the `SharedCodebase` routing flag, float uncommitted ledgers without data loss, and enforce the exact same filesystem state upon acceptance or rejection.

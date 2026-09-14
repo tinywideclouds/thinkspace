@@ -72,6 +72,24 @@ func (s *GoThinkSpace) Tools() []*genai.Tool {
 						Required: []string{"assigned_tags", "agent_count", "agent_tasks"},
 					},
 				},
+				{
+					Name:        "query_lens",
+					Description: s.config.QueryLensDescription,
+					Parameters: &genai.Schema{
+						Type: genai.TypeObject,
+						Properties: map[string]*genai.Schema{
+							"tag": {
+								Type:        genai.TypeString,
+								Description: s.config.QueryLensTagDescription,
+							},
+							"reasoning": {
+								Type:        genai.TypeString,
+								Description: s.config.QueryLensReasoningDescription,
+							},
+						},
+						Required: []string{"tag", "reasoning"},
+					},
+				},
 			},
 		},
 	}

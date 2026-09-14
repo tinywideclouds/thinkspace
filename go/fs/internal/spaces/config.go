@@ -6,23 +6,26 @@ import (
 
 // ThinkSpaceConfig represents the raw YAML configuration for a domain space.
 type ThinkSpaceConfig struct {
-	Type                         string                   `yaml:"type"`
-	Name                         string                   `yaml:"name"`
-	SystemPrompt                 string                   `yaml:"system_prompt"`
-	Roles                        ThinkSpaceRoles          `yaml:"roles"`
-	Models                       map[ModelCategory]string `yaml:"models"`
-	TurnTimeoutSeconds           int                      `yaml:"turn_timeout_seconds"`
-	AgentTimeoutSeconds          int                      `yaml:"agent_timeout_seconds"`
-	VerifyTimeoutSeconds         int                      `yaml:"verify_timeout_seconds"`
-	MaxWorkerTokens              int                      `yaml:"max_worker_tokens"`
-	ToolDescription              string                   `yaml:"tool_description"`
-	AgentCountDescription        string                   `yaml:"agent_count_description"`
-	AssignedTagsDescription      string                   `yaml:"assigned_tags_description"`
-	AgentInstructionsDescription string                   `yaml:"agent_instructions_description"`
-	ContextDigestDescription     string                   `yaml:"context_digest_description"`
-	InstructionDescription       string                   `yaml:"instruction_description"`
-	TargetFilesDescription       string                   `yaml:"target_files_description"`
-	WorkerRetryPrompt            string                   `yaml:"worker_retry_prompt"`
+	Type                          string                   `yaml:"type"`
+	Name                          string                   `yaml:"name"`
+	SystemPrompt                  string                   `yaml:"system_prompt"`
+	Roles                         ThinkSpaceRoles          `yaml:"roles"`
+	Models                        map[ModelCategory]string `yaml:"models"`
+	TurnTimeoutSeconds            int                      `yaml:"turn_timeout_seconds"`
+	AgentTimeoutSeconds           int                      `yaml:"agent_timeout_seconds"`
+	VerifyTimeoutSeconds          int                      `yaml:"verify_timeout_seconds"`
+	MaxWorkerTokens               int                      `yaml:"max_worker_tokens"`
+	ToolDescription               string                   `yaml:"tool_description"`
+	AgentCountDescription         string                   `yaml:"agent_count_description"`
+	AssignedTagsDescription       string                   `yaml:"assigned_tags_description"`
+	AgentInstructionsDescription  string                   `yaml:"agent_instructions_description"`
+	ContextDigestDescription      string                   `yaml:"context_digest_description"`
+	InstructionDescription        string                   `yaml:"instruction_description"`
+	TargetFilesDescription        string                   `yaml:"target_files_description"`
+	WorkerRetryPrompt             string                   `yaml:"worker_retry_prompt"`
+	QueryLensDescription          string                   `yaml:"query_lens_description"`
+	QueryLensTagDescription       string                   `yaml:"query_lens_tag_description"`
+	QueryLensReasoningDescription string                   `yaml:"query_lens_reasoning_description"`
 }
 
 // ApplyDefaults sets reasonable timeouts if they are missing from the configuration.

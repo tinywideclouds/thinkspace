@@ -60,6 +60,11 @@ func (engine *PlaybackEngine) LoadState(ctx context.Context, thread *Thread) (*C
 		} else {
 			graph.RecentEvents = append(graph.RecentEvents, event)
 		}
+
+		// Map historical tags to their Event IDs so they can be retrieved via the query_lens tool
+		for _, tag := range event.Tags {
+			manifest.Lenses[tag] = append(manifest.Lenses[tag], event.ID)
+		}
 	}
 
 	if err := scanner.Err(); err != nil {

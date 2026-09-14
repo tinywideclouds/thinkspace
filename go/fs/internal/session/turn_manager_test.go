@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"google.golang.org/genai"
@@ -18,10 +19,12 @@ import (
 
 type spyModelClient struct {
 	capturedHistory []*genai.Content
+	capturedConfig  *genai.GenerateContentConfig
 }
 
 func (m *spyModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
 	m.capturedHistory = history
+	m.capturedConfig = config
 	return func(yield func(*genai.GenerateContentResponse, error) bool) {}
 }
 
@@ -100,5 +103,15 @@ fanout:
 	lastText := spyClient.capturedHistory[len(spyClient.capturedHistory)-1].Parts[0].Text
 	if lastText != "Hello sequencing test" {
 		t.Errorf("Expected last history item to be the prompt, got: %s", lastText)
+	}
+
+	// Assert dynamic mapbook injection in the system prompt
+	if spyClient.capturedConfig == nil || spyClient.capturedConfig.SystemInstruction == nil {
+		t.Fatalf("Expected SDK configuration to contain SystemInstruction")
+	}
+
+	sysPrompt := spyClient.capturedConfig.SystemInstruction.Parts[0].Text
+	if !strings.Contains(sysPrompt, "### THE MAPBOOK") {
+		t.Errorf("Expected Mapbook to be injected into system prompt, got: %s", sysPrompt)
 	}
 }

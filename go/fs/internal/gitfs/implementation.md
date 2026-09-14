@@ -6,11 +6,11 @@ Our chat orchestration relies on a "floating ledger" pattern. Uncommitted stateâ
 **Sandbox Path Normalization**
 To support both "Shared Codebase" and "Jailed" workflows without polluting the domain's `workspace.CandidateSandbox` interface, the concrete engines implement a `normalizePath` router. The `SharedCodebase` boolean flag is passed at engine instantiation and cascades down to the sandboxes. When an agent requests to read/write `src/main.go`, the router determines whether to anchor that path to the repository root or the isolated `chats/<chat-id>/` directory dynamically.
 
-**The Native Exec Implementation (`GoExecChat`)**
-The `GoExecChat` engine wraps the standard OS-level Git CLI. This engine handles the floating ledger gracefully and natively. Standard commands like `git checkout <branch>` automatically evaluate the index; if an untracked or modified file does not conflict with the target branch, the CLI safely carries it over while perfectly extracting the target branch's tracked files (like `api.go`) to the physical disk. It is the gold standard for how this orchestration should behave.
+**The Native Exec Implementation (`GoExecEngine`)**
+The `GoExecEngine` engine wraps the standard OS-level Git CLI. This engine handles the floating ledger gracefully and natively. Standard commands like `git checkout <branch>` automatically evaluate the index; if an untracked or modified file does not conflict with the target branch, the CLI safely carries it over while perfectly extracting the target branch's tracked files (like `api.go`) to the physical disk. It is the gold standard for how this orchestration should behave.
 
-**The `go-git` Implementation (`GoGitChat`) & The Explicit Stash Hack**
-In the `GoGitChat` engine, I (the AI) struggled to elegantly replicate that native CLI checkout behavior using the provided `CheckoutOptions`. To definitively satisfy the domain requirement and ensure tests pass, I implemented a brute-force wrapper called `withFloatingLedger`.
+**The `go-git` Implementation (`GoGitEngine`) & The Explicit Stash Hack**
+In the `GoGitEngine` engine, I (the AI) struggled to elegantly replicate that native CLI checkout behavior using the provided `CheckoutOptions`. To definitively satisfy the domain requirement and ensure tests pass, I implemented a brute-force wrapper called `withFloatingLedger`.
 
 This wrapper works by:
 

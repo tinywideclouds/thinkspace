@@ -174,6 +174,54 @@ func (s *Service) LoadEvents(ctx context.Context, thread *chat.Thread) ([]chat.E
 	return events, nil
 }
 
+// FetchEvents blindly extracts specific historical records by ID.
+// It acts strictly as a Read Model projection mechanism without knowing the semantic context.
+func (s *Service) FetchEvents(ctx context.Context, thread *chat.Thread, ids []string) ([]chat.Event, error) {
+	idMap := make(map[string]bool)
+	for _, id := range ids {
+		idMap[id] = true
+	}
+
+	var matchedEvents []chat.Event
+
+	// Stream the file rather than holding all events in memory, to support massive ledgers safely
+	file, err := os.Open(thread.LedgerPath)
+	if err != nil {
+		return nil, fmt.Errorf("opening ledger for targeted fetch: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		// Fast-path string check before full unmarshal to save CPU on large ledgers
+		matchFound := false
+		for id := range idMap {
+			if strings.Contains(string(line), id) {
+				matchFound = true
+				break
+			}
+		}
+
+		if !matchFound {
+			continue
+		}
+
+		var ev chat.Event
+		if err := json.Unmarshal(line, &ev); err == nil && idMap[ev.ID.String()] {
+			matchedEvents = append(matchedEvents, ev)
+			// Small optimization: delete from map so we don't scan for it once found
+			delete(idMap, ev.ID.String())
+		}
+	}
+
+	return matchedEvents, nil
+}
+
 func (s *Service) LogUserPrompt(ctx context.Context, thread *chat.Thread, content string) error {
 	event := chat.NewEvent(chat.EventPrompt, content)
 	return s.bus.Publish(ctx, thread, event)

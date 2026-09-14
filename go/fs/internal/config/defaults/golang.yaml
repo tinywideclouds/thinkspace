@@ -11,6 +11,9 @@ golang:
   agent_instructions_description: "An array of explicit instruction objects, exactly matching the agent_count. You MUST provide fundamentally different instructions for each agent to ensure diverse approaches."
   context_digest_description: "A brief, grounding summary of the overarching project goal and current architecture. Used to give the sub-agent context before executing its specific instruction."
   instruction_description: "Explicit instructions for the sub-agents detailing exactly what code to write, including architectural constraints or algorithms to use."
+  query_lens_description: "Query the workspace history for deep context on a specific conceptual tag when it is missing from the recent trajectory."
+  query_lens_tag_description: "The exact tag to query from the Available Conceptual Tags list (e.g., 'auth', 'database')."
+  query_lens_reasoning_description: "A brief sentence explaining why this historical context is needed before proposing code changes."
 
   worker_retry_prompt: |
     CRITICAL VERIFICATION FAILURE. 

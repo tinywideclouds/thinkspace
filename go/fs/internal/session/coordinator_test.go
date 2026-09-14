@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
@@ -23,14 +24,15 @@ import (
 
 type mockModelClient struct {
 	responses []*genai.GenerateContentResponse
+	callIndex int
 }
 
 func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, configuration *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
 	return func(yield func(*genai.GenerateContentResponse, error) bool) {
-		for _, response := range m.responses {
-			if !yield(response, nil) {
-				return
-			}
+		if m.callIndex < len(m.responses) {
+			resp := m.responses[m.callIndex]
+			m.callIndex++
+			yield(resp, nil)
 		}
 	}
 }
@@ -145,7 +147,7 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 									FunctionCall: &genai.FunctionCall{
 										Name: "propose_change",
 										Args: map[string]any{
-											"assigned_tags": []any{"math", "core"}, // Phase 3 Coverage
+											"assigned_tags": []any{"math", "core"},
 											"agent_count":   float64(2),
 											"agent_tasks": []any{
 												map[string]any{"context_digest": "Context A", "instruction": "Do task A"},
@@ -179,9 +181,10 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 	}
 
 	space := &mockThinkSpace{}
+	manifest := chat.NewThreadManifest(thread.ID)
 	var history []*genai.Content
 
-	err := coordinator.ExecuteTurn(ctx, thread, space, history, userInterface)
+	err := coordinator.ExecuteTurn(ctx, thread, manifest, space, history, userInterface)
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
@@ -194,7 +197,6 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 		t.Errorf("Expected UI to review 'candidate/mock-123', got '%s'", userInterface.reviewedBranch)
 	}
 
-	// Verify the Coordinator successfully extracted assigned_tags and passed them to the ledger
 	events, _ := workspaceService.LoadEvents(ctx, thread)
 	foundTags := false
 	for _, ev := range events {
@@ -255,12 +257,82 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 		strategyToReturn: session.StrategySkip,
 	}
 
-	err := coordinator.ExecuteTurn(ctx, thread, &mockThinkSpace{}, nil, userInterface)
+	manifest := chat.NewThreadManifest(thread.ID)
+
+	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
 
 	if userInterface.reviewedBranch != "" {
 		t.Errorf("Expected UI review step to be skipped, but got review for: %s", userInterface.reviewedBranch)
+	}
+}
+
+func TestCoordinator_ToolLoop_QueryLensThenPropose(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	workspaceRoot := t.TempDir()
+
+	bus := chat.NewEventBus()
+	bus.Subscribe(chat.NewLedgerSubscriber())
+
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
+	thread, _ := workspaceService.StartThread(ctx, "test-thread-loop")
+
+	_ = workspaceService.LogUserMessage(ctx, thread, "This is historical auth info")
+
+	allEvents, _ := workspaceService.LoadEvents(ctx, thread)
+	testEventID := allEvents[0].ID
+
+	manifest := chat.NewThreadManifest(thread.ID)
+	// Directly assign the typed UUID array
+	manifest.Lenses["auth"] = []uuid.UUID{testEventID}
+
+	client := &mockModelClient{
+		responses: []*genai.GenerateContentResponse{
+			{
+				Candidates: []*genai.Candidate{{
+					Content: &genai.Content{
+						Parts: []*genai.Part{{
+							FunctionCall: &genai.FunctionCall{
+								Name: "query_lens",
+								Args: map[string]any{"tag": "auth", "reasoning": "Need past auth context"},
+							},
+						}},
+					},
+				}},
+			},
+			{
+				Candidates: []*genai.Candidate{{
+					Content: &genai.Content{
+						Parts: []*genai.Part{{
+							FunctionCall: &genai.FunctionCall{
+								Name: "propose_change",
+								Args: map[string]any{
+									"agent_count": float64(1),
+									"agent_tasks": []any{map[string]any{"context_digest": "Auth info", "instruction": "Do auth"}},
+								},
+							},
+						}},
+					},
+				}},
+			},
+		},
+	}
+
+	flow := &mockFlow{}
+	coordinator := session.NewCoordinator(logger, workspaceService, llm.NewAdapter(client), nil, flow, &mockEmitter{}, "golang", "", flows.FlowConfig{})
+	userInterface := &mockUserInterface{strategyToReturn: session.StrategySkip}
+
+	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
+	if err != nil {
+		t.Fatalf("ExecuteTurn failed: %v", err)
+	}
+
+	if !flow.executeCalled {
+		t.Errorf("Expected Flow to be executed on the second iteration of the tool loop")
 	}
 }

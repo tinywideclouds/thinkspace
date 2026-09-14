@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
@@ -21,7 +20,7 @@ type TurnManager struct {
 	workspaceManager *workspace.ServiceManager
 	llmAdapter       *llm.Adapter
 	playbackEngine   *chat.PlaybackEngine
-	contextAssembler *chat.ContextAssembler
+	contextAssembler *ContextAssembler
 	fanOutFlow       flows.Flow
 	modelClient      llm.ModelClient
 }
@@ -40,7 +39,7 @@ func NewTurnManager(
 		workspaceManager: workspaceManager,
 		llmAdapter:       llmAdapter,
 		playbackEngine:   chat.NewPlaybackEngine(),
-		contextAssembler: chat.NewContextAssembler(),
+		contextAssembler: NewContextAssembler(),
 		fanOutFlow:       fanOutFlow,
 		modelClient:      modelClient,
 	}
@@ -103,27 +102,17 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return fmt.Errorf("loading updated state: %w", err)
 	}
 
-	assemblyReq := chat.ContextAssemblyRequest{
+	// 3. Assemble and fuse the context dual-brain
+	assemblyReq := chat.AssemblyRequest{
 		Manifest:     manifest,
 		ActiveLenses: []string{},
 		RecentEvents: graph.RecentEvents,
 	}
 
-	history, err := tm.contextAssembler.Build(assemblyReq)
+	dynamicSystemPrompt, history, err := tm.contextAssembler.Build(ctx, thinkSpace, workspaceService.WorkspaceRoot(), assemblyReq)
 	if err != nil {
 		return fmt.Errorf("assembling context: %w", err)
 	}
-
-	var promptBuilder strings.Builder
-	promptBuilder.WriteString("### THE MAPBOOK (WORKSPACE CONTEXT)\n")
-
-	if layers, err := thinkSpace.Mapbook().GenerateLayers(ctx, workspaceService.WorkspaceRoot()); err == nil {
-		for layerName, content := range layers {
-			promptBuilder.WriteString(fmt.Sprintf("--- %s Map ---\n%s\n\n", layerName, content))
-		}
-	}
-
-	dynamicSystemPrompt := thinkSpace.Config().ManagerSystemPrompt() + "\n\n" + promptBuilder.String()
 
 	workerModel := thinkSpace.Config().Models[spaces.ModelCategoryWorker]
 	executor := llm.NewSubAgentExecutor(tm.modelClient, workerModel, thinkSpace.Config().WorkerSystemPrompt(), thinkSpace.Config().MaxWorkerTokens)
@@ -140,24 +129,8 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		flowConfig,
 	)
 
-	// Inject the dynamicMapbook system prompt into the thinkSpace wrapper specifically for this turn
-	wrappedThinkSpace := &dynamicThinkSpaceWrapper{
-		ThinkSpace:   thinkSpace,
-		systemPrompt: dynamicSystemPrompt,
-	}
+	// Inject the fused dynamic system prompt for the Coordinator
+	wrappedThinkSpace := WrapSpace(thinkSpace, dynamicSystemPrompt)
 
-	return coordinator.ExecuteTurn(ctx, thread, wrappedThinkSpace, history, ui)
-}
-
-// dynamicThinkSpaceWrapper intercepts the ManagerSystemPrompt to inject Mapbook contexts at runtime.
-type dynamicThinkSpaceWrapper struct {
-	spaces.ThinkSpace
-	systemPrompt string
-}
-
-func (d *dynamicThinkSpaceWrapper) Config() spaces.ThinkSpaceConfig {
-	cfg := d.ThinkSpace.Config()
-	cfg.SystemPrompt = d.systemPrompt
-	cfg.Roles.Manager = "" // Already merged in TurnManager
-	return cfg
+	return coordinator.ExecuteTurn(ctx, thread, manifest, wrappedThinkSpace, history, ui)
 }

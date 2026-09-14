@@ -79,15 +79,18 @@ func (m *mockSandbox) TearDown(ctx context.Context) error                   { re
 
 func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
 	config := spaces.ThinkSpaceConfig{
-		Name:                         "golang",
-		VerifyTimeoutSeconds:         verifyTimeout,
-		ToolDescription:              "mock tool desc",
-		AgentCountDescription:        "mock count desc",
-		AssignedTagsDescription:      "mock tags desc",
-		AgentInstructionsDescription: "mock instructions desc",
-		ContextDigestDescription:     "mock digest desc",
-		InstructionDescription:       "mock instruction desc",
-		TargetFilesDescription:       "mock files desc",
+		Name:                          "golang",
+		VerifyTimeoutSeconds:          verifyTimeout,
+		ToolDescription:               "mock tool desc",
+		AgentCountDescription:         "mock count desc",
+		AssignedTagsDescription:       "mock tags desc",
+		AgentInstructionsDescription:  "mock instructions desc",
+		ContextDigestDescription:      "mock digest desc",
+		InstructionDescription:        "mock instruction desc",
+		TargetFilesDescription:        "mock files desc",
+		QueryLensDescription:          "mock query lens desc",
+		QueryLensTagDescription:       "mock lens tag",
+		QueryLensReasoningDescription: "mock lens reasoning",
 	}
 	config.ApplyDefaults()
 	return golang.NewGoThinkSpace(config)
@@ -255,19 +258,39 @@ func TestGoThinkSpace_InterfaceContracts(t *testing.T) {
 		t.Fatalf("Expected exactly 1 tool, got %d", len(tools))
 	}
 
-	funcDecl := tools[0].FunctionDeclarations[0]
-	if funcDecl.Name != "propose_change" {
-		t.Errorf("Expected tool name 'propose_change', got '%s'", funcDecl.Name)
-	}
-	if funcDecl.Description != "mock tool desc" {
-		t.Errorf("Tool description was not correctly mapped from config")
+	hasPropose := false
+	hasQueryLens := false
+
+	for _, decl := range tools[0].FunctionDeclarations {
+		if decl.Name == "propose_change" {
+			hasPropose = true
+			if decl.Description != "mock tool desc" {
+				t.Errorf("Tool description was not correctly mapped from config")
+			}
+			props := decl.Parameters.Properties
+			if props["assigned_tags"].Description != "mock tags desc" {
+				t.Errorf("Schema property mapping failed for assigned_tags")
+			}
+			if props["agent_tasks"].Items.Properties["target_files"].Description != "mock files desc" {
+				t.Errorf("Schema property mapping failed for target_files inside agent_tasks")
+			}
+		}
+		if decl.Name == "query_lens" {
+			hasQueryLens = true
+			if decl.Description != "mock query lens desc" {
+				t.Errorf("QueryLens description was not mapped")
+			}
+			props := decl.Parameters.Properties
+			if props["tag"].Description != "mock lens tag" {
+				t.Errorf("QueryLens tag description was not mapped")
+			}
+		}
 	}
 
-	props := funcDecl.Parameters.Properties
-	if props["assigned_tags"].Description != "mock tags desc" {
-		t.Errorf("Schema property mapping failed for assigned_tags")
+	if !hasPropose {
+		t.Error("missing propose_change tool")
 	}
-	if props["agent_tasks"].Items.Properties["target_files"].Description != "mock files desc" {
-		t.Errorf("Schema property mapping failed for target_files inside agent_tasks")
+	if !hasQueryLens {
+		t.Error("missing query_lens tool")
 	}
 }

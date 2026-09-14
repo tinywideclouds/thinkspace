@@ -81,11 +81,12 @@ files:
   - ../../go/fs/internal/spaces/models.go
   - ../../go/fs/internal/spaces/thinkspace.go
   - ../../go/fs/internal/spaces/verifier.go
-  - ../../go/fs/internal/spaces/golang/assembler.go
   - ../../go/fs/internal/spaces/golang/mapbook.go
   - ../../go/fs/internal/spaces/golang/space_test.go
   - ../../go/fs/internal/spaces/golang/space.go
   - ../../go/fs/internal/spaces/golang/verifier.go
   - ../../go/fs/internal/assembler/mapbook.go
   - ../../go/fs/internal/assembler/workbench.go
+  - ../../go/fs/internal/assembler/workbench_test.go
+  - ../../go/fs/internal/spaces/config_test.go
 last_context: llm_golang_31.md

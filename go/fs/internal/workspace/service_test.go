@@ -252,3 +252,38 @@ func TestService_LedgerTags(t *testing.T) {
 		t.Errorf("expected tags [ui, frontend] to be recovered from ledger, got %v", events[0].Tags)
 	}
 }
+
+func TestService_FetchEvents(t *testing.T) {
+	svc, _, _ := setupServiceTest(t)
+	ctx := context.Background()
+
+	thread, _ := svc.StartThread(ctx, "fetch-thread")
+
+	_ = svc.LogUserMessage(ctx, thread, "Event A")
+	_ = svc.LogModelResponse(ctx, thread, "Event B")
+	_ = svc.LogUserMessage(ctx, thread, "Event C")
+
+	allEvents, _ := svc.LoadEvents(ctx, thread)
+	if len(allEvents) != 3 {
+		t.Fatalf("Expected 3 events in ledger")
+	}
+
+	targetID1 := allEvents[0].ID.String()
+	targetID2 := allEvents[2].ID.String()
+
+	fetched, err := svc.FetchEvents(ctx, thread, []string{targetID1, targetID2})
+	if err != nil {
+		t.Fatalf("FetchEvents failed: %v", err)
+	}
+
+	if len(fetched) != 2 {
+		t.Fatalf("Expected exactly 2 events fetched, got %d", len(fetched))
+	}
+
+	if fetched[0].ID.String() != targetID1 && fetched[1].ID.String() != targetID1 {
+		t.Errorf("Expected to retrieve targetID1")
+	}
+	if fetched[0].ID.String() != targetID2 && fetched[1].ID.String() != targetID2 {
+		t.Errorf("Expected to retrieve targetID2")
+	}
+}
