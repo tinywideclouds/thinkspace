@@ -102,7 +102,16 @@ func main() {
 
 	workerModel := activeThinkSpace.Config().Models[spaces.ModelCategoryWorker]
 	llmAdapter := llm.NewAdapter(modelClient)
-	subAgentExecutor := llm.NewSubAgentExecutor(modelClient, workerModel, activeThinkSpace.Config().WorkerSystemPrompt(), activeThinkSpace.Config().MaxWorkerTokens)
+
+	// UPDATED: Pass the Patcher from the active space into the executor
+	subAgentExecutor := llm.NewSubAgentExecutor(
+		modelClient,
+		workerModel,
+		activeThinkSpace.Config().WorkerSystemPrompt(),
+		activeThinkSpace.Config().MaxWorkerTokens,
+		activeThinkSpace.Patcher(),
+	)
+
 	fanOutFlow := flows.NewFanOutFlow(logger)
 	workspaceService := workspace.NewService(logger, stateEngine, repositoryRoot, bus)
 

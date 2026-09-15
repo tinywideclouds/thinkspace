@@ -3,6 +3,7 @@ package golang
 import (
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
 
@@ -101,4 +102,8 @@ func (s *GoThinkSpace) Verifier() spaces.Verifier {
 
 func (s *GoThinkSpace) Mapbook() assembler.Mapbook {
 	return NewGolangMapbook()
+}
+
+func (s *GoThinkSpace) Patcher() workspace.Patcher {
+	return NewGoASTPatcher(s.config.PatcherSystemInstructions)
 }

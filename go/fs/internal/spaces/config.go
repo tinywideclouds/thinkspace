@@ -26,6 +26,7 @@ type ThinkSpaceConfig struct {
 	QueryLensDescription          string                   `yaml:"query_lens_description"`
 	QueryLensTagDescription       string                   `yaml:"query_lens_tag_description"`
 	QueryLensReasoningDescription string                   `yaml:"query_lens_reasoning_description"`
+	PatcherSystemInstructions     string                   `yaml:"patcher_system_instructions"`
 }
 
 // ApplyDefaults sets reasonable timeouts if they are missing from the configuration.

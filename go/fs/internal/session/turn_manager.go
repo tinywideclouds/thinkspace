@@ -89,20 +89,17 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return fmt.Errorf("starting thread: %w", err)
 	}
 
-	// 1. ALWAYS log the user's prompt to the physical ledger first
 	if promptText != "" {
 		if err := workspaceService.LogUserPrompt(ctx, thread, promptText); err != nil {
 			return fmt.Errorf("logging user prompt: %w", err)
 		}
 	}
 
-	// 2. Reload state to guarantee the newly written prompt is included in the RecentEvents array
 	graph, manifest, err := tm.playbackEngine.LoadState(ctx, thread)
 	if err != nil {
 		return fmt.Errorf("loading updated state: %w", err)
 	}
 
-	// 3. Assemble and fuse the context dual-brain
 	assemblyReq := chat.AssemblyRequest{
 		Manifest:     manifest,
 		ActiveLenses: []string{},
@@ -115,7 +112,15 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 	}
 
 	workerModel := thinkSpace.Config().Models[spaces.ModelCategoryWorker]
-	executor := llm.NewSubAgentExecutor(tm.modelClient, workerModel, thinkSpace.Config().WorkerSystemPrompt(), thinkSpace.Config().MaxWorkerTokens)
+
+	// Pass the Patcher to the SubAgentExecutor
+	executor := llm.NewSubAgentExecutor(
+		tm.modelClient,
+		workerModel,
+		thinkSpace.Config().WorkerSystemPrompt(),
+		thinkSpace.Config().MaxWorkerTokens,
+		thinkSpace.Patcher(),
+	)
 
 	coordinator := NewCoordinator(
 		tm.logger,
@@ -129,23 +134,18 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		flowConfig,
 	)
 
-	// --- Observability: Manager LLM Payload ---
 	tm.logger.Info("=== MANAGER CONTEXT ASSEMBLY COMPLETE ===",
 		"system_prompt_length", len(dynamicSystemPrompt),
 		"history_length", len(history),
 	)
 
-	// Use Debug level for the massive text dumps so it doesn't permanently flood standard Info logs,
-	// but is easily accessible when we run with -v or debug mode.
 	tm.logger.Debug("--- MANAGER SYSTEM PROMPT ---\n" + dynamicSystemPrompt)
 	for i, h := range history {
 		if len(h.Parts) > 0 {
 			tm.logger.Debug(fmt.Sprintf("--- MANAGER HISTORY [%d] (%s) ---\n%s", i, h.Role, h.Parts[0].Text))
 		}
 	}
-	// ------------------------------------------
 
-	// Inject the fused dynamic system prompt for the Coordinator
 	wrappedThinkSpace := WrapSpace(thinkSpace, dynamicSystemPrompt)
 
 	return coordinator.ExecuteTurn(ctx, thread, manifest, wrappedThinkSpace, history, ui)

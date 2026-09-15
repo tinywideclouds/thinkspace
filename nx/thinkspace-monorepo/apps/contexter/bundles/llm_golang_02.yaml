@@ -90,4 +90,7 @@ files:
   - ../../go/fs/internal/gitfs/implementation.md
   - ../../go/fs/internal/session/context_assembler_test.go
   - ../../go/fs/internal/session/context_assembler.go
+  - ../../go/fs/internal/spaces/golang/patcher_test.go
+  - ../../go/fs/internal/spaces/golang/patcher.go
+  - ../../go/fs/internal/workspace/patcher.go
 last_context: llm_golang_35.md

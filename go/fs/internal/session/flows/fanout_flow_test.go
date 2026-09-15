@@ -22,19 +22,26 @@ type mockChatEngine struct {
 	sandbox *mockSandbox
 }
 
-func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
+func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error {
+	return nil
+}
+
 func (m *mockChatEngine) Snapshot(ctx context.Context, chatID string, msg string) (string, error) {
 	return "", nil
 }
+
 func (m *mockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
 	return nil
 }
+
 func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID string, candidateID string) (string, error) {
 	return "+ mock candidate diff", nil
 }
+
 func (m *mockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
+
 func (m *mockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
@@ -49,7 +56,10 @@ type mockSandbox struct {
 	delivered   bool
 }
 
-func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error { return nil }
+func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
+	return nil
+}
+
 func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if path == "trace.jsonl" {
 		return []byte(`{"prompt": "Do a thing", "generated": "mock output"}`), nil
@@ -60,15 +70,23 @@ func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error)
 	// Return dummy data to simulate a successfully loaded target file
 	return []byte("mock physical file content"), nil
 }
+
 func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
 	return "", nil
 }
-func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error { return nil }
+
+func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error {
+	return nil
+}
+
 func (m *mockSandbox) DeliverForReview(ctx context.Context) error {
 	m.delivered = true
 	return nil
 }
-func (m *mockSandbox) TearDown(ctx context.Context) error { return nil }
+
+func (m *mockSandbox) TearDown(ctx context.Context) error {
+	return nil
+}
 
 type mockThinkSpace struct{}
 
@@ -76,9 +94,21 @@ func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	return spaces.ThinkSpaceConfig{}
 }
 
-func (m *mockThinkSpace) Tools() []*genai.Tool       { return nil }
-func (m *mockThinkSpace) Verifier() spaces.Verifier  { return nil }
-func (m *mockThinkSpace) Mapbook() assembler.Mapbook { return nil }
+func (m *mockThinkSpace) Tools() []*genai.Tool {
+	return nil
+}
+
+func (m *mockThinkSpace) Verifier() spaces.Verifier {
+	return nil
+}
+
+func (m *mockThinkSpace) Mapbook() assembler.Mapbook {
+	return nil
+}
+
+func (m *mockThinkSpace) Patcher() workspace.Patcher {
+	return nil
+}
 
 type mockVerifier struct {
 	errsToReturn []error
@@ -201,8 +231,8 @@ func TestFanOutFlow_FailFast_HallucinatedFile(t *testing.T) {
 		t.Fatalf("expected fanout to fail due to fail-fast boundary, but it succeeded")
 	}
 
-	// FanOutFlow returns an aggregate error summary, not the raw error.
-	if !strings.Contains(err.Error(), "fatal system errors") {
+	// Updated to look for the new specific error trace bubbled up from the flow execution
+	if !strings.Contains(err.Error(), "sub-agent execution aborted") {
 		t.Errorf("expected aggregate flow error, got: %v", err)
 	}
 

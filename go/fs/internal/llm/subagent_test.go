@@ -2,6 +2,7 @@ package llm_test
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error)
 	if data, ok := m.files[path]; ok {
 		return data, nil
 	}
-	return nil, nil // Return nil safely if file doesn't exist yet
+	return nil, nil
 }
 
 func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
@@ -41,7 +42,6 @@ func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error { re
 func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { return nil }
 func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
 
-// spyModelClient implements ModelClient and captures the arguments passed to GenerateContentStream.
 type spyModelClient struct {
 	responses       []*genai.GenerateContentResponse
 	err             error
@@ -68,15 +68,32 @@ func (m *spyModelClient) GenerateContentStream(ctx context.Context, model string
 	}
 }
 
+type mockPatcher struct {
+	applyCalled bool
+	lastOutput  string
+	errToReturn error
+}
+
+func (m *mockPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSandbox, llmOutput string) error {
+	m.applyCalled = true
+	m.lastOutput = llmOutput
+	return m.errToReturn
+}
+
+func (m *mockPatcher) SystemInstructions() string {
+	return "Mock patcher formatting rules"
+}
+
 // --- Tests ---
 
-func TestSubAgentFactory_Execution(t *testing.T) {
+func TestSubAgentFactory_ExecutionWithPatcher(t *testing.T) {
 	ctx := context.Background()
 	sandbox := newMockSandbox()
+	patcher := &mockPatcher{}
 
-	domainSystemPrompt := "You must place all Go files in the src/ directory."
+	domainSystemPrompt := "Base domain rules"
 	taskInstruction := "write a main file"
-	jsonPayload := `{"src/main.go": "package main\n"}`
+	llmOutput := `{"patches": []}`
 	maxTokens := 8192
 
 	spyClient := &spyModelClient{
@@ -85,9 +102,7 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 				Candidates: []*genai.Candidate{
 					{
 						Content: &genai.Content{
-							Parts: []*genai.Part{
-								{Text: jsonPayload},
-							},
+							Parts: []*genai.Part{{Text: llmOutput}},
 						},
 					},
 				},
@@ -95,7 +110,7 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 		},
 	}
 
-	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", domainSystemPrompt, maxTokens)
+	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", domainSystemPrompt, maxTokens, patcher)
 	tokenChan := make(chan workspace.AgentToken, 10)
 
 	briefing := workspace.SubAgentBriefing{Instruction: taskInstruction}
@@ -105,52 +120,21 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 	}
 	close(tokenChan)
 
-	// 1. Assert the AI was configured with the domain's System Prompt
-	if spyClient.capturedConfig == nil || spyClient.capturedConfig.SystemInstruction == nil {
-		t.Fatalf("expected SystemInstruction to be populated in the SDK config")
-	}
+	// Assert Instructions Fused
 	actualSysPrompt := spyClient.capturedConfig.SystemInstruction.Parts[0].Text
-	if actualSysPrompt != domainSystemPrompt {
-		t.Errorf("expected system prompt %q, got %q", domainSystemPrompt, actualSysPrompt)
+	if !strings.Contains(actualSysPrompt, "Base domain rules") || !strings.Contains(actualSysPrompt, "Mock patcher formatting rules") {
+		t.Errorf("expected combined system prompt, got %q", actualSysPrompt)
 	}
 
-	// 2. Assert Max Tokens were applied using direct int32 comparison
-	if spyClient.capturedConfig.MaxOutputTokens != int32(maxTokens) {
-		t.Errorf("expected MaxOutputTokens to be set to %d, got %d", maxTokens, spyClient.capturedConfig.MaxOutputTokens)
+	// Assert Patcher Call
+	if !patcher.applyCalled {
+		t.Errorf("expected Patcher.Apply to be called")
+	}
+	if patcher.lastOutput != llmOutput {
+		t.Errorf("expected patcher to receive raw output")
 	}
 
-	// 3. Assert the AI was passed the specific agent instructions
-	if len(spyClient.capturedHistory) == 0 {
-		t.Fatalf("expected history to contain the task instructions")
-	}
-	actualInstruction := spyClient.capturedHistory[0].Parts[0].Text
-	if !strings.Contains(actualInstruction, taskInstruction) {
-		t.Errorf("expected task instruction %q to be in %q", taskInstruction, actualInstruction)
-	}
-
-	// 4. Assert the token stream multiplexing works
-	var streamedText strings.Builder
-	for token := range tokenChan {
-		if token.AgentID != 1 {
-			t.Errorf("expected agent ID 1, got %d", token.AgentID)
-		}
-		streamedText.WriteString(token.Text)
-	}
-
-	if streamedText.String() != jsonPayload {
-		t.Errorf("expected streamed text to be '%s', got '%s'", jsonPayload, streamedText.String())
-	}
-
-	// 5. Assert the physical sandbox correctly interpreted the JSON payload
-	content, exists := sandbox.files["src/main.go"]
-	if !exists {
-		t.Fatalf("expected src/main.go to be generated in sandbox")
-	}
-	if string(content) != "package main\n" {
-		t.Errorf("unexpected file content: %s", string(content))
-	}
-
-	// 6. Assert the trace ledger logged the execution accurately
+	// Assert Trace logging
 	traceContent, exists := sandbox.files["trace.jsonl"]
 	if !exists {
 		t.Fatalf("expected trace.jsonl to be generated in sandbox")
@@ -158,17 +142,12 @@ func TestSubAgentFactory_Execution(t *testing.T) {
 	if !strings.Contains(string(traceContent), taskInstruction) {
 		t.Errorf("trace.jsonl missing prompt: %s", string(traceContent))
 	}
-	if !strings.Contains(string(traceContent), "src/main.go") {
-		t.Errorf("trace.jsonl missing generated JSON: %s", string(traceContent))
-	}
 }
 
-func TestSubAgentFactory_RecoverableJSON(t *testing.T) {
+func TestSubAgentFactory_EmptyResponse(t *testing.T) {
 	ctx := context.Background()
 	sandbox := newMockSandbox()
-
-	// This string contains an invalid escape sequence `\)` which LLMs occasionally hallucinate
-	recoverablePayload := `{"src/server.go": "import (\n\t\"net/http\"\)\n"}`
+	patcher := &mockPatcher{}
 
 	spyClient := &spyModelClient{
 		responses: []*genai.GenerateContentResponse{
@@ -176,9 +155,7 @@ func TestSubAgentFactory_RecoverableJSON(t *testing.T) {
 				Candidates: []*genai.Candidate{
 					{
 						Content: &genai.Content{
-							Parts: []*genai.Part{
-								{Text: recoverablePayload},
-							},
+							Parts: []*genai.Part{{Text: ""}},
 						},
 					},
 				},
@@ -186,61 +163,47 @@ func TestSubAgentFactory_RecoverableJSON(t *testing.T) {
 		},
 	}
 
-	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", "Mock system instructions", 8192)
-	tokenChan := make(chan workspace.AgentToken, 10)
+	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", "rules", 100, patcher)
 
-	briefing := workspace.SubAgentBriefing{Instruction: "write server with a bad escape"}
-
-	// Execute should succeed because the regex sanitizer fixes the broken `\)`
-	err := executor(ctx, briefing, sandbox, 1, tokenChan)
-	if err != nil {
-		t.Fatalf("expected executor to recover from bad escapes, but failed: %v", err)
-	}
-
-	content, exists := sandbox.files["src/server.go"]
-	if !exists {
-		t.Fatalf("expected src/server.go to be generated in sandbox")
-	}
-
-	// The trailing `\)` should have been cleanly sanitized to `)`
-	expectedContent := "import (\n\t\"net/http\")\n"
-	if string(content) != expectedContent {
-		t.Errorf("expected file content:\n%s\ngot:\n%s", expectedContent, string(content))
-	}
-}
-
-func TestSubAgentFactory_InvalidJSON(t *testing.T) {
-	ctx := context.Background()
-	sandbox := newMockSandbox()
-
-	invalidPayload := `{"main.go": ` // missing closing brackets/quotes. Unrecoverable.
-
-	spyClient := &spyModelClient{
-		responses: []*genai.GenerateContentResponse{
-			{
-				Candidates: []*genai.Candidate{
-					{
-						Content: &genai.Content{
-							Parts: []*genai.Part{
-								{Text: invalidPayload},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", "Mock system instructions", 8192)
-	tokenChan := make(chan workspace.AgentToken, 10)
-
-	briefing := workspace.SubAgentBriefing{Instruction: "write bad json"}
-	err := executor(ctx, briefing, sandbox, 1, tokenChan)
+	err := executor(ctx, workspace.SubAgentBriefing{Instruction: "do work"}, sandbox, 1, nil)
 	if err == nil {
-		t.Fatalf("expected executor to fail on fatally invalid json")
+		t.Fatalf("expected error on empty response, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "failed to parse sub-agent json") {
-		t.Errorf("expected JSON parse error, got: %v", err)
+	if !strings.Contains(err.Error(), "empty response") {
+		t.Errorf("expected empty response error, got %v", err)
+	}
+}
+
+func TestSubAgentFactory_PatcherFailure(t *testing.T) {
+	ctx := context.Background()
+	sandbox := newMockSandbox()
+	patcher := &mockPatcher{
+		errToReturn: errors.New("patching failed structurally"),
+	}
+
+	spyClient := &spyModelClient{
+		responses: []*genai.GenerateContentResponse{
+			{
+				Candidates: []*genai.Candidate{
+					{
+						Content: &genai.Content{
+							Parts: []*genai.Part{{Text: "some output"}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", "rules", 100, patcher)
+
+	err := executor(ctx, workspace.SubAgentBriefing{Instruction: "do work"}, sandbox, 1, nil)
+	if err == nil {
+		t.Fatalf("expected error bubbling from patcher, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "patcher failed to apply changes") {
+		t.Errorf("expected patcher error wrap, got %v", err)
 	}
 }

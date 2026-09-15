@@ -39,22 +39,30 @@ func (m *mockModelClient) GenerateContentStream(ctx context.Context, model strin
 
 type mockChatEngine struct{}
 
-func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
+func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error {
+	return nil
+}
+
 func (m *mockChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
 	return "mock-sha", nil
 }
+
 func (m *mockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
 	return nil, nil
 }
+
 func (m *mockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
 	return nil
 }
+
 func (m *mockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
+
 func (m *mockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
+
 func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
 	return "+ mock diff", nil
 }
@@ -72,9 +80,21 @@ func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	return cfg
 }
 
-func (m *mockThinkSpace) Tools() []*genai.Tool       { return nil }
-func (m *mockThinkSpace) Verifier() spaces.Verifier  { return &mockVerifier{} }
-func (m *mockThinkSpace) Mapbook() assembler.Mapbook { return nil }
+func (m *mockThinkSpace) Tools() []*genai.Tool {
+	return nil
+}
+
+func (m *mockThinkSpace) Verifier() spaces.Verifier {
+	return &mockVerifier{}
+}
+
+func (m *mockThinkSpace) Mapbook() assembler.Mapbook {
+	return nil
+}
+
+func (m *mockThinkSpace) Patcher() workspace.Patcher {
+	return nil
+}
 
 type mockVerifier struct{}
 
@@ -86,7 +106,10 @@ type mockFlow struct {
 	executeCalled bool
 }
 
-func (m *mockFlow) Name() string { return "MockFlow" }
+func (m *mockFlow) Name() string {
+	return "MockFlow"
+}
+
 func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *chat.Thread, space spaces.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier spaces.Verifier) (*flows.FlowResult, error) {
 	m.executeCalled = true
 	return &flows.FlowResult{
@@ -288,7 +311,6 @@ func TestCoordinator_ToolLoop_QueryLensThenPropose(t *testing.T) {
 	testEventID := allEvents[0].ID
 
 	manifest := chat.NewThreadManifest(thread.ID)
-	// Directly assign the typed UUID array
 	manifest.Lenses["auth"] = []uuid.UUID{testEventID}
 
 	client := &mockModelClient{

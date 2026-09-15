@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -19,19 +17,23 @@ type TraceEvent struct {
 	Generated string    `json:"generated,omitempty"`
 }
 
-// NewSubAgentExecutor creates a SubAgentExecutor linked to a specific model, system instruction, and token limit.
-func NewSubAgentExecutor(client ModelClient, modelName string, systemInstruction string, maxTokens int) workspace.SubAgentExecutor {
+// NewSubAgentExecutor creates a SubAgentExecutor linked to a specific model, system instruction, token limit, and patcher.
+func NewSubAgentExecutor(client ModelClient, modelName string, systemInstruction string, maxTokens int, patcher workspace.Patcher) workspace.SubAgentExecutor {
 	return func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
 
+		combinedInstruction := systemInstruction
+		if patcher != nil && patcher.SystemInstructions() != "" {
+			combinedInstruction += "\n\n" + patcher.SystemInstructions()
+		}
+
 		var sysInstr *genai.Content
-		if systemInstruction != "" {
+		if combinedInstruction != "" {
 			sysInstr = &genai.Content{
-				Parts: []*genai.Part{{Text: systemInstruction}},
+				Parts: []*genai.Part{{Text: combinedInstruction}},
 			}
 		}
 
 		config := &genai.GenerateContentConfig{
-			ResponseMIMEType:  "application/json",
 			SystemInstruction: sysInstr,
 		}
 
@@ -57,7 +59,7 @@ func NewSubAgentExecutor(client ModelClient, modelName string, systemInstruction
 
 		stream := client.GenerateContentStream(ctx, modelName, contents, config)
 
-		rawJSON := ""
+		rawOutput := ""
 
 		for chunk, err := range stream {
 			if err != nil {
@@ -67,7 +69,7 @@ func NewSubAgentExecutor(client ModelClient, modelName string, systemInstruction
 			if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
 				for _, part := range chunk.Candidates[0].Content.Parts {
 					if part.Text != "" {
-						rawJSON += part.Text
+						rawOutput += part.Text
 
 						if tokenChan != nil {
 							tokenChan <- workspace.AgentToken{
@@ -80,33 +82,21 @@ func NewSubAgentExecutor(client ModelClient, modelName string, systemInstruction
 			}
 		}
 
-		if rawJSON == "" {
+		if rawOutput == "" {
 			return fmt.Errorf("empty response from sub-agent")
 		}
 
-		// Sanitize hallucinated JSON escapes (e.g., \), \:) before unmarshaling
-		re := regexp.MustCompile(`\\([^"\\/bfnrtu])`)
-		sanitizedJSON := re.ReplaceAllString(rawJSON, "$1")
-
-		var files map[string]string
-		if err := json.Unmarshal([]byte(sanitizedJSON), &files); err != nil {
-			return fmt.Errorf("failed to parse sub-agent json: %w\nOutput was: %s", err, rawJSON)
-		}
-
-		for relPath, content := range files {
-			// Normalize to forward slashes to prevent cross-platform OS bugs (like Windows \ paths)
-			cleanPath := filepath.ToSlash(filepath.Clean(relPath))
-			if err := sandbox.WriteFile(ctx, cleanPath, []byte(content)); err != nil {
-				return fmt.Errorf("writing file %s: %w", relPath, err)
+		if patcher != nil {
+			if err := patcher.Apply(ctx, sandbox, rawOutput); err != nil {
+				return fmt.Errorf("patcher failed to apply changes: %w\nRaw Output:\n%s", err, rawOutput)
 			}
 		}
 
 		traceData, _ := sandbox.ReadFile(ctx, "trace.jsonl")
-
 		event := TraceEvent{
 			Timestamp: time.Now().UTC(),
 			Prompt:    fullPrompt,
-			Generated: rawJSON,
+			Generated: rawOutput,
 		}
 
 		b, err := json.Marshal(event)

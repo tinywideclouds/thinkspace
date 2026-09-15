@@ -10,6 +10,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
 
@@ -35,6 +36,7 @@ func (m *mockSpaceForFusion) Config() spaces.ThinkSpaceConfig {
 func (m *mockSpaceForFusion) Tools() []*genai.Tool       { return nil }
 func (m *mockSpaceForFusion) Verifier() spaces.Verifier  { return nil }
 func (m *mockSpaceForFusion) Mapbook() assembler.Mapbook { return &mockMapbook{} }
+func (m *mockSpaceForFusion) Patcher() workspace.Patcher { return nil }
 
 func TestContextAssembler_Build(t *testing.T) {
 	ca := session.NewContextAssembler()
@@ -63,7 +65,6 @@ func TestContextAssembler_Build(t *testing.T) {
 		t.Fatalf("Build failed: %v", err)
 	}
 
-	// 1. Assert Spatial Reality Fusion (Mapbook + Base Config)
 	if !strings.Contains(sysPrompt, "Base System Prompt\n\nManager Role Rules") {
 		t.Errorf("Expected base system prompt and manager role, got: %s", sysPrompt)
 	}
@@ -77,7 +78,6 @@ func TestContextAssembler_Build(t *testing.T) {
 		t.Errorf("Expected conceptual layer, got: %s", sysPrompt)
 	}
 
-	// 2. Assert Temporal Memory Fusion (Chat Assembler)
 	if len(history) != 3 {
 		t.Fatalf("Expected 3 history items (sticky, tags, recent), got %d", len(history))
 	}

@@ -43,7 +43,7 @@ func TestFanOutFlow_ParseTasks(t *testing.T) {
 					AgentID:       "agent-2",
 					ContextDigest: "System uses Go 1.22",
 					Instruction:   "Build a gin router",
-					TargetFiles:   nil,
+					TargetFiles:   []string{}, // Updated to match make([]string, 0)
 				},
 			},
 		},
@@ -56,8 +56,8 @@ func TestFanOutFlow_ParseTasks(t *testing.T) {
 				},
 			},
 			expected: []SubAgentTask{
-				{AgentID: "agent-1", ContextDigest: "", Instruction: "Just build a mux", TargetFiles: nil},
-				{AgentID: "agent-2", ContextDigest: "", Instruction: "Just build a gin router", TargetFiles: nil},
+				{AgentID: "agent-1", ContextDigest: "", Instruction: "Just build a mux", TargetFiles: []string{}},
+				{AgentID: "agent-2", ContextDigest: "", Instruction: "Just build a gin router", TargetFiles: []string{}},
 			},
 		},
 		{
