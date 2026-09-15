@@ -13,55 +13,61 @@ func TestThinkSpaceConfig_ApplyDefaults(t *testing.T) {
 	// Apply defaults to an empty configuration
 	configuration.ApplyDefaults()
 
-	if configuration.TurnTimeoutSeconds != 300 {
-		t.Errorf("Expected TurnTimeoutSeconds default to be 300, got %d", configuration.TurnTimeoutSeconds)
+	if configuration.Timeouts.TurnSeconds != 300 {
+		t.Errorf("Expected TurnTimeoutSeconds default to be 300, got %d", configuration.Timeouts.TurnSeconds)
 	}
-	if configuration.AgentTimeoutSeconds != 60 {
-		t.Errorf("Expected AgentTimeoutSeconds default to be 60, got %d", configuration.AgentTimeoutSeconds)
+	if configuration.Timeouts.AgentSeconds != 60 {
+		t.Errorf("Expected AgentTimeoutSeconds default to be 60, got %d", configuration.Timeouts.AgentSeconds)
 	}
-	if configuration.VerifyTimeoutSeconds != 15 {
-		t.Errorf("Expected VerifyTimeoutSeconds default to be 15, got %d", configuration.VerifyTimeoutSeconds)
+	if configuration.Timeouts.VerifySeconds != 15 {
+		t.Errorf("Expected VerifyTimeoutSeconds default to be 15, got %d", configuration.Timeouts.VerifySeconds)
 	}
 }
 
 func TestThinkSpaceConfig_DoNotOverrideExplicitValues(t *testing.T) {
 	configuration := spaces.ThinkSpaceConfig{
-		TurnTimeoutSeconds:   500,
-		AgentTimeoutSeconds:  120,
-		VerifyTimeoutSeconds: 45,
+		Timeouts: spaces.TimeoutsConfig{
+			TurnSeconds:   500,
+			AgentSeconds:  120,
+			VerifySeconds: 45,
+		},
 	}
 
 	// Apply defaults should not overwrite existing values
 	configuration.ApplyDefaults()
 
-	if configuration.TurnTimeoutSeconds != 500 {
-		t.Errorf("Expected TurnTimeoutSeconds to remain 500, got %d", configuration.TurnTimeoutSeconds)
+	if configuration.Timeouts.TurnSeconds != 500 {
+		t.Errorf("Expected TurnTimeoutSeconds to remain 500, got %d", configuration.Timeouts.TurnSeconds)
 	}
-	if configuration.AgentTimeoutSeconds != 120 {
-		t.Errorf("Expected AgentTimeoutSeconds to remain 120, got %d", configuration.AgentTimeoutSeconds)
+	if configuration.Timeouts.AgentSeconds != 120 {
+		t.Errorf("Expected AgentTimeoutSeconds to remain 120, got %d", configuration.Timeouts.AgentSeconds)
 	}
-	if configuration.VerifyTimeoutSeconds != 45 {
-		t.Errorf("Expected VerifyTimeoutSeconds to remain 45, got %d", configuration.VerifyTimeoutSeconds)
+	if configuration.Timeouts.VerifySeconds != 45 {
+		t.Errorf("Expected VerifyTimeoutSeconds to remain 45, got %d", configuration.Timeouts.VerifySeconds)
 	}
 }
 
 func TestThinkSpaceConfig_SystemPrompts(t *testing.T) {
 	configuration := spaces.ThinkSpaceConfig{
-		SystemPrompt: "Base system instructions.",
-		Roles: spaces.ThinkSpaceRoles{
-			Manager: "You are the manager.",
-			Worker:  "You are the worker.",
+		SystemPrompt: "Base rules.",
+		Roles: spaces.RolesConfig{
+			Manager: spaces.ManagerConfig{
+				SystemPrompt: "You are the manager.",
+			},
+			Worker: spaces.WorkerConfig{
+				SystemPrompt: "You are the worker.",
+			},
 		},
 	}
 
 	managerPrompt := configuration.ManagerSystemPrompt()
-	expectedManager := "Base system instructions.\n\nYou are the manager."
+	expectedManager := "Base rules.\n\nYou are the manager."
 	if managerPrompt != expectedManager {
 		t.Errorf("Expected manager prompt %q, got %q", expectedManager, managerPrompt)
 	}
 
 	workerPrompt := configuration.WorkerSystemPrompt()
-	expectedWorker := "Base system instructions.\n\nYou are the worker."
+	expectedWorker := "Base rules.\n\nYou are the worker."
 	if workerPrompt != expectedWorker {
 		t.Errorf("Expected worker prompt %q, got %q", expectedWorker, workerPrompt)
 	}
@@ -69,9 +75,11 @@ func TestThinkSpaceConfig_SystemPrompts(t *testing.T) {
 
 func TestThinkSpaceConfig_Timeouts(t *testing.T) {
 	configuration := spaces.ThinkSpaceConfig{
-		TurnTimeoutSeconds:   10,
-		AgentTimeoutSeconds:  20,
-		VerifyTimeoutSeconds: 30,
+		Timeouts: spaces.TimeoutsConfig{
+			TurnSeconds:   10,
+			AgentSeconds:  20,
+			VerifySeconds: 30,
+		},
 	}
 
 	if configuration.TurnTimeout() != 10*time.Second {

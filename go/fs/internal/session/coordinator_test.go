@@ -71,10 +71,11 @@ type mockThinkSpace struct{}
 
 func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	cfg := spaces.ThinkSpaceConfig{
-		Models: map[spaces.ModelCategory]string{
-			spaces.ModelCategoryManager: "test-manager",
+		Roles: spaces.RolesConfig{
+			Manager: spaces.ManagerConfig{Model: "test-manager"},
+			Worker:  spaces.WorkerConfig{Model: "test-worker"},
 		},
-		TurnTimeoutSeconds: 300,
+		Timeouts: spaces.TimeoutsConfig{TurnSeconds: 300},
 	}
 	cfg.ApplyDefaults()
 	return cfg

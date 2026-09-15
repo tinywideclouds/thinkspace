@@ -60,8 +60,7 @@ type dynamicThinkSpaceWrapper struct {
 
 func (d *dynamicThinkSpaceWrapper) Config() spaces.ThinkSpaceConfig {
 	cfg := d.ThinkSpace.Config()
-	cfg.SystemPrompt = d.systemPrompt
-	cfg.Roles.Manager = "" // Already merged by the config's own ManagerSystemPrompt() call
+	cfg.Roles.Manager.SystemPrompt = d.systemPrompt
 	return cfg
 }
 

@@ -20,7 +20,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -100,15 +99,15 @@ func main() {
 	bus := chat.NewEventBus()
 	bus.Subscribe(chat.NewLedgerSubscriber())
 
-	workerModel := activeThinkSpace.Config().Models[spaces.ModelCategoryWorker]
+	workerModel := activeThinkSpace.Config().Roles.Worker.Model
 	llmAdapter := llm.NewAdapter(modelClient)
 
-	// UPDATED: Pass the Patcher from the active space into the executor
+	// Pass the Patcher from the active space into the executor
 	subAgentExecutor := llm.NewSubAgentExecutor(
 		modelClient,
 		workerModel,
-		activeThinkSpace.Config().WorkerSystemPrompt(),
-		activeThinkSpace.Config().MaxWorkerTokens,
+		activeThinkSpace.Config().Roles.Worker.SystemPrompt,
+		activeThinkSpace.Config().Roles.Worker.MaxTokens,
 		activeThinkSpace.Patcher(),
 	)
 
@@ -130,7 +129,7 @@ func main() {
 		fanOutFlow,
 		emitter,
 		*domainName,
-		spaceConfiguration.Roles.Worker,
+		spaceConfiguration.Roles.Worker.SystemPrompt,
 		flowConfiguration,
 	)
 

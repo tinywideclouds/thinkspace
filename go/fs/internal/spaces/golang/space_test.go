@@ -79,18 +79,30 @@ func (m *mockSandbox) TearDown(ctx context.Context) error                   { re
 
 func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
 	config := spaces.ThinkSpaceConfig{
-		Name:                          "golang",
-		VerifyTimeoutSeconds:          verifyTimeout,
-		ToolDescription:               "mock tool desc",
-		AgentCountDescription:         "mock count desc",
-		AssignedTagsDescription:       "mock tags desc",
-		AgentInstructionsDescription:  "mock instructions desc",
-		ContextDigestDescription:      "mock digest desc",
-		InstructionDescription:        "mock instruction desc",
-		TargetFilesDescription:        "mock files desc",
-		QueryLensDescription:          "mock query lens desc",
-		QueryLensTagDescription:       "mock lens tag",
-		QueryLensReasoningDescription: "mock lens reasoning",
+		Name: "golang",
+		Timeouts: spaces.TimeoutsConfig{
+			VerifySeconds: verifyTimeout,
+		},
+		Roles: spaces.RolesConfig{
+			Manager: spaces.ManagerConfig{
+				Tools: spaces.ToolsConfig{
+					ProposeChange: spaces.ToolProposeChangeConfig{
+						Description:                  "mock tool desc",
+						AgentCountDescription:        "mock count desc",
+						AssignedTagsDescription:      "mock tags desc",
+						AgentInstructionsDescription: "mock instructions desc",
+						ContextDigestDescription:     "mock digest desc",
+						InstructionDescription:       "mock instruction desc",
+						TargetFilesDescription:       "mock files desc",
+					},
+					QueryLens: spaces.ToolQueryLensConfig{
+						Description:          "mock query lens desc",
+						TagDescription:       "mock lens tag",
+						ReasoningDescription: "mock lens reasoning",
+					},
+				},
+			},
+		},
 	}
 	config.ApplyDefaults()
 	return golang.NewGoThinkSpace(config)

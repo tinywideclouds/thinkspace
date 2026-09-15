@@ -24,43 +24,45 @@ func (s *GoThinkSpace) Config() spaces.ThinkSpaceConfig {
 }
 
 func (s *GoThinkSpace) Tools() []*genai.Tool {
+	managerTools := s.config.Roles.Manager.Tools
+
 	return []*genai.Tool{
 		{
 			FunctionDeclarations: []*genai.FunctionDeclaration{
 				{
 					Name:        "propose_change",
-					Description: s.config.ToolDescription,
+					Description: managerTools.ProposeChange.Description,
 					Parameters: &genai.Schema{
 						Type: genai.TypeObject,
 						Properties: map[string]*genai.Schema{
 							"assigned_tags": {
 								Type:        genai.TypeArray,
-								Description: s.config.AssignedTagsDescription,
+								Description: managerTools.ProposeChange.AssignedTagsDescription,
 								Items: &genai.Schema{
 									Type: genai.TypeString,
 								},
 							},
 							"agent_count": {
 								Type:        genai.TypeInteger,
-								Description: s.config.AgentCountDescription,
+								Description: managerTools.ProposeChange.AgentCountDescription,
 							},
 							"agent_tasks": {
 								Type:        genai.TypeArray,
-								Description: s.config.AgentInstructionsDescription,
+								Description: managerTools.ProposeChange.AgentInstructionsDescription,
 								Items: &genai.Schema{
 									Type: genai.TypeObject,
 									Properties: map[string]*genai.Schema{
 										"context_digest": {
 											Type:        genai.TypeString,
-											Description: s.config.ContextDigestDescription,
+											Description: managerTools.ProposeChange.ContextDigestDescription,
 										},
 										"instruction": {
 											Type:        genai.TypeString,
-											Description: s.config.InstructionDescription,
+											Description: managerTools.ProposeChange.InstructionDescription,
 										},
 										"target_files": {
 											Type:        genai.TypeArray,
-											Description: s.config.TargetFilesDescription,
+											Description: managerTools.ProposeChange.TargetFilesDescription,
 											Items: &genai.Schema{
 												Type: genai.TypeString,
 											},
@@ -75,17 +77,17 @@ func (s *GoThinkSpace) Tools() []*genai.Tool {
 				},
 				{
 					Name:        "query_lens",
-					Description: s.config.QueryLensDescription,
+					Description: managerTools.QueryLens.Description,
 					Parameters: &genai.Schema{
 						Type: genai.TypeObject,
 						Properties: map[string]*genai.Schema{
 							"tag": {
 								Type:        genai.TypeString,
-								Description: s.config.QueryLensTagDescription,
+								Description: managerTools.QueryLens.TagDescription,
 							},
 							"reasoning": {
 								Type:        genai.TypeString,
-								Description: s.config.QueryLensReasoningDescription,
+								Description: managerTools.QueryLens.ReasoningDescription,
 							},
 						},
 						Required: []string{"tag", "reasoning"},
@@ -97,7 +99,7 @@ func (s *GoThinkSpace) Tools() []*genai.Tool {
 }
 
 func (s *GoThinkSpace) Verifier() spaces.Verifier {
-	return NewGoVerifier(s.config.VerifyTimeout())
+	return NewGoVerifier(s.config.TurnTimeout())
 }
 
 func (s *GoThinkSpace) Mapbook() assembler.Mapbook {
@@ -105,5 +107,5 @@ func (s *GoThinkSpace) Mapbook() assembler.Mapbook {
 }
 
 func (s *GoThinkSpace) Patcher() workspace.Patcher {
-	return NewGoASTPatcher(s.config.PatcherSystemInstructions)
+	return NewGoASTPatcher(s.config.Roles.Worker.PatcherInstructions)
 }

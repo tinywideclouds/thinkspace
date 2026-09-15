@@ -50,6 +50,7 @@
       "executor": "@angular/build:dev-server",
       "defaultConfiguration": "development",
       "options": {
+        "port": 4201, 
         "proxyConfig": "apps/llm/chat-app/proxy.conf.json"
       },
       "configurations": {

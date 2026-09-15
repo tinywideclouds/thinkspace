@@ -62,10 +62,12 @@ golang-space:
   type: space
   name: test
   roles:
-    manager: ""
-    worker: ""
-  models:
-    manager: "test-model"
+    manager:
+      model: "test-model"
+      system_prompt: ""
+    worker:
+      model: "test-worker-model"
+      system_prompt: ""
 
 fanout:
   type: flow

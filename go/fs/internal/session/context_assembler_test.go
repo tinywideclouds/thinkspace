@@ -28,8 +28,10 @@ type mockSpaceForFusion struct{}
 func (m *mockSpaceForFusion) Config() spaces.ThinkSpaceConfig {
 	return spaces.ThinkSpaceConfig{
 		SystemPrompt: "Base System Prompt",
-		Roles: spaces.ThinkSpaceRoles{
-			Manager: "Manager Role Rules",
+		Roles: spaces.RolesConfig{
+			Manager: spaces.ManagerConfig{
+				SystemPrompt: "Manager Role Rules",
+			},
 		},
 	}
 }

@@ -11,17 +11,21 @@ func TestParseConfigBytes_Success(t *testing.T) {
 golang-space:
   type: "space"
   name: "Golang Environment"
-  max_worker_tokens: 8192
-  tool_description: "mock tool"
-  agent_count_description: "mock count"
-  agent_instructions_description: "mock inst array"
-  context_digest_description: "mock digest"
-  instruction_description: "mock instruction"
-  worker_retry_prompt: "mock retry prompt"
-  models:
-    manager: "gemini-3.6-flash"
+  system_prompt: "Base rules"
   roles:
-    worker: "Must use /src"
+    manager:
+      model: "gemini-3.6-flash"
+      tools:
+        propose_change:
+          description: "mock tool"
+          agent_count_description: "mock count"
+          agent_instructions_description: "mock inst array"
+          context_digest_description: "mock digest"
+          instruction_description: "mock instruction"
+    worker:
+      max_tokens: 8192
+      retry_prompt: "mock retry prompt"
+      system_prompt: "Must use /src"
 
 fanout:
   type: "flow"
@@ -41,17 +45,20 @@ fanout:
 	if spaceCfg.Name != "Golang Environment" {
 		t.Errorf("Expected Name 'Golang Environment', got %q", spaceCfg.Name)
 	}
-	if spaceCfg.Roles.Worker != "Must use /src" {
-		t.Errorf("Expected Worker Role to be 'Must use /src', got %q", spaceCfg.Roles.Worker)
+	if spaceCfg.SystemPrompt != "Base rules" {
+		t.Errorf("Expected SystemPrompt to be 'Base rules', got %q", spaceCfg.SystemPrompt)
 	}
-	if spaceCfg.MaxWorkerTokens != 8192 {
-		t.Errorf("Expected MaxWorkerTokens to be 8192, got %d", spaceCfg.MaxWorkerTokens)
+	if spaceCfg.Roles.Worker.SystemPrompt != "Must use /src" {
+		t.Errorf("Expected Worker SystemPrompt to be 'Must use /src', got %q", spaceCfg.Roles.Worker.SystemPrompt)
 	}
-	if spaceCfg.ToolDescription != "mock tool" {
-		t.Errorf("Expected ToolDescription to be 'mock tool', got %q", spaceCfg.ToolDescription)
+	if spaceCfg.Roles.Worker.MaxTokens != 8192 {
+		t.Errorf("Expected MaxWorkerTokens to be 8192, got %d", spaceCfg.Roles.Worker.MaxTokens)
 	}
-	if spaceCfg.WorkerRetryPrompt != "mock retry prompt" {
-		t.Errorf("Expected WorkerRetryPrompt to be 'mock retry prompt', got %q", spaceCfg.WorkerRetryPrompt)
+	if spaceCfg.Roles.Manager.Tools.ProposeChange.Description != "mock tool" {
+		t.Errorf("Expected ToolDescription to be 'mock tool', got %q", spaceCfg.Roles.Manager.Tools.ProposeChange.Description)
+	}
+	if spaceCfg.Roles.Worker.RetryPrompt != "mock retry prompt" {
+		t.Errorf("Expected WorkerRetryPrompt to be 'mock retry prompt', got %q", spaceCfg.Roles.Worker.RetryPrompt)
 	}
 
 	flowCfg, ok := parsed.Flows["fanout"]

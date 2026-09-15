@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -52,6 +53,13 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 
 	for _, patch := range payload.Patches {
 		cleanPath := filepath.ToSlash(filepath.Clean(patch.File))
+
+		// Local development observability
+		logArgs := []any{"action", patch.Action, "file", cleanPath}
+		if patch.Name != "" {
+			logArgs = append(logArgs, "name", patch.Name)
+		}
+		slog.InfoContext(ctx, "applied AST patch", logArgs...)
 
 		if patch.Action == "full_replace" {
 			if err := sandbox.WriteFile(ctx, cleanPath, []byte(patch.Code)); err != nil {

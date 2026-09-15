@@ -77,7 +77,7 @@ func (c *Coordinator) ExecuteTurn(
 	turnContext, cancel := context.WithTimeout(ctx, thinkSpace.Config().TurnTimeout())
 	defer cancel()
 
-	managerModel := thinkSpace.Config().Models[spaces.ModelCategoryManager]
+	managerModel := thinkSpace.Config().Roles.Manager.Model
 	maxIterations := 3
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
@@ -162,8 +162,6 @@ func (c *Coordinator) ExecuteTurn(
 		if call.Name == "propose_change" {
 			err := c.executeProposeChange(turnContext, thread, thinkSpace, history, userInterface, call, managerModel)
 			if err != nil {
-				// We explicitly catch the failure (like a Workbench fail-fast hallucination),
-				// push it into the LLM history, and loop so it can correct its tool call.
 				c.logger.WarnContext(turnContext, "tool execution failed, bouncing back to manager", "error", err)
 				userInterface.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** %v\nAsking Manager to self-correct...\n", err))
 
@@ -209,8 +207,8 @@ func (c *Coordinator) executeProposeChange(
 	}
 
 	activeFlowConfig := c.flowConfiguration
-	if thinkSpace.Config().WorkerRetryPrompt != "" {
-		activeFlowConfig.RetryPrompt = thinkSpace.Config().WorkerRetryPrompt
+	if thinkSpace.Config().Roles.Worker.RetryPrompt != "" {
+		activeFlowConfig.RetryPrompt = thinkSpace.Config().Roles.Worker.RetryPrompt
 	}
 
 	result, err := c.fanOutFlow.Execute(
@@ -226,7 +224,6 @@ func (c *Coordinator) executeProposeChange(
 		thinkSpace.Verifier(),
 	)
 
-	// If FanOutFlow fails (e.g., fail-fast file error), bubble it back immediately to ExecuteTurn
 	if err != nil {
 		c.logger.ErrorContext(turnContext, "delegation flow failed", "error", err)
 		return err
@@ -293,7 +290,6 @@ func (c *Coordinator) executeProposeChange(
 		}
 	}
 
-	// Wrap Up
 	userInterface.OnTextChunk("\n\n🤖 **Manager summarizing turn...**\n")
 	wrapUpPrompt := fmt.Sprintf(
 		"The sub-agent orchestration flow is now complete. Here is the system trace of the outcome:\n\n%s\n\n"+
@@ -374,7 +370,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 
 	userInterface.OnTextChunk("\n\n🤖 **Manager evaluating candidates...**\n")
 
-	managerModel := thinkSpace.Config().Models[spaces.ModelCategoryManager]
+	managerModel := thinkSpace.Config().Roles.Manager.Model
 	evaluationStream := c.llmAdapter.GenerateStream(ctx, managerModel, thinkSpace.Config().ManagerSystemPrompt(), nil, evaluationHistory)
 
 	var evaluationResponse strings.Builder
@@ -420,8 +416,8 @@ func (c *Coordinator) executeLLMReviewPhase(
 	}
 
 	activeFlowConfig := c.flowConfiguration
-	if thinkSpace.Config().WorkerRetryPrompt != "" {
-		activeFlowConfig.RetryPrompt = thinkSpace.Config().WorkerRetryPrompt
+	if thinkSpace.Config().Roles.Worker.RetryPrompt != "" {
+		activeFlowConfig.RetryPrompt = thinkSpace.Config().Roles.Worker.RetryPrompt
 	}
 
 	refinementResult, err := c.fanOutFlow.Execute(

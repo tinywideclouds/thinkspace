@@ -9,7 +9,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -111,14 +110,14 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return fmt.Errorf("assembling context: %w", err)
 	}
 
-	workerModel := thinkSpace.Config().Models[spaces.ModelCategoryWorker]
+	workerModel := thinkSpace.Config().Roles.Worker.Model
 
 	// Pass the Patcher to the SubAgentExecutor
 	executor := llm.NewSubAgentExecutor(
 		tm.modelClient,
 		workerModel,
-		thinkSpace.Config().WorkerSystemPrompt(),
-		thinkSpace.Config().MaxWorkerTokens,
+		thinkSpace.Config().Roles.Worker.SystemPrompt,
+		thinkSpace.Config().Roles.Worker.MaxTokens,
 		thinkSpace.Patcher(),
 	)
 
@@ -130,7 +129,7 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		tm.fanOutFlow,
 		emitter,
 		spaceID,
-		spaceConfig.Roles.Worker,
+		spaceConfig.Roles.Worker.SystemPrompt,
 		flowConfig,
 	)
 
