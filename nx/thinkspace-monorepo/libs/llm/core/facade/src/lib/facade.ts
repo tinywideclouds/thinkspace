@@ -55,6 +55,7 @@ export class LlmFacade {
             chatId: protocolBufferEvent.payload.value.chatId,
             managerSystemPrompt: protocolBufferEvent.payload.value.managerSystemPrompt,
             stickyDigests: protocolBufferEvent.payload.value.stickyDigests,
+            recentHistory: protocolBufferEvent.payload.value.recentHistory,
             fileContexts: protocolBufferEvent.payload.value.fileContexts.map(fc => ({
               path: fc.path,
               level: fc.level,

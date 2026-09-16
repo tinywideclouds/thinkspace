@@ -16,6 +16,16 @@
       <div class="connection-status" [class.connected]="chatState.connected()">
         {{ chatState.connected() ? '🟢 Connected' : '🔴 Disconnected' }}
       </div>
+      
+      <!-- Developer Toggle for Auto-Approve -->
+      <label style="margin-left: 16px; font-size: 11px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+        <input 
+          type="checkbox" 
+          [checked]="chatState.autoApproveContext()" 
+          (change)="chatState.autoApproveContext.set(!chatState.autoApproveContext())" 
+        />
+        Auto-Approve Context
+      </label>
     </div>
     
     <div class="chat-scroll-area">
@@ -26,7 +36,14 @@
       />
 
       <div class="prompt-area">
-        @if (chatState.pendingStrategy()) {
+        @if (chatState.pendingContextReview(); as contextReview) {
+          <llm-context-inspector
+            [context]="contextReview"
+            (approve)="chatState.submitContextApproval(true)"
+            (reviewCancelled)="chatState.submitContextApproval(false)"
+            (copyFull)="chatState.copyFullContextPreview($event)"
+          />
+        } @else if (chatState.pendingStrategy()) {
           <llm-chat-strategy-prompt 
             (strategySelected)="chatState.selectStrategy($event)" 
           />

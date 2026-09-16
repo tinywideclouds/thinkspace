@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
@@ -12,7 +13,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// TurnManager orchestrates the lifecycle of a conversational turn entirely decoupled from network transport.
 type TurnManager struct {
 	logger           *slog.Logger
 	registry         *config.Registry
@@ -44,7 +44,6 @@ func NewTurnManager(
 	}
 }
 
-// LoadThreadState provisions a thread and loads its history. Ideal for initial UI hydration.
 func (tm *TurnManager) LoadThreadState(ctx context.Context, spaceID, chatID string) (*chat.Thread, *chat.ChatGraph, *chat.ThreadManifest, error) {
 	workspaceService := tm.workspaceManager.GetService(spaceID)
 	thread, err := workspaceService.StartThread(ctx, chatID)
@@ -60,7 +59,6 @@ func (tm *TurnManager) LoadThreadState(ctx context.Context, spaceID, chatID stri
 	return thread, graph, manifest, nil
 }
 
-// ExecuteTurn handles the guaranteed sequence of logging a prompt, reloading history, and invoking the LLM.
 func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptText string, ui UserInterface, emitter flows.FlowEmitter) error {
 	spaceState, err := tm.workspaceManager.GetSpaceState(spaceID)
 	if err != nil {
@@ -110,13 +108,57 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return fmt.Errorf("assembling context: %w", err)
 	}
 
+	// Dump exact full text payload to disk
+	var fullContext strings.Builder
+	fullContext.WriteString("=== SYSTEM PROMPT ===\n")
+	fullContext.WriteString(dynamicSystemPrompt)
+	fullContext.WriteString("\n\n=== CHAT HISTORY ===\n")
+	for _, h := range history {
+		if len(h.Parts) > 0 {
+			fullContext.WriteString(fmt.Sprintf("[%s]: %s\n\n", h.Role, h.Parts[0].Text))
+		}
+	}
+
+	previewID, err := workspaceService.SaveContextPreview(ctx, thread, fullContext.String())
+	if err != nil {
+		tm.logger.WarnContext(ctx, "failed to save context preview", "error", err)
+	}
+
+	// Pack UI Payload
+	var stickyDigests []string
+	for _, d := range manifest.Digests {
+		if d.IsSticky {
+			stickyDigests = append(stickyDigests, d.Summary)
+		}
+	}
+
+	var recentHistory []string
+	for _, ev := range graph.RecentEvents {
+		recentHistory = append(recentHistory, fmt.Sprintf("[%s] %s", ev.Type, ev.Content))
+	}
+
+	turnCtx := TurnContext{
+		SpaceID:             spaceID,
+		ChatID:              chatID,
+		PreviewID:           previewID,
+		ManagerSystemPrompt: thinkSpace.Config().ManagerSystemPrompt(),
+		StickyDigests:       stickyDigests,
+		RecentHistory:       recentHistory,
+		FileContexts:        nil, // We will map AST vs File inclusions here later
+	}
+
+	if !ui.ReviewContext(turnCtx) {
+		tm.logger.Info("Turn cancelled by user during context review")
+		return nil
+	}
+
 	workerModel := thinkSpace.Config().Roles.Worker.Model
 
 	executor := llm.NewSubAgentExecutor(
 		tm.logger,
 		tm.modelClient,
 		workerModel,
-		thinkSpace.Config().WorkerSystemPrompt(), // Fuses base rules + worker persona
+		thinkSpace.Config().WorkerSystemPrompt(),
 		thinkSpace.Config().Roles.Worker.MaxTokens,
 		thinkSpace.Patcher(),
 	)
@@ -129,7 +171,7 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		tm.fanOutFlow,
 		emitter,
 		spaceID,
-		spaceConfig.WorkerSystemPrompt(), // Fuses base rules + worker persona
+		spaceConfig.WorkerSystemPrompt(),
 		flowConfig,
 	)
 
@@ -137,13 +179,6 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		"system_prompt_length", len(dynamicSystemPrompt),
 		"history_length", len(history),
 	)
-
-	tm.logger.Debug("--- MANAGER SYSTEM PROMPT ---\n" + dynamicSystemPrompt)
-	for i, h := range history {
-		if len(h.Parts) > 0 {
-			tm.logger.Debug(fmt.Sprintf("--- MANAGER HISTORY [%d] (%s) ---\n%s", i, h.Role, h.Parts[0].Text))
-		}
-	}
 
 	wrappedThinkSpace := WrapSpace(thinkSpace, dynamicSystemPrompt)
 

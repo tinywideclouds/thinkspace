@@ -193,8 +193,10 @@ func (f *EventFacade) MarshalPreviewContext(ctxData session.TurnContext) ([]byte
 			PreviewContext: &pb.PreviewContextPayload{
 				SpaceId:             ctxData.SpaceID,
 				ChatId:              ctxData.ChatID,
+				PreviewId:           ctxData.PreviewID,
 				ManagerSystemPrompt: ctxData.ManagerSystemPrompt,
 				StickyDigests:       ctxData.StickyDigests,
+				RecentHistory:       ctxData.RecentHistory,
 				FileContexts:        fileContexts,
 			},
 		},

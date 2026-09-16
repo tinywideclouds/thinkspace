@@ -8,7 +8,8 @@ import {
   ChatReviewPromptComponent,
   FlowTrackerComponent,
   FlowInspectorComponent,
-  ChatHeaderComponent
+  ChatHeaderComponent,
+  ContextInspectorComponent
 } from '@org/llm-ui-chat';
 
 @Component({
@@ -22,7 +23,8 @@ import {
     ChatReviewPromptComponent,
     FlowTrackerComponent,
     FlowInspectorComponent,
-    ChatHeaderComponent
+    ChatHeaderComponent,
+    ContextInspectorComponent
   ],
   templateUrl: './chat-container.component.html',
   styleUrl: './chat-container.component.css'
@@ -43,7 +45,7 @@ export class ChatContainerComponent {
 
   onNewChatRequested() {
     const name = prompt('Enter a name for the new chat (or leave blank for auto):');
-    if (name !== null) { // null means the user cancelled the prompt
+    if (name !== null) { 
       this.workspaceState.createChat(name);
       this.chatState.clearSession();
     }

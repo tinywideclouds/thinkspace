@@ -45,6 +45,7 @@ export interface DomainPreviewContext {
   chatId: string;
   managerSystemPrompt: string;
   stickyDigests: string[];
+  recentHistory: string[]; // <-- Added missing property
   fileContexts: FileContextMetaData[];
 }
 

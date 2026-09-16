@@ -12,7 +12,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// ... (Keep existing mocks: mockSandbox, mockChatEngine, setupServiceTest) ...
 type mockSandbox struct {
 	writeCalled    bool
 	readCalled     bool
@@ -116,7 +115,6 @@ func setupServiceTest(t *testing.T) (*workspace.Service, *mockChatEngine, string
 	return svc, mockEngine, workspaceRoot
 }
 
-// ... (Keep existing TestService_StartThread, TestService_ProposeAndResolveCandidate, TestService_Receipts) ...
 func TestService_StartThread(t *testing.T) {
 	svc, mockEngine, _ := setupServiceTest(t)
 	ctx := context.Background()
@@ -227,7 +225,6 @@ func TestService_Receipts(t *testing.T) {
 	}
 }
 
-// Phase 3 Coverage: Verify Tags map safely to the event and persist to disk
 func TestService_LedgerTags(t *testing.T) {
 	svc, _, _ := setupServiceTest(t)
 	ctx := context.Background()
@@ -285,5 +282,30 @@ func TestService_FetchEvents(t *testing.T) {
 	}
 	if fetched[0].ID.String() != targetID2 && fetched[1].ID.String() != targetID2 {
 		t.Errorf("Expected to retrieve targetID2")
+	}
+}
+
+func TestService_ContextPreviews(t *testing.T) {
+	svc, _, _ := setupServiceTest(t)
+	ctx := context.Background()
+
+	thread, _ := svc.StartThread(ctx, "preview-thread")
+
+	previewID, err := svc.SaveContextPreview(ctx, thread, "Mock LLM Context")
+	if err != nil {
+		t.Fatalf("SaveContextPreview failed: %v", err)
+	}
+
+	if previewID == "" {
+		t.Errorf("Expected valid UUIDv7 previewID")
+	}
+
+	data, err := svc.GetContextPreview(ctx, thread, previewID)
+	if err != nil {
+		t.Fatalf("GetContextPreview failed: %v", err)
+	}
+
+	if string(data) != "Mock LLM Context" {
+		t.Errorf("Expected 'Mock LLM Context', got '%s'", string(data))
 	}
 }

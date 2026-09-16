@@ -9,10 +9,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"uuid"
 )
 
 // Service orchestrates the workspace lifecycle using the ChatEngine.
@@ -174,8 +176,6 @@ func (s *Service) LoadEvents(ctx context.Context, thread *chat.Thread) ([]chat.E
 	return events, nil
 }
 
-// FetchEvents blindly extracts specific historical records by ID.
-// It acts strictly as a Read Model projection mechanism without knowing the semantic context.
 func (s *Service) FetchEvents(ctx context.Context, thread *chat.Thread, ids []string) ([]chat.Event, error) {
 	idMap := make(map[string]bool)
 	for _, id := range ids {
@@ -184,7 +184,6 @@ func (s *Service) FetchEvents(ctx context.Context, thread *chat.Thread, ids []st
 
 	var matchedEvents []chat.Event
 
-	// Stream the file rather than holding all events in memory, to support massive ledgers safely
 	file, err := os.Open(thread.LedgerPath)
 	if err != nil {
 		return nil, fmt.Errorf("opening ledger for targeted fetch: %w", err)
@@ -198,7 +197,6 @@ func (s *Service) FetchEvents(ctx context.Context, thread *chat.Thread, ids []st
 			continue
 		}
 
-		// Fast-path string check before full unmarshal to save CPU on large ledgers
 		matchFound := false
 		for id := range idMap {
 			if strings.Contains(string(line), id) {
@@ -214,7 +212,6 @@ func (s *Service) FetchEvents(ctx context.Context, thread *chat.Thread, ids []st
 		var ev chat.Event
 		if err := json.Unmarshal(line, &ev); err == nil && idMap[ev.ID.String()] {
 			matchedEvents = append(matchedEvents, ev)
-			// Small optimization: delete from map so we don't scan for it once found
 			delete(idMap, ev.ID.String())
 		}
 	}
@@ -296,5 +293,47 @@ func (s *Service) SaveReceipt(ctx context.Context, thread *chat.Thread, receipt 
 
 func (s *Service) GetReceipt(ctx context.Context, thread *chat.Thread, flowID string) ([]byte, error) {
 	path := filepath.Join(thread.Dir, "receipts", fmt.Sprintf("%s.xml", flowID))
+	return os.ReadFile(path)
+}
+
+// SaveContextPreview drops the raw LLM payload to disk, returning a UUIDv7 identifier.
+// It maintains a FIFO limit of 15 previews to prevent runaway disk usage.
+func (s *Service) SaveContextPreview(ctx context.Context, thread *chat.Thread, content string) (string, error) {
+	previewID := uuid.NewV7().String()
+	previewsDir := filepath.Join(thread.Dir, "previews")
+
+	if err := os.MkdirAll(previewsDir, 0755); err != nil {
+		return "", fmt.Errorf("creating previews directory: %w", err)
+	}
+
+	path := filepath.Join(previewsDir, fmt.Sprintf("%s.md", previewID))
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("writing preview file: %w", err)
+	}
+
+	// Simple FIFO Cleanup
+	if entries, err := os.ReadDir(previewsDir); err == nil && len(entries) > 15 {
+		var files []string
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+				files = append(files, entry.Name())
+			}
+		}
+
+		// UUIDv7 is inherently time-sortable chronologically
+		sort.Strings(files)
+
+		// Delete the oldest files
+		for i := 0; i < len(files)-15; i++ {
+			_ = os.Remove(filepath.Join(previewsDir, files[i]))
+		}
+	}
+
+	return previewID, nil
+}
+
+// GetContextPreview retrieves a previously saved context dump.
+func (s *Service) GetContextPreview(ctx context.Context, thread *chat.Thread, previewID string) ([]byte, error) {
+	path := filepath.Join(thread.Dir, "previews", fmt.Sprintf("%s.md", previewID))
 	return os.ReadFile(path)
 }

@@ -28,8 +28,10 @@ const (
 type TurnContext struct {
 	SpaceID             string
 	ChatID              string
+	PreviewID           string
 	ManagerSystemPrompt string
 	StickyDigests       []string
+	RecentHistory       []string
 	FileContexts        []FileContext
 }
 

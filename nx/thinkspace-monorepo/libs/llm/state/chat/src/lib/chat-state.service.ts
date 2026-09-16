@@ -295,4 +295,23 @@ export class ChatStateService {
     this.appendCoreChat('user', `Review for ${branch}: ${accepted ? 'ACCEPTED' : 'REJECTED'}`);
     this.transportService.send(LlmFacade.createReviewDecision(branch, accepted));
   }
+
+  public async copyFullContextPreview(previewId: string): Promise<void> {
+    const spaceId = this.workspaceStateService.activeSpaceId();
+    const chatId = this.workspaceStateService.activeChatId();
+
+    if (!spaceId || !chatId) return;
+
+    try {
+      const url = `/api/previews/${encodeURIComponent(chatId)}/${encodeURIComponent(previewId)}?space=${encodeURIComponent(spaceId)}`;
+      const markdownData = await firstValueFrom(this.httpClient.get(url, { responseType: 'text' }));
+      
+      await navigator.clipboard.writeText(markdownData);
+      this.appendSystemLog('INFO', `Successfully copied full context payload (${previewId}) to clipboard.`);
+      
+    } catch (error) {
+      console.error(`Failed to fetch preview ${previewId}`, error);
+      this.appendSystemLog('ERROR', `Failed to copy full context payload.`);
+    }
+  }
 }

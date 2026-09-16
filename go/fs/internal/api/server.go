@@ -41,6 +41,7 @@ func NewServer(
 
 func (s *Server) RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/receipts/{chat_id}/{flow_id}", s.handleGetReceipt)
+	mux.HandleFunc("GET /api/previews/{chat_id}/{preview_id}", s.handleGetPreview)
 	mux.HandleFunc("/ws", s.HandleWebSocket)
 }
 
@@ -71,6 +72,33 @@ func (s *Server) handleGetReceipt(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+func (s *Server) handleGetPreview(w http.ResponseWriter, r *http.Request) {
+	chatID := r.PathValue("chat_id")
+	previewID := r.PathValue("preview_id")
+	spaceID := r.URL.Query().Get("space")
+
+	if spaceID == "" {
+		http.Error(w, "Missing space query parameter", http.StatusBadRequest)
+		return
+	}
+
+	service := s.manager.GetService(spaceID)
+	thread := &chat.Thread{
+		ID:      chatID,
+		SpaceID: spaceID,
+		Dir:     filepath.Join(service.WorkspaceRoot(), "chats", chatID),
+	}
+
+	data, err := service.GetContextPreview(r.Context(), thread, previewID)
+	if err != nil {
+		http.Error(w, "Preview not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/markdown")
+	_, _ = w.Write(data)
+}
+
 func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	connection, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
@@ -84,12 +112,10 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	// 1. Restore the Token Streaming Channel for Sub-Agents
 	tokenChan := make(chan workspace.AgentToken, 100)
 	facade := NewEventFacade()
 	ui := NewWebSocketUI(ctx, connection, tokenChan)
 
-	// 2. Restore the Initial Handshake (Available Spaces)
 	spaceIDs, _ := s.manager.ListSpaces(ctx)
 	var availableSpaces []SpaceState
 
@@ -118,7 +144,6 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_ = connection.Write(ctx, websocket.MessageText, handshakeBytes)
 	}
 
-	// 3. Restore the Async Token Streamer
 	go func() {
 		for token := range tokenChan {
 			if streamBytes, err := facade.MarshalAgentStream(token.AgentID, token.Text); err == nil {
@@ -127,11 +152,10 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// 4. The Main Event Loop
 	for {
 		_, msgBytes, err := connection.Read(ctx)
 		if err != nil {
-			break // Client disconnected
+			break
 		}
 
 		inbound, err := facade.UnmarshalInbound(msgBytes)
@@ -144,7 +168,6 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		case "submit_prompt":
 			payload := inbound.SubmitPrompt
 
-			// UI Hydration using the current TurnManager
 			_, graph, manifest, err := s.turnManager.LoadThreadState(ctx, payload.SpaceID, payload.ChatID)
 			if err == nil {
 				if syncData, err := facade.MarshalSyncHistory(graph.RecentEvents, manifest.Digests); err == nil {
@@ -156,7 +179,6 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Execution using the current TurnManager
 			emitter := NewWebSocketEmitter(ctx, connection, facade)
 			go func() {
 				if err := s.turnManager.ExecuteTurn(ctx, payload.SpaceID, payload.ChatID, payload.Text, ui, emitter); err != nil {
@@ -165,7 +187,6 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 			}()
 
-		// 5. Restore the Missing Interactive UI Routing
 		case "select_strategy":
 			ui.PushStrategy(inbound.SelectStrategy.StrategyID)
 

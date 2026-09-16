@@ -137,8 +137,10 @@ func TestEventFacade_MarshalPreviewContext(t *testing.T) {
 	ctxData := session.TurnContext{
 		SpaceID:             "golang",
 		ChatID:              "chat-123",
+		PreviewID:           "uuid-v7",
 		ManagerSystemPrompt: "Test rules",
 		StickyDigests:       []string{"Sticky memory"},
+		RecentHistory:       []string{"[prompt] Test"},
 		FileContexts: []session.FileContext{
 			{Path: "src/main.go", Level: "structural", TokenCount: 100},
 		},
@@ -161,6 +163,9 @@ func TestEventFacade_MarshalPreviewContext(t *testing.T) {
 
 	if previewCtxRaw["spaceId"] != "golang" {
 		t.Errorf("expected spaceId 'golang', got %v", previewCtxRaw["spaceId"])
+	}
+	if previewCtxRaw["previewId"] != "uuid-v7" {
+		t.Errorf("expected previewId 'uuid-v7', got %v", previewCtxRaw["previewId"])
 	}
 	if previewCtxRaw["managerSystemPrompt"] != "Test rules" {
 		t.Errorf("expected prompt 'Test rules', got %v", previewCtxRaw["managerSystemPrompt"])
