@@ -2,7 +2,6 @@
   
   <main class="chat-main">
     <div class="chat-header">
-      <!-- Replaced static H2 with dynamic header -->
       <llm-chat-header
         style="flex: 1; margin-right: 24px;"
         [spaces]="workspaceState.spaces()"
@@ -22,6 +21,7 @@
     <div class="chat-scroll-area">
       <llm-chat-feed 
         [feed]="chatState.coreChat()" 
+        [flowStates]="chatState.flowStates()"
         (inspectFlow)="chatState.inspectFlow($event)"
       />
 
@@ -45,7 +45,10 @@
   </main>
 
   <aside class="chat-drawer">
-    <llm-flow-tracker [flows]="chatState.flowStates()"></llm-flow-tracker>
+    <llm-flow-tracker 
+      [systemLogs]="chatState.systemLogs()"
+      [flows]="chatState.flowStates()">
+    </llm-flow-tracker>
   </aside>
 
   @if (chatState.inspectedReceipt()) {

@@ -1,7 +1,7 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { TransportService } from '@org/llm-core-transport';
-import { LlmFacade, DomainEvent, DomainDelegationStrategy, DomainFlowEvent } from '@org/llm-core-facade';
+import { LlmFacade, DomainEvent, DomainDelegationStrategy, DomainFlowEvent, DomainPreviewContext } from '@org/llm-core-facade';
 import { firstValueFrom } from 'rxjs';
 import { WorkspaceStateService } from './workspace-state.service';
 
@@ -69,6 +69,10 @@ export class ChatStateService {
   
   public pendingStrategy = signal<boolean>(false);
   public pendingReviewBranch = signal<string | null>(null);
+  public pendingContextReview = signal<DomainPreviewContext | null>(null);
+  
+  // UX Preferences
+  public autoApproveContext = signal<boolean>(true);
   public connected = signal<boolean>(false);
   public inspectedReceipt = signal<string | null>(null);
 
@@ -76,9 +80,7 @@ export class ChatStateService {
     this.transportService.connect(url).subscribe({
       next: (protocolBufferEvent) => {
         const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
-        if (domainEvent) {
-          this.handleEvent(domainEvent);
-        }
+        if (domainEvent) this.handleEvent(domainEvent);
       },
       error: (error) => {
         this.appendSystemLog('ERROR', `Connection error: ${error}`);
@@ -104,6 +106,7 @@ export class ChatStateService {
     this.flowStates.set(new Map());
     this.pendingStrategy.set(false);
     this.pendingReviewBranch.set(null);
+    this.pendingContextReview.set(null);
     this.inspectedReceipt.set(null);
   }
 
@@ -116,9 +119,23 @@ export class ChatStateService {
       return;
     }
 
+    // Isolate telemetry to the current turn
+    this.systemLogs.set([]);
+    
+    // Instant UI Feedback
     this.appendCoreChat('user', text);
+    this.appendCoreChat('system', 'Manager Thinking...');
     
     const protocolBufferEvent = LlmFacade.createSubmitPrompt(text, spaceId, chatId);
+    this.transportService.send(protocolBufferEvent);
+  }
+
+  public submitContextApproval(approved: boolean): void {
+    this.pendingContextReview.set(null);
+    if (!approved) {
+      this.appendSystemLog('INFO', 'Turn aborted by user during context review.');
+    }
+    const protocolBufferEvent = LlmFacade.createApproveContext(approved);
     this.transportService.send(protocolBufferEvent);
   }
 
@@ -140,7 +157,12 @@ export class ChatStateService {
 
   private handleEvent(event: DomainEvent): void {
     switch (event.type) {
-      case 'available_spaces':
+      case 'preview_context':
+        if (this.autoApproveContext()) {
+          this.submitContextApproval(true);
+        } else {
+          this.pendingContextReview.set(event.context);
+        }
         break;
       case 'chat_stream':
         this.appendToLastModelMessage(event.text);
@@ -150,18 +172,6 @@ export class ChatStateService {
         break;
       case 'flow_event':
         this.handleFlowEvent(event);
-        break;
-      case 'agent_stream':
-        this.activeAgents.update(currentMap => {
-          const updatedMap = new Map(currentMap);
-          let agent = updatedMap.get(event.agentId);
-          if (!agent) {
-            agent = { id: event.agentId, instructions: '', stream: '', status: 'running' };
-          }
-          agent.stream += event.text;
-          updatedMap.set(event.agentId, agent);
-          return updatedMap;
-        });
         break;
       case 'request_strategy':
         this.pendingStrategy.set(event.active);
@@ -177,7 +187,6 @@ export class ChatStateService {
       const updatedMap = new Map(currentFlows);
       let flow = updatedMap.get(event.flowId);
 
-      // Inject the flow instantly on start so the inspector is accessible live
       if (event.eventType === 'flow_start') {
         flow = {
           flowId: event.flowId,
@@ -198,18 +207,6 @@ export class ChatStateService {
         }]);
       }
 
-      if (event.eventType === 'flow_complete' && flow) {
-        flow.completedCount++;
-        if (flow.completedCount === flow.agentCount && flow.status !== 'completed') {
-          flow.status = 'completed';
-          
-          // Update the live card to completed
-          this.coreChat.update(chatHistory => chatHistory.map(item => 
-            item.flowId === event.flowId ? { ...item, status: 'completed', content: 'Orchestration Flow Completed' } : item
-          ));
-        }
-      }
-
       if (!flow) return updatedMap;
 
       if (event.agentId) {
@@ -224,18 +221,18 @@ export class ChatStateService {
           timeline: []
         };
 
-        const currentAttempt = event.attempt || agent.attempt;
         if (event.instruction) agent.instruction = event.instruction;
 
-        // Append-only state logging
         if (event.status && event.status !== agent.status) {
-          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${currentAttempt}] Status: ${event.status}`, isError: false });
+          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Status: ${event.status}`, isError: false });
           agent.status = event.status;
+          
+          // Re-trigger coreChat update to refresh live FlowCard
+          this.coreChat.update(chat => [...chat]);
         }
         
-        // Append-only error logging
         if (event.trace) {
-          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${currentAttempt}] Error: ${event.trace}`, isError: true });
+          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Error: ${event.trace}`, isError: true });
           agent.trace = event.trace;
         }
 
@@ -245,20 +242,37 @@ export class ChatStateService {
         flow.agents.set(event.agentId, agent);
       }
 
+      if (event.eventType === 'flow_complete') {
+        flow.completedCount++;
+        if (flow.completedCount === flow.agentCount && flow.status !== 'completed') {
+          flow.status = 'completed';
+          this.coreChat.update(chatHistory => chatHistory.map(item => 
+            item.flowId === event.flowId ? { ...item, status: 'completed' } : item
+          ));
+        }
+      }
+
       return updatedMap;
     });
   }
 
   private appendCoreChat(source: ChatItem['source'], content: string): void {
-    this.coreChat.update(chatHistory => [...chatHistory, { id: crypto.randomUUID(), source, content }]);
+    this.coreChat.update(chatHistory => {
+      // Clean up the "Thinking..." system message before appending real responses
+      const cleanHistory = chatHistory.filter(c => !(c.source === 'system' && c.content.includes('Thinking')));
+      return [...cleanHistory, { id: crypto.randomUUID(), source, content }];
+    });
   }
 
   private appendToLastModelMessage(chunkText: string): void {
     this.coreChat.update(chatHistory => {
-      if (chatHistory.length === 0 || chatHistory[chatHistory.length - 1].source !== 'model') {
-        return [...chatHistory, { id: crypto.randomUUID(), source: 'model', content: chunkText }];
+      const cleanHistory = chatHistory.filter(c => !(c.source === 'system' && c.content.includes('Thinking')));
+      
+      if (cleanHistory.length === 0 || cleanHistory[cleanHistory.length - 1].source !== 'model') {
+        return [...cleanHistory, { id: crypto.randomUUID(), source: 'model', content: chunkText }];
       }
-      const updatedChatHistory = [...chatHistory];
+      
+      const updatedChatHistory = [...cleanHistory];
       updatedChatHistory[updatedChatHistory.length - 1].content += chunkText;
       return updatedChatHistory;
     });
@@ -271,17 +285,14 @@ export class ChatStateService {
   public selectStrategy(strategy: DomainDelegationStrategy): void {
     this.pendingStrategy.set(false);
     this.appendCoreChat('user', `Selected Strategy: ${DomainDelegationStrategy[strategy]}`);
-    const protocolBufferEvent = LlmFacade.createSelectStrategy(strategy);
-    this.transportService.send(protocolBufferEvent);
+    this.transportService.send(LlmFacade.createSelectStrategy(strategy));
   }
 
   public submitReview(accepted: boolean): void {
     const branch = this.pendingReviewBranch();
     if (!branch) return;
-    
     this.pendingReviewBranch.set(null);
     this.appendCoreChat('user', `Review for ${branch}: ${accepted ? 'ACCEPTED' : 'REJECTED'}`);
-    const protocolBufferEvent = LlmFacade.createReviewDecision(branch, accepted);
-    this.transportService.send(protocolBufferEvent);
+    this.transportService.send(LlmFacade.createReviewDecision(branch, accepted));
   }
 }

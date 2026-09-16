@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ChatFeedComponent } from './chat-feed.component';
 import { ComponentRef } from '@angular/core';
 import { describe, beforeEach, it, expect } from 'vitest';
+import { FlowState } from '@org/llm-state-chat';
 
 describe('ChatFeedComponent', () => {
   let component: ChatFeedComponent;
@@ -17,11 +18,12 @@ describe('ChatFeedComponent', () => {
     component = fixture.componentInstance;
     componentRef = fixture.componentRef;
     
-    // Set required signal input
+    // Set required signal inputs
     componentRef.setInput('feed', [
       { id: '1', source: 'user', content: 'Test prompt' },
       { id: '2', source: 'model', content: 'Test response' }
     ]);
+    componentRef.setInput('flowStates', new Map<string, FlowState>());
     fixture.detectChanges();
   });
 

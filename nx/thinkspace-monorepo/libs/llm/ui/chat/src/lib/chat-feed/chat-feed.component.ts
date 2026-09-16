@@ -1,6 +1,6 @@
 import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ChatItem } from '@org/llm-state-chat';
+import { ChatItem, FlowState } from '@org/llm-state-chat';
 import { ChatFlowCardComponent } from '../chat-flow-card/chat-flow-card.component';
 
 @Component({
@@ -12,8 +12,7 @@ import { ChatFlowCardComponent } from '../chat-flow-card/chat-flow-card.componen
       @for (item of feed(); track item.id) {
         @if (item.source === 'flow_card' && item.flowId) {
           <llm-chat-flow-card 
-            [flowId]="item.flowId" 
-            [status]="item.status || 'completed'"
+            [flow]="flowStates().get(item.flowId)" 
             (inspect)="inspectFlow.emit($event)">
           </llm-chat-flow-card>
         } @else {
@@ -28,5 +27,6 @@ import { ChatFlowCardComponent } from '../chat-flow-card/chat-flow-card.componen
 })
 export class ChatFeedComponent {
   feed = input.required<ChatItem[]>();
+  flowStates = input.required<Map<string, FlowState>>();
   inspectFlow = output<string>();
 }

@@ -24,6 +24,33 @@ func (ui *TerminalUI) OnTextChunk(text string) {
 	fmt.Print(text)
 }
 
+// ReviewContext fulfills the updated session.UserInterface contract, allowing the CLI
+// to optionally block and display the JIT context before invoking the Manager LLM.
+func (ui *TerminalUI) ReviewContext(ctxData session.TurnContext) bool {
+	fmt.Printf("\n🧠 --- CONTEXT PREVIEW ---\n")
+	fmt.Printf("Space: %s | Chat: %s\n", ctxData.SpaceID, ctxData.ChatID)
+
+	if len(ctxData.StickyDigests) > 0 {
+		fmt.Printf("Sticky Digests: %d\n", len(ctxData.StickyDigests))
+	}
+
+	if len(ctxData.FileContexts) > 0 {
+		fmt.Printf("Files in Context:\n")
+		for _, fc := range ctxData.FileContexts {
+			fmt.Printf("  - %s [%s] (~%d tokens)\n", fc.Path, fc.Level, fc.TokenCount)
+		}
+	}
+
+	fmt.Println("---------------------------")
+	fmt.Print("Proceed with LLM execution? (Y/n): ")
+
+	input, _ := ui.reader.ReadString('\n')
+	input = strings.ToLower(strings.TrimSpace(input))
+
+	// Default to yes unless explicitly aborted
+	return input != "n"
+}
+
 func (ui *TerminalUI) ChooseNextStep() session.DelegationStrategy {
 	fmt.Println("\nSelect Next Step:")
 	fmt.Println("[1] Manual Review (I will read the generated code)")

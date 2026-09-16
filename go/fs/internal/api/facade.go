@@ -14,8 +14,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 )
 
-// --- Domain Types ---
-
 type SpaceState struct {
 	ID           string
 	Name         string
@@ -27,6 +25,7 @@ type InboundEvent struct {
 	SubmitPrompt   *SubmitPromptPayload
 	SelectStrategy *SelectStrategyPayload
 	ReviewDecision *ReviewDecisionPayload
+	ApproveContext *ApproveContextPayload
 }
 
 type SubmitPromptPayload struct {
@@ -44,7 +43,9 @@ type ReviewDecisionPayload struct {
 	Accepted bool
 }
 
-// --- Facade Implementation ---
+type ApproveContextPayload struct {
+	Approved bool
+}
 
 type EventFacade struct {
 	marshaler   protojson.MarshalOptions
@@ -53,12 +54,8 @@ type EventFacade struct {
 
 func NewEventFacade() *EventFacade {
 	return &EventFacade{
-		marshaler: protojson.MarshalOptions{
-			EmitUnpopulated: true,
-		},
-		unmarshaler: protojson.UnmarshalOptions{
-			DiscardUnknown: true,
-		},
+		marshaler:   protojson.MarshalOptions{EmitUnpopulated: true},
+		unmarshaler: protojson.UnmarshalOptions{DiscardUnknown: true},
 	}
 }
 
@@ -96,29 +93,20 @@ func (f *EventFacade) MarshalSyncHistory(recentEvents []chat.Event, digests map[
 
 func (f *EventFacade) MarshalRESTSpaces(spaces []SpaceState) ([]byte, error) {
 	var rawSpaces []json.RawMessage
-
 	for _, s := range spaces {
-		pbSpace := &pb.SpaceInfo{
-			Id:           s.ID,
-			Name:         s.Name,
-			IsConfigured: s.IsConfigured,
-		}
-
+		pbSpace := &pb.SpaceInfo{Id: s.ID, Name: s.Name, IsConfigured: s.IsConfigured}
 		b, err := f.marshaler.Marshal(pbSpace)
 		if err != nil {
 			return nil, err
 		}
 		rawSpaces = append(rawSpaces, b)
 	}
-
 	if rawSpaces == nil {
 		rawSpaces = make([]json.RawMessage, 0)
 	}
-
 	return json.Marshal(rawSpaces)
 }
 
-// UnmarshalRESTSpaces completes the Facade symmetry, hiding the protojson array parsing from tests
 func (f *EventFacade) UnmarshalRESTSpaces(data []byte) ([]SpaceState, error) {
 	var rawSpaces []json.RawMessage
 	if err := json.Unmarshal(data, &rawSpaces); err != nil {
@@ -143,18 +131,12 @@ func (f *EventFacade) UnmarshalRESTSpaces(data []byte) ([]SpaceState, error) {
 func (f *EventFacade) MarshalAvailableSpaces(spaces []SpaceState) ([]byte, error) {
 	var pbSpaces []*pb.SpaceInfo
 	for _, s := range spaces {
-		pbSpaces = append(pbSpaces, &pb.SpaceInfo{
-			Id:           s.ID,
-			Name:         s.Name,
-			IsConfigured: s.IsConfigured,
-		})
+		pbSpaces = append(pbSpaces, &pb.SpaceInfo{Id: s.ID, Name: s.Name, IsConfigured: s.IsConfigured})
 	}
 
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_AvailableSpaces{
-			AvailableSpaces: &pb.AvailableSpacesPayload{
-				Spaces: pbSpaces,
-			},
+			AvailableSpaces: &pb.AvailableSpacesPayload{Spaces: pbSpaces},
 		},
 	}
 	return f.marshaler.Marshal(event)
@@ -163,9 +145,7 @@ func (f *EventFacade) MarshalAvailableSpaces(spaces []SpaceState) ([]byte, error
 func (f *EventFacade) MarshalChatStream(text string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_ChatStream{
-			ChatStream: &pb.ChatStreamPayload{
-				Text: text,
-			},
+			ChatStream: &pb.ChatStreamPayload{Text: text},
 		},
 	}
 	return f.marshaler.Marshal(event)
@@ -174,9 +154,7 @@ func (f *EventFacade) MarshalChatStream(text string) ([]byte, error) {
 func (f *EventFacade) MarshalRequestStrategy() ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_RequestStrategy{
-			RequestStrategy: &pb.RequestStrategyPayload{
-				Active: true,
-			},
+			RequestStrategy: &pb.RequestStrategyPayload{Active: true},
 		},
 	}
 	return f.marshaler.Marshal(event)
@@ -185,9 +163,7 @@ func (f *EventFacade) MarshalRequestStrategy() ([]byte, error) {
 func (f *EventFacade) MarshalRequestReview(branch string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_RequestReview{
-			RequestReview: &pb.RequestReviewPayload{
-				Branch: branch,
-			},
+			RequestReview: &pb.RequestReviewPayload{Branch: branch},
 		},
 	}
 	return f.marshaler.Marshal(event)
@@ -196,9 +172,30 @@ func (f *EventFacade) MarshalRequestReview(branch string) ([]byte, error) {
 func (f *EventFacade) MarshalAgentStream(agentID int, text string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_AgentStream{
-			AgentStream: &pb.AgentStreamPayload{
-				AgentId: int32(agentID),
-				Text:    text,
+			AgentStream: &pb.AgentStreamPayload{AgentId: int32(agentID), Text: text},
+		},
+	}
+	return f.marshaler.Marshal(event)
+}
+
+func (f *EventFacade) MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
+	var fileContexts []*pb.FileContextMetaData
+	for _, fc := range ctxData.FileContexts {
+		fileContexts = append(fileContexts, &pb.FileContextMetaData{
+			Path:       fc.Path,
+			Level:      fc.Level,
+			TokenCount: int32(fc.TokenCount),
+		})
+	}
+
+	event := &pb.WSEvent{
+		Payload: &pb.WSEvent_PreviewContext{
+			PreviewContext: &pb.PreviewContextPayload{
+				SpaceId:             ctxData.SpaceID,
+				ChatId:              ctxData.ChatID,
+				ManagerSystemPrompt: ctxData.ManagerSystemPrompt,
+				StickyDigests:       ctxData.StickyDigests,
+				FileContexts:        fileContexts,
 			},
 		},
 	}
@@ -246,8 +243,6 @@ func (f *EventFacade) UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		}
 	case *pb.WSEvent_SelectStrategy:
 		domainEvent.Type = "select_strategy"
-
-		// Explicit Mapping to prevent off-by-one enum drift
 		var strategy session.DelegationStrategy
 		switch payload.SelectStrategy.StrategyId {
 		case pb.DelegationStrategy_DELEGATION_STRATEGY_SKIP:
@@ -259,17 +254,19 @@ func (f *EventFacade) UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		case pb.DelegationStrategy_DELEGATION_STRATEGY_REFINE:
 			strategy = session.StrategyRefine
 		default:
-			strategy = session.StrategyManual // Safe fallback
+			strategy = session.StrategyManual
 		}
-
-		domainEvent.SelectStrategy = &SelectStrategyPayload{
-			StrategyID: strategy,
-		}
+		domainEvent.SelectStrategy = &SelectStrategyPayload{StrategyID: strategy}
 	case *pb.WSEvent_ReviewDecision:
 		domainEvent.Type = "review_decision"
 		domainEvent.ReviewDecision = &ReviewDecisionPayload{
 			Branch:   payload.ReviewDecision.Branch,
 			Accepted: payload.ReviewDecision.Accepted,
+		}
+	case *pb.WSEvent_ApproveContext:
+		domainEvent.Type = "approve_context"
+		domainEvent.ApproveContext = &ApproveContextPayload{
+			Approved: payload.ApproveContext.Approved,
 		}
 	default:
 		return nil, errors.New("unsupported or unknown inbound event type")

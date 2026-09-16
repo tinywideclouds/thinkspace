@@ -31,7 +31,6 @@ func TestEventFacade_UnmarshalInbound_SelectStrategy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Construct the raw JSON that protojson expects for the WSEvent oneof
 			payload := `{"selectStrategy": {"strategyId": ` + string(rune('0'+tt.protoEnumVal)) + `}}`
 			if tt.protoEnumVal > 9 {
 				payload = `{"selectStrategy": {"strategyId": 99}}`
@@ -108,6 +107,63 @@ func TestEventFacade_UnmarshalInbound_ReviewDecision(t *testing.T) {
 	}
 	if !inbound.ReviewDecision.Accepted {
 		t.Errorf("expected accepted to be true")
+	}
+}
+
+func TestEventFacade_UnmarshalInbound_ApproveContext(t *testing.T) {
+	facade := api.NewEventFacade()
+	payload := []byte(`{
+		"approveContext": {
+			"approved": true
+		}
+	}`)
+
+	inbound, err := facade.UnmarshalInbound(payload)
+	if err != nil {
+		t.Fatalf("unexpected error unmarshaling: %v", err)
+	}
+
+	if inbound.Type != "approve_context" {
+		t.Errorf("expected 'approve_context', got '%s'", inbound.Type)
+	}
+	if !inbound.ApproveContext.Approved {
+		t.Errorf("expected approved to be true")
+	}
+}
+
+func TestEventFacade_MarshalPreviewContext(t *testing.T) {
+	facade := api.NewEventFacade()
+
+	ctxData := session.TurnContext{
+		SpaceID:             "golang",
+		ChatID:              "chat-123",
+		ManagerSystemPrompt: "Test rules",
+		StickyDigests:       []string{"Sticky memory"},
+		FileContexts: []session.FileContext{
+			{Path: "src/main.go", Level: "structural", TokenCount: 100},
+		},
+	}
+
+	data, err := facade.MarshalPreviewContext(ctxData)
+	if err != nil {
+		t.Fatalf("failed to marshal preview context: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("failed to parse protojson output: %v", err)
+	}
+
+	previewCtxRaw, ok := result["previewContext"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected 'previewContext' wrapper in JSON output, got: %s", string(data))
+	}
+
+	if previewCtxRaw["spaceId"] != "golang" {
+		t.Errorf("expected spaceId 'golang', got %v", previewCtxRaw["spaceId"])
+	}
+	if previewCtxRaw["managerSystemPrompt"] != "Test rules" {
+		t.Errorf("expected prompt 'Test rules', got %v", previewCtxRaw["managerSystemPrompt"])
 	}
 }
 

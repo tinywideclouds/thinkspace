@@ -24,8 +24,24 @@ const (
 	StrategyRefine
 )
 
+// TurnContext captures the state sent to the UI for inspection before LLM execution.
+type TurnContext struct {
+	SpaceID             string
+	ChatID              string
+	ManagerSystemPrompt string
+	StickyDigests       []string
+	FileContexts        []FileContext
+}
+
+type FileContext struct {
+	Path       string
+	Level      string
+	TokenCount int
+}
+
 type UserInterface interface {
 	OnTextChunk(text string)
+	ReviewContext(ctxData TurnContext) bool
 	ChooseNextStep() DelegationStrategy
 	ReviewCandidate(branch string) (accepted bool)
 }

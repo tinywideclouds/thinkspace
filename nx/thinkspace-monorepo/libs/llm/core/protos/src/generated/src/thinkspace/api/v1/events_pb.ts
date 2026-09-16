@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file src/thinkspace/api/v1/events.proto.
  */
 export const file_src_thinkspace_api_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("CiJzcmMvdGhpbmtzcGFjZS9hcGkvdjEvZXZlbnRzLnByb3RvEhF0aGlua3NwYWNlLmFwaS52MSI8CglTcGFjZUluZm8SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIVCg1pc19jb25maWd1cmVkGAMgASgIIrwBCgtMZWRnZXJFdmVudBIKCgJpZBgBIAEoCRIRCgl0aW1lc3RhbXAYAiABKAkSDAoEdHlwZRgDIAEoCRIPCgdjb250ZW50GAQgASgJEj4KCG1ldGFkYXRhGAUgAygLMiwudGhpbmtzcGFjZS5hcGkudjEuTGVkZ2VyRXZlbnQuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiPAoKRGlnZXN0TWV0YRIKCgJpZBgBIAEoCRIPCgdzdW1tYXJ5GAIgASgJEhEKCWlzX3N0aWNreRgDIAEoCCIhChFDaGF0U3RyZWFtUGF5bG9hZBIMCgR0ZXh0GAEgASgJIjMKEUxvZ01lc3NhZ2VQYXlsb2FkEg0KBWxldmVsGAEgASgJEg8KB21lc3NhZ2UYAiABKAkiNAoSQWdlbnRTdHJlYW1QYXlsb2FkEhAKCGFnZW50X2lkGAEgASgFEgwKBHRleHQYAiABKAki3wEKElN5bmNIaXN0b3J5UGF5bG9hZBI1Cg1yZWNlbnRfZXZlbnRzGAEgAygLMh4udGhpbmtzcGFjZS5hcGkudjEuTGVkZ2VyRXZlbnQSQwoHZGlnZXN0cxgCIAMoCzIyLnRoaW5rc3BhY2UuYXBpLnYxLlN5bmNIaXN0b3J5UGF5bG9hZC5EaWdlc3RzRW50cnkaTQoMRGlnZXN0c0VudHJ5EgsKA2tleRgBIAEoCRIsCgV2YWx1ZRgCIAEoCzIdLnRoaW5rc3BhY2UuYXBpLnYxLkRpZ2VzdE1ldGE6AjgBIigKFlJlcXVlc3RTdHJhdGVneVBheWxvYWQSDgoGYWN0aXZlGAEgASgIIiYKFFJlcXVlc3RSZXZpZXdQYXlsb2FkEg4KBmJyYW5jaBgBIAEoCSJGChZBdmFpbGFibGVTcGFjZXNQYXlsb2FkEiwKBnNwYWNlcxgBIAMoCzIcLnRoaW5rc3BhY2UuYXBpLnYxLlNwYWNlSW5mbyL8AQoQRmxvd0V2ZW50UGF5bG9hZBIPCgdmbG93X2lkGAEgASgJEgwKBHR5cGUYAiABKAkSEQoJdGltZXN0YW1wGAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSEwoLYWdlbnRfY291bnQYBSABKAUSEAoIYWdlbnRfaWQYBiABKAkSEwoLYWdlbnRfaW5kZXgYByABKAUSEwoLaW5zdHJ1Y3Rpb24YCCABKAkSDgoGc3RhdHVzGAkgASgJEg8KB2F0dGVtcHQYCiABKAUSDQoFdHJhY2UYCyABKAkSFAoMY2FuZGlkYXRlX2lkGAwgASgJEg4KBnBhc3NlZBgNIAEoCCJGChNTdWJtaXRQcm9tcHRQYXlsb2FkEgwKBHRleHQYASABKAkSEAoIc3BhY2VfaWQYAiABKAkSDwoHY2hhdF9pZBgDIAEoCSJTChVTZWxlY3RTdHJhdGVneVBheWxvYWQSOgoLc3RyYXRlZ3lfaWQYASABKA4yJS50aGlua3NwYWNlLmFwaS52MS5EZWxlZ2F0aW9uU3RyYXRlZ3kiOQoVUmV2aWV3RGVjaXNpb25QYXlsb2FkEg4KBmJyYW5jaBgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCLjBQoHV1NFdmVudBI7CgtjaGF0X3N0cmVhbRgBIAEoCzIkLnRoaW5rc3BhY2UuYXBpLnYxLkNoYXRTdHJlYW1QYXlsb2FkSAASOwoLbG9nX21lc3NhZ2UYAiABKAsyJC50aGlua3NwYWNlLmFwaS52MS5Mb2dNZXNzYWdlUGF5bG9hZEgAEj0KDGFnZW50X3N0cmVhbRgGIAEoCzIlLnRoaW5rc3BhY2UuYXBpLnYxLkFnZW50U3RyZWFtUGF5bG9hZEgAEkUKEHJlcXVlc3Rfc3RyYXRlZ3kYCCABKAsyKS50aGlua3NwYWNlLmFwaS52MS5SZXF1ZXN0U3RyYXRlZ3lQYXlsb2FkSAASQQoOcmVxdWVzdF9yZXZpZXcYCSABKAsyJy50aGlua3NwYWNlLmFwaS52MS5SZXF1ZXN0UmV2aWV3UGF5bG9hZEgAEkUKEGF2YWlsYWJsZV9zcGFjZXMYCiABKAsyKS50aGlua3NwYWNlLmFwaS52MS5BdmFpbGFibGVTcGFjZXNQYXlsb2FkSAASPQoMc3luY19oaXN0b3J5GA8gASgLMiUudGhpbmtzcGFjZS5hcGkudjEuU3luY0hpc3RvcnlQYXlsb2FkSAASOQoKZmxvd19ldmVudBgOIAEoCzIjLnRoaW5rc3BhY2UuYXBpLnYxLkZsb3dFdmVudFBheWxvYWRIABI/Cg1zdWJtaXRfcHJvbXB0GAsgASgLMiYudGhpbmtzcGFjZS5hcGkudjEuU3VibWl0UHJvbXB0UGF5bG9hZEgAEkMKD3NlbGVjdF9zdHJhdGVneRgMIAEoCzIoLnRoaW5rc3BhY2UuYXBpLnYxLlNlbGVjdFN0cmF0ZWd5UGF5bG9hZEgAEkMKD3Jldmlld19kZWNpc2lvbhgNIAEoCzIoLnRoaW5rc3BhY2UuYXBpLnYxLlJldmlld0RlY2lzaW9uUGF5bG9hZEgAQgkKB3BheWxvYWQqtwEKEkRlbGVnYXRpb25TdHJhdGVneRIjCh9ERUxFR0FUSU9OX1NUUkFURUdZX1VOU1BFQ0lGSUVEEAASHAoYREVMRUdBVElPTl9TVFJBVEVHWV9TS0lQEAESHgoaREVMRUdBVElPTl9TVFJBVEVHWV9NQU5VQUwQAhIeChpERUxFR0FUSU9OX1NUUkFURUdZX1JFVklFVxADEh4KGkRFTEVHQVRJT05fU1RSQVRFR1lfUkVGSU5FEARCNFoyZ2l0aHViLmNvbS90aW55d2lkZWNsb3Vkcy90aGlua3NwYWNlL2FwaS92MTthcGlfdjFiBnByb3RvMw");
+  fileDesc("CiJzcmMvdGhpbmtzcGFjZS9hcGkvdjEvZXZlbnRzLnByb3RvEhF0aGlua3NwYWNlLmFwaS52MSI8CglTcGFjZUluZm8SCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIVCg1pc19jb25maWd1cmVkGAMgASgIIrwBCgtMZWRnZXJFdmVudBIKCgJpZBgBIAEoCRIRCgl0aW1lc3RhbXAYAiABKAkSDAoEdHlwZRgDIAEoCRIPCgdjb250ZW50GAQgASgJEj4KCG1ldGFkYXRhGAUgAygLMiwudGhpbmtzcGFjZS5hcGkudjEuTGVkZ2VyRXZlbnQuTWV0YWRhdGFFbnRyeRovCg1NZXRhZGF0YUVudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiPAoKRGlnZXN0TWV0YRIKCgJpZBgBIAEoCRIPCgdzdW1tYXJ5GAIgASgJEhEKCWlzX3N0aWNreRgDIAEoCCIhChFDaGF0U3RyZWFtUGF5bG9hZBIMCgR0ZXh0GAEgASgJIjMKEUxvZ01lc3NhZ2VQYXlsb2FkEg0KBWxldmVsGAEgASgJEg8KB21lc3NhZ2UYAiABKAkiNAoSQWdlbnRTdHJlYW1QYXlsb2FkEhAKCGFnZW50X2lkGAEgASgFEgwKBHRleHQYAiABKAki3wEKElN5bmNIaXN0b3J5UGF5bG9hZBI1Cg1yZWNlbnRfZXZlbnRzGAEgAygLMh4udGhpbmtzcGFjZS5hcGkudjEuTGVkZ2VyRXZlbnQSQwoHZGlnZXN0cxgCIAMoCzIyLnRoaW5rc3BhY2UuYXBpLnYxLlN5bmNIaXN0b3J5UGF5bG9hZC5EaWdlc3RzRW50cnkaTQoMRGlnZXN0c0VudHJ5EgsKA2tleRgBIAEoCRIsCgV2YWx1ZRgCIAEoCzIdLnRoaW5rc3BhY2UuYXBpLnYxLkRpZ2VzdE1ldGE6AjgBIigKFlJlcXVlc3RTdHJhdGVneVBheWxvYWQSDgoGYWN0aXZlGAEgASgIIiYKFFJlcXVlc3RSZXZpZXdQYXlsb2FkEg4KBmJyYW5jaBgBIAEoCSJGChZBdmFpbGFibGVTcGFjZXNQYXlsb2FkEiwKBnNwYWNlcxgBIAMoCzIcLnRoaW5rc3BhY2UuYXBpLnYxLlNwYWNlSW5mbyL8AQoQRmxvd0V2ZW50UGF5bG9hZBIPCgdmbG93X2lkGAEgASgJEgwKBHR5cGUYAiABKAkSEQoJdGltZXN0YW1wGAMgASgJEg8KB3Rhc2tfaWQYBCABKAkSEwoLYWdlbnRfY291bnQYBSABKAUSEAoIYWdlbnRfaWQYBiABKAkSEwoLYWdlbnRfaW5kZXgYByABKAUSEwoLaW5zdHJ1Y3Rpb24YCCABKAkSDgoGc3RhdHVzGAkgASgJEg8KB2F0dGVtcHQYCiABKAUSDQoFdHJhY2UYCyABKAkSFAoMY2FuZGlkYXRlX2lkGAwgASgJEg4KBnBhc3NlZBgNIAEoCCJGChNTdWJtaXRQcm9tcHRQYXlsb2FkEgwKBHRleHQYASABKAkSEAoIc3BhY2VfaWQYAiABKAkSDwoHY2hhdF9pZBgDIAEoCSJTChVTZWxlY3RTdHJhdGVneVBheWxvYWQSOgoLc3RyYXRlZ3lfaWQYASABKA4yJS50aGlua3NwYWNlLmFwaS52MS5EZWxlZ2F0aW9uU3RyYXRlZ3kiOQoVUmV2aWV3RGVjaXNpb25QYXlsb2FkEg4KBmJyYW5jaBgBIAEoCRIQCghhY2NlcHRlZBgCIAEoCCLtBgoHV1NFdmVudBI7CgtjaGF0X3N0cmVhbRgBIAEoCzIkLnRoaW5rc3BhY2UuYXBpLnYxLkNoYXRTdHJlYW1QYXlsb2FkSAASOwoLbG9nX21lc3NhZ2UYAiABKAsyJC50aGlua3NwYWNlLmFwaS52MS5Mb2dNZXNzYWdlUGF5bG9hZEgAEj0KDGFnZW50X3N0cmVhbRgGIAEoCzIlLnRoaW5rc3BhY2UuYXBpLnYxLkFnZW50U3RyZWFtUGF5bG9hZEgAEkUKEHJlcXVlc3Rfc3RyYXRlZ3kYCCABKAsyKS50aGlua3NwYWNlLmFwaS52MS5SZXF1ZXN0U3RyYXRlZ3lQYXlsb2FkSAASQQoOcmVxdWVzdF9yZXZpZXcYCSABKAsyJy50aGlua3NwYWNlLmFwaS52MS5SZXF1ZXN0UmV2aWV3UGF5bG9hZEgAEkUKEGF2YWlsYWJsZV9zcGFjZXMYCiABKAsyKS50aGlua3NwYWNlLmFwaS52MS5BdmFpbGFibGVTcGFjZXNQYXlsb2FkSAASPQoMc3luY19oaXN0b3J5GA8gASgLMiUudGhpbmtzcGFjZS5hcGkudjEuU3luY0hpc3RvcnlQYXlsb2FkSAASOQoKZmxvd19ldmVudBgOIAEoCzIjLnRoaW5rc3BhY2UuYXBpLnYxLkZsb3dFdmVudFBheWxvYWRIABI/Cg1zdWJtaXRfcHJvbXB0GAsgASgLMiYudGhpbmtzcGFjZS5hcGkudjEuU3VibWl0UHJvbXB0UGF5bG9hZEgAEkMKD3NlbGVjdF9zdHJhdGVneRgMIAEoCzIoLnRoaW5rc3BhY2UuYXBpLnYxLlNlbGVjdFN0cmF0ZWd5UGF5bG9hZEgAEkMKD3Jldmlld19kZWNpc2lvbhgNIAEoCzIoLnRoaW5rc3BhY2UuYXBpLnYxLlJldmlld0RlY2lzaW9uUGF5bG9hZEgAEkMKD3ByZXZpZXdfY29udGV4dBgQIAEoCzIoLnRoaW5rc3BhY2UuYXBpLnYxLlByZXZpZXdDb250ZXh0UGF5bG9hZEgAEkMKD2FwcHJvdmVfY29udGV4dBgRIAEoCzIoLnRoaW5rc3BhY2UuYXBpLnYxLkFwcHJvdmVDb250ZXh0UGF5bG9hZEgAQgkKB3BheWxvYWQisAEKFVByZXZpZXdDb250ZXh0UGF5bG9hZBIQCghzcGFjZV9pZBgBIAEoCRIPCgdjaGF0X2lkGAIgASgJEh0KFW1hbmFnZXJfc3lzdGVtX3Byb21wdBgDIAEoCRIWCg5zdGlja3lfZGlnZXN0cxgEIAMoCRI9Cg1maWxlX2NvbnRleHRzGAUgAygLMiYudGhpbmtzcGFjZS5hcGkudjEuRmlsZUNvbnRleHRNZXRhRGF0YSJHChNGaWxlQ29udGV4dE1ldGFEYXRhEgwKBHBhdGgYASABKAkSDQoFbGV2ZWwYAiABKAkSEwoLdG9rZW5fY291bnQYAyABKAUiKQoVQXBwcm92ZUNvbnRleHRQYXlsb2FkEhAKCGFwcHJvdmVkGAEgASgIKrcBChJEZWxlZ2F0aW9uU3RyYXRlZ3kSIwofREVMRUdBVElPTl9TVFJBVEVHWV9VTlNQRUNJRklFRBAAEhwKGERFTEVHQVRJT05fU1RSQVRFR1lfU0tJUBABEh4KGkRFTEVHQVRJT05fU1RSQVRFR1lfTUFOVUFMEAISHgoaREVMRUdBVElPTl9TVFJBVEVHWV9SRVZJRVcQAxIeChpERUxFR0FUSU9OX1NUUkFURUdZX1JFRklORRAEQjRaMmdpdGh1Yi5jb20vdGlueXdpZGVjbG91ZHMvdGhpbmtzcGFjZS9hcGkvdjE7YXBpX3YxYgZwcm90bzM");
 
 /**
  * --- Shared Types ---
@@ -485,6 +485,18 @@ export type WSEvent = Message<"thinkspace.api.v1.WSEvent"> & {
      */
     value: ReviewDecisionPayload;
     case: "reviewDecision";
+  } | {
+    /**
+     * @generated from field: thinkspace.api.v1.PreviewContextPayload preview_context = 16;
+     */
+    value: PreviewContextPayload;
+    case: "previewContext";
+  } | {
+    /**
+     * @generated from field: thinkspace.api.v1.ApproveContextPayload approve_context = 17;
+     */
+    value: ApproveContextPayload;
+    case: "approveContext";
   } | { case: undefined; value?: undefined };
 };
 
@@ -494,6 +506,93 @@ export type WSEvent = Message<"thinkspace.api.v1.WSEvent"> & {
  */
 export const WSEventSchema: GenMessage<WSEvent> = /*@__PURE__*/
   messageDesc(file_src_thinkspace_api_v1_events, 14);
+
+/**
+ * Outbound context breakdown payload
+ *
+ * @generated from message thinkspace.api.v1.PreviewContextPayload
+ */
+export type PreviewContextPayload = Message<"thinkspace.api.v1.PreviewContextPayload"> & {
+  /**
+   * @generated from field: string space_id = 1;
+   */
+  spaceId: string;
+
+  /**
+   * @generated from field: string chat_id = 2;
+   */
+  chatId: string;
+
+  /**
+   * @generated from field: string manager_system_prompt = 3;
+   */
+  managerSystemPrompt: string;
+
+  /**
+   * @generated from field: repeated string sticky_digests = 4;
+   */
+  stickyDigests: string[];
+
+  /**
+   * @generated from field: repeated thinkspace.api.v1.FileContextMetaData file_contexts = 5;
+   */
+  fileContexts: FileContextMetaData[];
+};
+
+/**
+ * Describes the message thinkspace.api.v1.PreviewContextPayload.
+ * Use `create(PreviewContextPayloadSchema)` to create a new message.
+ */
+export const PreviewContextPayloadSchema: GenMessage<PreviewContextPayload> = /*@__PURE__*/
+  messageDesc(file_src_thinkspace_api_v1_events, 15);
+
+/**
+ * @generated from message thinkspace.api.v1.FileContextMetaData
+ */
+export type FileContextMetaData = Message<"thinkspace.api.v1.FileContextMetaData"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * "structural", "skeleton", "full"
+   *
+   * @generated from field: string level = 2;
+   */
+  level: string;
+
+  /**
+   * @generated from field: int32 token_count = 3;
+   */
+  tokenCount: number;
+};
+
+/**
+ * Describes the message thinkspace.api.v1.FileContextMetaData.
+ * Use `create(FileContextMetaDataSchema)` to create a new message.
+ */
+export const FileContextMetaDataSchema: GenMessage<FileContextMetaData> = /*@__PURE__*/
+  messageDesc(file_src_thinkspace_api_v1_events, 16);
+
+/**
+ * Add this to Inbound Payloads
+ *
+ * @generated from message thinkspace.api.v1.ApproveContextPayload
+ */
+export type ApproveContextPayload = Message<"thinkspace.api.v1.ApproveContextPayload"> & {
+  /**
+   * @generated from field: bool approved = 1;
+   */
+  approved: boolean;
+};
+
+/**
+ * Describes the message thinkspace.api.v1.ApproveContextPayload.
+ * Use `create(ApproveContextPayloadSchema)` to create a new message.
+ */
+export const ApproveContextPayloadSchema: GenMessage<ApproveContextPayload> = /*@__PURE__*/
+  messageDesc(file_src_thinkspace_api_v1_events, 17);
 
 /**
  * --- Enums ---

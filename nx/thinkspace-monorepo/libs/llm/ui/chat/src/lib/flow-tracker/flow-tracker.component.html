@@ -1,54 +1,55 @@
-<div style="display: flex; flex-direction: column; gap: 12px; padding: 12px; background: #f8f9fa; border-top: 1px solid #dee2e6; height: 100%; overflow-y: auto;">
-  <h3 style="margin: 0; font-size: 14px; color: #495057; text-transform: uppercase; letter-spacing: 0.5px;">
-    🏭 Execution Telemetry
-  </h3>
+<div style="display: flex; flex-direction: column; height: 100%; background: #fff; border-top: 1px solid #dee2e6;">
   
-  @if (flowsArray().length === 0) {
-    <div style="color: #adb5bd; font-size: 13px; font-style: italic;">Awaiting orchestration...</div>
-  }
+  <!-- Tab Header -->
+  <div style="display: flex; gap: 4px; padding: 8px 12px 0; background: #f8f9fa; border-bottom: 1px solid #dee2e6; overflow-x: auto;">
+    <button 
+      (click)="activeTab.set('manager')"
+      [style.border-bottom]="activeTab() === 'manager' ? '2px solid #339af0' : '2px solid transparent'"
+      [style.color]="activeTab() === 'manager' ? '#1971c2' : '#495057'"
+      style="padding: 8px 16px; background: transparent; border: none; cursor: pointer; font-size: 13px; font-weight: bold; white-space: nowrap;">
+      🧠 Manager Logs
+    </button>
+    
+    @for (flow of flowsArray(); track flow.flowId) {
+      @for (agent of flow.agentsArray; track agent.agentId) {
+        <button 
+          (click)="activeTab.set(agent.agentId)"
+          [style.border-bottom]="activeTab() === agent.agentId ? '2px solid #339af0' : '2px solid transparent'"
+          [style.color]="activeTab() === agent.agentId ? '#1971c2' : '#495057'"
+          style="padding: 8px 16px; background: transparent; border: none; cursor: pointer; font-size: 13px; font-weight: bold; white-space: nowrap;">
+          🤖 Agent {{ agent.agentIndex }} {{ agent.passed ? '✅' : (agent.trace ? '❌' : '⏳') }}
+        </button>
+      }
+    }
+  </div>
 
-  @for (flow of flowsArray(); track flow.flowId) {
-    <div style="border: 1px solid #ced4da; border-radius: 6px; background: #ffffff; padding: 12px; margin-bottom: 8px;">
-      
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #f1f3f5; padding-bottom: 8px;">
-        <strong style="font-size: 13px; color: #343a40;">
-          Flow: {{ flow.flowId.split('-').pop() }} 
-          <span style="font-weight: normal; color: #868e96;">({{ flow.agentCount }} agents)</span>
-        </strong>
-        <span [style.color]="flow.status === 'running' ? '#f59f00' : '#2b8a3e'" style="font-size: 12px; font-weight: bold; text-transform: uppercase;">
-          {{ flow.status === 'running' ? '⏳ Running' : '✅ Completed' }}
-        </span>
-      </div>
-
-      <div style="display: flex; flex-direction: column; gap: 12px;">
-        @for (agent of flow.agentsArray; track agent.agentId) {
-          
-          <!-- Terminal Block -->
-          <div style="border: 1px solid #343a40; border-radius: 4px; background: #212529; color: #f8f9fa; font-family: monospace; font-size: 12px; overflow: hidden;">
-            
-            <div style="background: #111; padding: 6px 12px; display: flex; justify-content: space-between; border-bottom: 1px solid #343a40;">
-              <span style="font-weight: bold; color: #4dabf7;">Agent {{ agent.agentIndex }}</span>
-              <span>{{ agent.passed ? '✅ Passed' : (agent.trace ? '❌ Errored' : '⏳ Running') }}</span>
-            </div>
-            
-            <div style="padding: 8px 12px; color: #adb5bd; border-bottom: 1px dashed #495057; white-space: pre-wrap; font-size: 11px;">{{ agent.instruction }}</div>
-            
-            <div style="padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto;">
-              @if (agent.timeline.length === 0) {
-                <span style="color: #868e96; font-style: italic;">Waiting for events...</span>
-              }
-              @for (entry of agent.timeline; track entry.id) {
-                <div [style.color]="entry.isError ? '#ff8787' : '#b2f2bb'" style="word-break: break-all; margin-bottom: 2px;">
-                  <span style="color: #868e96; margin-right: 6px;">[{{ entry.timestamp | date:'HH:mm:ss' }}]</span>
-                  <span [style.font-weight]="entry.isError ? 'bold' : 'normal'">{{ entry.message }}</span>
-                </div>
-              }
-            </div>
-
+  <!-- Tab Content Area -->
+  <div style="flex: 1; overflow-y: auto; padding: 12px; background: #212529; font-family: monospace; font-size: 12px; color: #f8f9fa;">
+    
+    @if (activeTab() === 'manager') {
+      @if (systemLogs().length === 0) {
+        <div style="color: #868e96; font-style: italic;">Awaiting manager activity for this turn...</div>
+      }
+      @for (log of systemLogs(); track log.id) {
+        <div style="margin-bottom: 4px; word-break: break-all;">
+          <span style="color: #868e96; margin-right: 8px;">[{{ log.timestamp | date:'HH:mm:ss' }}]</span>
+          <span [style.color]="log.level === 'ERROR' ? '#ff8787' : (log.level === 'WARN' ? '#ffd43b' : '#b2f2bb')" style="font-weight: bold; margin-right: 8px;">[{{ log.level }}]</span>
+          <span>{{ log.message }}</span>
+        </div>
+      }
+    } @else {
+      @if (activeAgentData(); as data) {
+        <div style="padding-bottom: 8px; margin-bottom: 12px; border-bottom: 1px dashed #495057; color: #adb5bd; white-space: pre-wrap; font-size: 11px;">
+          {{ data.instruction }}
+        </div>
+        
+        @for (entry of data.timeline; track entry.id) {
+          <div [style.color]="entry.isError ? '#ff8787' : '#b2f2bb'" style="margin-bottom: 4px; word-break: break-all;">
+            <span style="color: #868e96; margin-right: 8px;">[{{ entry.timestamp | date:'HH:mm:ss' }}]</span>
+            <span [style.font-weight]="entry.isError ? 'bold' : 'normal'">{{ entry.message }}</span>
           </div>
-
         }
-      </div>
-    </div>
-  }
+      }
+    }
+  </div>
 </div>

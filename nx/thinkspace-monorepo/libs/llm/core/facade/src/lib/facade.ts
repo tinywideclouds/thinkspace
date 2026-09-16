@@ -47,6 +47,22 @@ export class LlmFacade {
           }, {} as Record<string, DomainDigestMeta>)
         };
 
+      case 'previewContext':
+        return {
+          type: 'preview_context',
+          context: {
+            spaceId: protocolBufferEvent.payload.value.spaceId,
+            chatId: protocolBufferEvent.payload.value.chatId,
+            managerSystemPrompt: protocolBufferEvent.payload.value.managerSystemPrompt,
+            stickyDigests: protocolBufferEvent.payload.value.stickyDigests,
+            fileContexts: protocolBufferEvent.payload.value.fileContexts.map(fc => ({
+              path: fc.path,
+              level: fc.level,
+              tokenCount: fc.tokenCount
+            }))
+          }
+        };
+
       case 'flowEvent':
         return {
           type: 'flow_event',
@@ -73,29 +89,25 @@ export class LlmFacade {
 
   static createSubmitPrompt(text: string, spaceId: string, chatId: string): WSEvent {
     return create(WSEventSchema, {
-      payload: {
-        case: 'submitPrompt',
-        value: { text, spaceId, chatId }
-      }
+      payload: { case: 'submitPrompt', value: { text, spaceId, chatId } }
+    });
+  }
+
+  static createApproveContext(approved: boolean): WSEvent {
+    return create(WSEventSchema, {
+      payload: { case: 'approveContext', value: { approved } }
     });
   }
 
   static createSelectStrategy(strategy: DomainDelegationStrategy): WSEvent {
-    const strategyId = strategy as unknown as DelegationStrategy;
     return create(WSEventSchema, {
-      payload: {
-        case: 'selectStrategy',
-        value: { strategyId }
-      }
+      payload: { case: 'selectStrategy', value: { strategyId: strategy as unknown as DelegationStrategy } }
     });
   }
 
   static createReviewDecision(branch: string, accepted: boolean): WSEvent {
     return create(WSEventSchema, {
-      payload: {
-        case: 'reviewDecision',
-        value: { branch, accepted }
-      }
+      payload: { case: 'reviewDecision', value: { branch, accepted } }
     });
   }
 }

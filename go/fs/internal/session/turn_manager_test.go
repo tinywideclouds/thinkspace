@@ -87,6 +87,8 @@ fanout:
 	spyClient := &spyModelClient{}
 	llmAdapter := llm.NewAdapter(spyClient)
 	dummyFlow := &mockFlow{}
+
+	// Utilizes the mockUserInterface defined in coordinator_test.go
 	ui := &mockUserInterface{}
 
 	turnManager := session.NewTurnManager(logger, registry, manager, llmAdapter, dummyFlow, spyClient)

@@ -85,19 +85,54 @@ describe('ChatStateService', () => {
     expect(service.pendingReviewBranch()).toBe('candidate/123');
   });
 
-  it('should send prompt with correct space and chat ids', () => {
+  it('should handle context review automatically if autoApproveContext is true', () => {
+    service.connect('ws://test');
+    service.autoApproveContext.set(true);
+    
+    const previewEvent = create(WSEventSchema, { 
+      payload: { case: 'previewContext', value: { spaceId: 'golang', chatId: 'test-chat', managerSystemPrompt: 'test', stickyDigests: [], fileContexts: [] } } 
+    });
+    
+    webSocketSubject.next(previewEvent);
+
+    // It should instantly send the OK message and not halt the UI
+    expect(mockTransportService.send).toHaveBeenCalled();
+    expect(service.pendingContextReview()).toBeNull();
+  });
+
+  it('should halt UI for context review if autoApproveContext is false', () => {
+    service.connect('ws://test');
+    service.autoApproveContext.set(false);
+    
+    const previewEvent = create(WSEventSchema, { 
+      payload: { case: 'previewContext', value: { spaceId: 'golang', chatId: 'test-chat', managerSystemPrompt: 'test', stickyDigests: [], fileContexts: [] } } 
+    });
+    
+    webSocketSubject.next(previewEvent);
+
+    expect(mockTransportService.send).not.toHaveBeenCalled();
+    expect(service.pendingContextReview()).toBeTruthy();
+    expect(service.pendingContextReview()?.managerSystemPrompt).toBe('test');
+  });
+
+  it('should send prompt, clear logs, and show thinking indicator', () => {
+    service.systemLogs.set([{ id: 'old', timestamp: 0, level: 'INFO', message: 'old log' }]);
+    
     service.submitPrompt('Refactor this app');
     
     expect(mockTransportService.send).toHaveBeenCalled();
+    
     const chatHistory = service.coreChat();
-    expect(chatHistory.length).toBe(1); // the llm system now gives back true state here instead of assuming 'manager is thinking'
+    expect(chatHistory.length).toBe(2);
     expect(chatHistory[0].source).toBe('user');
     expect(chatHistory[0].content).toBe('Refactor this app');
+    expect(chatHistory[1].source).toBe('system');
+    expect(chatHistory[1].content).toBe('Manager Thinking...');
     
+    expect(service.systemLogs().length).toBe(0); // Logs were cleared
+
     const sentProtocolBuffer = mockTransportService.send.mock.calls[0][0];
     expect(sentProtocolBuffer.payload.value.text).toBe('Refactor this app');
-    expect(sentProtocolBuffer.payload.value.spaceId).toBe('golang');
-    expect(sentProtocolBuffer.payload.value.chatId).toBe('test-chat');
   });
 
   it('should clear strategy state and send on selectStrategy', () => {
@@ -113,6 +148,15 @@ describe('ChatStateService', () => {
     service.submitReview(true);
     
     expect(service.pendingReviewBranch()).toBeNull();
+    expect(mockTransportService.send).toHaveBeenCalled();
+  });
+
+  it('should clear context review state and send on submitContextApproval', () => {
+    service.pendingContextReview.set({ spaceId: 'golang', chatId: 'test', managerSystemPrompt: 'rules', stickyDigests: [], fileContexts: [] });
+    
+    service.submitContextApproval(true);
+    
+    expect(service.pendingContextReview()).toBeNull();
     expect(mockTransportService.send).toHaveBeenCalled();
   });
 

@@ -67,6 +67,37 @@ describe('LlmFacade', () => {
       });
     });
 
+    it('should map a preview context event correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'previewContext',
+          value: {
+            spaceId: 'golang',
+            chatId: 'chat-1',
+            managerSystemPrompt: 'Test rules',
+            stickyDigests: ['Sticky memory'],
+            fileContexts: [
+              { path: 'src/main.go', level: 'structural', tokenCount: 100 }
+            ]
+          }
+        }
+      });
+
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'preview_context',
+        context: {
+          spaceId: 'golang',
+          chatId: 'chat-1',
+          managerSystemPrompt: 'Test rules',
+          stickyDigests: ['Sticky memory'],
+          fileContexts: [
+            { path: 'src/main.go', level: 'structural', tokenCount: 100 }
+          ]
+        }
+      });
+    });
+
     it('should map a flow event correctly', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
@@ -123,6 +154,15 @@ describe('LlmFacade', () => {
         expect(protocolBufferEvent.payload.value.text).toBe('Write a test');
         expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
         expect(protocolBufferEvent.payload.value.chatId).toBe('test-chat');
+      }
+    });
+
+    it('should create a valid ApproveContext WSEvent', () => {
+      const protocolBufferEvent = LlmFacade.createApproveContext(true);
+      
+      expect(protocolBufferEvent.payload.case).toBe('approveContext');
+      if (protocolBufferEvent.payload.case === 'approveContext') {
+        expect(protocolBufferEvent.payload.value.approved).toBe(true);
       }
     });
 

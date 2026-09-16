@@ -122,5 +122,28 @@ message WSEvent {
     SubmitPromptPayload submit_prompt = 11;
     SelectStrategyPayload select_strategy = 12;
     ReviewDecisionPayload review_decision = 13;
+
+    PreviewContextPayload preview_context = 16;
+    ApproveContextPayload approve_context = 17;
   }
+}
+
+// Outbound context breakdown payload
+message PreviewContextPayload {
+  string space_id = 1;
+  string chat_id = 2;
+  string manager_system_prompt = 3;
+  repeated string sticky_digests = 4;
+  repeated FileContextMetaData file_contexts = 5;
+}
+
+message FileContextMetaData {
+  string path = 1;
+  string level = 2; // "structural", "skeleton", "full"
+  int32 token_count = 3;
+}
+
+// Add this to Inbound Payloads
+message ApproveContextPayload {
+  bool approved = 1;
 }

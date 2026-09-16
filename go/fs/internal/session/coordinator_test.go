@@ -136,6 +136,11 @@ func (u *mockUserInterface) ReviewCandidate(branch string) bool {
 	return u.reviewToReturn
 }
 
+// Added to fulfill the updated UserInterface contract for all session tests
+func (u *mockUserInterface) ReviewContext(ctxData session.TurnContext) bool {
+	return true
+}
+
 type mockEmitter struct{}
 
 func (m *mockEmitter) Emit(event flows.FlowEvent) {}
