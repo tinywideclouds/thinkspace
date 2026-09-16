@@ -233,12 +233,18 @@ func (c *Coordinator) executeProposeChange(
 		return nil
 	}
 
+	var branchNames []string
 	for _, branch := range result.Branches {
-		candidateID := strings.TrimPrefix(branch, "candidate/")
-		_ = c.workspaceService.LogProposal(turnContext, thread, candidateID, fmt.Sprintf("Proposed branch %s via sub-agent fan-out.", branch), assignedTags)
+		candidateID := strings.TrimPrefix(branch.CandidateID, "candidate/")
+		statusMsg := "Proposed branch"
+		if !branch.Passed {
+			statusMsg = "Proposed FAILED branch"
+		}
+		branchNames = append(branchNames, branch.CandidateID)
+		_ = c.workspaceService.LogProposal(turnContext, thread, candidateID, fmt.Sprintf("%s %s via sub-agent fan-out.", statusMsg, branch.CandidateID), assignedTags)
 	}
 
-	branchesToReview := result.Branches
+	branchesToReview := branchNames
 	strategy := userInterface.ChooseNextStep()
 
 	strategyNames := map[DelegationStrategy]string{
@@ -327,7 +333,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 	history []*genai.Content,
 	userInterface UserInterface,
 	strategy DelegationStrategy,
-	candidateBranches []string,
+	candidateBranches []flows.BranchResult,
 ) []string {
 	var ledgerPromptBuilder strings.Builder
 	ledgerPromptBuilder.WriteString("The automated sub-agents have completed their proposals. Please evaluate the following candidate diffs. ")
@@ -341,17 +347,24 @@ func (c *Coordinator) executeLLMReviewPhase(
 	ledgerPromptBuilder.WriteString("### Candidate Branches\n\n")
 
 	var diffsBuilder strings.Builder
-	for _, branch := range candidateBranches {
-		candidateID := strings.TrimPrefix(branch, "candidate/")
+	var outputBranches []string
 
-		ledgerPromptBuilder.WriteString(fmt.Sprintf("* [`%s`](#branch:%s)\n", branch, branch))
+	for _, branch := range candidateBranches {
+		candidateID := strings.TrimPrefix(branch.CandidateID, "candidate/")
+		outputBranches = append(outputBranches, branch.CandidateID)
+
+		ledgerPromptBuilder.WriteString(fmt.Sprintf("* [`%s`](#branch:%s)\n", branch.CandidateID, branch.CandidateID))
 
 		diff, err := c.workspaceService.ReadCandidate(ctx, thread, candidateID)
 		if err != nil || diff == "" {
 			diff = "// No readable diff generated or error fetching diff."
 		}
 
-		diffsBuilder.WriteString(fmt.Sprintf("#### %s\n```diff\n%s\n```\n\n", branch, diff))
+		diffsBuilder.WriteString(fmt.Sprintf("#### %s\n", branch.CandidateID))
+		if !branch.Passed {
+			diffsBuilder.WriteString(fmt.Sprintf("⚠️ **VERIFICATION FAILED**:\n```\n%s\n```\n\n", branch.Trace))
+		}
+		diffsBuilder.WriteString(fmt.Sprintf("```diff\n%s\n```\n\n", diff))
 	}
 
 	ledgerPrompt := ledgerPromptBuilder.String()
@@ -377,7 +390,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 	for chunk, err := range evaluationStream {
 		if err != nil {
 			c.logger.ErrorContext(ctx, "evaluation stream failed", "error", err)
-			return candidateBranches
+			return outputBranches
 		}
 		if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
 			for _, part := range chunk.Candidates[0].Content.Parts {
@@ -394,7 +407,7 @@ func (c *Coordinator) executeLLMReviewPhase(
 	}
 
 	if strategy == StrategyReview {
-		return candidateBranches
+		return outputBranches
 	}
 
 	userInterface.OnTextChunk("\n\n🚀 **Synthesizing final candidate based on evaluation...**\n")
@@ -436,9 +449,14 @@ func (c *Coordinator) executeLLMReviewPhase(
 	if err != nil {
 		c.logger.ErrorContext(ctx, "refinement flow failed", "error", err)
 		userInterface.OnTextChunk("\n\n⚠️ Refinement orchestration failed. Falling back to original candidates.\n")
-		return candidateBranches
+		return outputBranches
 	}
 
-	finalBranches := append(refinementResult.Branches, candidateBranches...)
+	var finalBranches []string
+	for _, b := range refinementResult.Branches {
+		finalBranches = append(finalBranches, b.CandidateID)
+	}
+	finalBranches = append(finalBranches, outputBranches...)
+
 	return finalBranches
 }

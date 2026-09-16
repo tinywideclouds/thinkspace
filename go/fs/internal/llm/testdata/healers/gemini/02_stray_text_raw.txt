@@ -1,0 +1,7 @@
+Wait, let's complete writing the code, ensure all escapes are correct.
+Let's make sure the response format is PURE JSON and we don't have any markdown block wrapping it.
+{
+  "thought": "No markdown, just stray text",
+  "patches": []
+}
+And some text at the end.

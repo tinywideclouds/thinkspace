@@ -112,11 +112,11 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 
 	workerModel := thinkSpace.Config().Roles.Worker.Model
 
-	// Pass the Patcher to the SubAgentExecutor
 	executor := llm.NewSubAgentExecutor(
+		tm.logger,
 		tm.modelClient,
 		workerModel,
-		thinkSpace.Config().Roles.Worker.SystemPrompt,
+		thinkSpace.Config().WorkerSystemPrompt(), // Fuses base rules + worker persona
 		thinkSpace.Config().Roles.Worker.MaxTokens,
 		thinkSpace.Patcher(),
 	)
@@ -129,7 +129,7 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		tm.fanOutFlow,
 		emitter,
 		spaceID,
-		spaceConfig.Roles.Worker.SystemPrompt,
+		spaceConfig.WorkerSystemPrompt(), // Fuses base rules + worker persona
 		flowConfig,
 	)
 

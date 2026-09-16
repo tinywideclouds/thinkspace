@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -18,7 +19,7 @@ type TraceEvent struct {
 }
 
 // NewSubAgentExecutor creates a SubAgentExecutor linked to a specific model, system instruction, token limit, and patcher.
-func NewSubAgentExecutor(client ModelClient, modelName string, systemInstruction string, maxTokens int, patcher workspace.Patcher) workspace.SubAgentExecutor {
+func NewSubAgentExecutor(logger *slog.Logger, client ModelClient, modelName string, systemInstruction string, maxTokens int, patcher workspace.Patcher) workspace.SubAgentExecutor {
 	return func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
 
 		combinedInstruction := systemInstruction
@@ -84,6 +85,20 @@ func NewSubAgentExecutor(client ModelClient, modelName string, systemInstruction
 
 		if rawOutput == "" {
 			return fmt.Errorf("empty response from sub-agent")
+		}
+
+		// Apply Model-Specific Output Healers
+		healer := GetHealerForModel(modelName)
+		if healer != nil {
+			healedOutput, modified := healer.Heal(rawOutput)
+			if modified {
+				logger.WarnContext(ctx, "model output healed",
+					"model", modelName,
+					"healer", fmt.Sprintf("%T", healer),
+					"original", rawOutput,
+					"healed", healedOutput)
+				rawOutput = healedOutput
+			}
 		}
 
 		if patcher != nil {

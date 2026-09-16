@@ -16,7 +16,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// FlowContext holds the dynamic parameters passed from the Manager/Space during execution.
 type FlowContext struct {
 	FlowID         string
 	SpaceID        string
@@ -34,6 +33,7 @@ type agentResult struct {
 	candidateID string
 	err         error
 	record      workspace.AgentRecord
+	passed      bool
 }
 
 type FanOutFlow struct {
@@ -47,10 +47,6 @@ func NewFanOutFlow(logger *slog.Logger) *FanOutFlow {
 func (f *FanOutFlow) Name() string {
 	return "FanOutFlow"
 }
-
-// -----------------------------------------------------------------------------
-// 1. Orchestration & Fan-Out
-// -----------------------------------------------------------------------------
 
 func (f *FanOutFlow) Execute(
 	ctx context.Context,
@@ -67,16 +63,12 @@ func (f *FanOutFlow) Execute(
 
 	tasks := f.parseTasks(args)
 
-	// --- Observability: Manager Request Logging ---
-	// This makes it explicitly clear on the service side what the Manager
-	// actually requested for its Read Dependency before we hit the file system.
 	for _, task := range tasks {
 		f.logger.Info("=== MANAGER DELEGATION REQUEST ===",
 			"agent_id", task.AgentID,
 			"target_files", fmt.Sprintf("%v", task.TargetFiles),
 		)
 	}
-	// ----------------------------------------------
 
 	emitter.Emit(FlowEvent{
 		FlowID:     flowContext.FlowID,
@@ -103,7 +95,7 @@ func (f *FanOutFlow) Execute(
 		}(i+1, task)
 	}
 
-	var branches []string
+	var branches []BranchResult
 	var errs []error
 	var records []workspace.AgentRecord
 
@@ -112,22 +104,24 @@ func (f *FanOutFlow) Execute(
 		if res.err != nil {
 			errs = append(errs, res.err)
 		} else {
-			branches = append(branches, res.candidateID)
 			records = append(records, res.record)
+			branches = append(branches, BranchResult{
+				CandidateID: res.candidateID,
+				Passed:      res.passed,
+				Trace:       res.record.VerificationTrace,
+			})
 		}
 	}
 
-	// We now return the explicitly concatenated error messages so the Coordinator
-	// can feed the exact fail-fast trace back to the Manager LLM.
 	if len(errs) > 0 {
 		var errMsgs []string
 		for _, e := range errs {
 			errMsgs = append(errMsgs, e.Error())
 		}
-		return nil, fmt.Errorf("sub-agent execution aborted: %s", strings.Join(errMsgs, " ; "))
+		return nil, fmt.Errorf("fatal system errors aborted flow: %s", strings.Join(errMsgs, " ; "))
 	}
 
-	summary := fmt.Sprintf("Successfully generated %d candidate branches.", len(branches))
+	summary := fmt.Sprintf("Generated %d candidate branches.", len(branches))
 
 	receipt := workspace.FlowReceipt{
 		FlowID:    flowContext.FlowID,
@@ -145,10 +139,6 @@ func (f *FanOutFlow) Execute(
 	}, nil
 }
 
-// -----------------------------------------------------------------------------
-// 2. Task Parsing
-// -----------------------------------------------------------------------------
-
 func (f *FanOutFlow) parseTasks(args map[string]any) []SubAgentTask {
 	var tasks []SubAgentTask
 	if rawTasks, ok := args["agent_tasks"].([]any); ok {
@@ -158,7 +148,6 @@ func (f *FanOutFlow) parseTasks(args map[string]any) []SubAgentTask {
 				digest, _ := taskMap["context_digest"].(string)
 				instruction, _ := taskMap["instruction"].(string)
 
-				// Ensure targetFiles defaults to an empty slice, never nil, for clarity
 				targetFiles := make([]string, 0)
 				if rawFiles, hasFiles := taskMap["target_files"].([]any); hasFiles {
 					for _, fileRaw := range rawFiles {
@@ -185,10 +174,6 @@ func (f *FanOutFlow) parseTasks(args map[string]any) []SubAgentTask {
 	}
 	return tasks
 }
-
-// -----------------------------------------------------------------------------
-// 3. Agent Pipeline & Sandbox Lifecycle
-// -----------------------------------------------------------------------------
 
 func (f *FanOutFlow) runAgentPipeline(
 	ctx context.Context,
@@ -223,12 +208,10 @@ func (f *FanOutFlow) runAgentPipeline(
 	}
 	defer sandbox.TearDown(ctx)
 
-	// --- THE UNIVERSAL JIT WORKBENCH ---
 	workbench := assembler.NewWorkbench()
 	workbenchText, err := workbench.Build(ctx, sandbox, task.TargetFiles)
 	if err != nil {
 		agentLogger.Error("manager requested invalid target files", "error", err)
-
 		emitter.Emit(FlowEvent{
 			FlowID:     flowContext.FlowID,
 			Type:       FlowError,
@@ -241,7 +224,6 @@ func (f *FanOutFlow) runAgentPipeline(
 	}
 
 	task.ContextDigest += workbenchText
-	// ----------------------------------
 
 	var passed bool
 	var finalTrace string
@@ -256,12 +238,6 @@ func (f *FanOutFlow) runAgentPipeline(
 		}
 	}
 
-	if err := sandbox.DeliverForReview(ctx); err != nil {
-		agentLogger.Error("failed to deliver candidate", "error", err)
-		return agentResult{err: err}
-	}
-
-	diff, _ := service.ReadCandidate(ctx, thread, candidateID)
 	traceBytes, _ := sandbox.ReadFile(ctx, "trace.jsonl")
 
 	record := workspace.AgentRecord{
@@ -270,8 +246,17 @@ func (f *FanOutFlow) runAgentPipeline(
 		Instruction:       task.Instruction,
 		RawPayload:        string(traceBytes),
 		VerificationTrace: finalTrace,
-		StateDelta:        diff,
+		StateDelta:        "",
 	}
+
+	// Always deliver for review, even if failed. The Manager must see the failure.
+	if err := sandbox.DeliverForReview(ctx); err != nil {
+		agentLogger.Error("failed to deliver candidate", "error", err)
+		return agentResult{err: err}
+	}
+
+	diff, _ := service.ReadCandidate(ctx, thread, candidateID)
+	record.StateDelta = diff
 
 	emitter.Emit(FlowEvent{
 		FlowID:      flowContext.FlowID,
@@ -284,12 +269,8 @@ func (f *FanOutFlow) runAgentPipeline(
 		Trace:       finalTrace,
 	})
 
-	return agentResult{candidateID: fmt.Sprintf("candidate/%s", candidateID), err: nil, record: record}
+	return agentResult{candidateID: fmt.Sprintf("candidate/%s", candidateID), err: nil, passed: passed, record: record}
 }
-
-// -----------------------------------------------------------------------------
-// 4. Single Execution Attempt
-// -----------------------------------------------------------------------------
 
 func (f *FanOutFlow) executeSingleAttempt(
 	ctx context.Context,
@@ -345,14 +326,12 @@ func (f *FanOutFlow) executeSingleAttempt(
 		agentLogger.Info("executing retry", "retry_instruction", briefing.Instruction)
 	}
 
-	// --- Observability: Sub-Agent Payload ---
 	agentLogger.Info("=== SUB-AGENT PAYLOAD ===",
 		"context_digest_length", len(briefing.ContextDigest),
 		"instruction_length", len(briefing.Instruction),
 	)
 	agentLogger.Debug("--- SUB-AGENT CONTEXT DIGEST ---\n" + briefing.ContextDigest)
 	agentLogger.Debug("--- SUB-AGENT INSTRUCTION ---\n" + briefing.Instruction)
-	// ----------------------------------------
 
 	emitter.Emit(FlowEvent{
 		FlowID:      flowContext.FlowID,

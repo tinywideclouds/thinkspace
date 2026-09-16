@@ -9,8 +9,6 @@ import (
 	"go/token"
 	"log/slog"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -37,29 +35,22 @@ type PatchRequest struct {
 }
 
 func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSandbox, llmOutput string) error {
-	cleanJSON := extractJSON(llmOutput)
-
-	// Sanitize common LLM JSON escapes
-	re := regexp.MustCompile(`\\([^"\\/bfnrtu])`)
-	sanitized := re.ReplaceAllString(cleanJSON, "$1")
-
 	var payload struct {
 		Patches []PatchRequest `json:"patches"`
 	}
 
-	if err := json.Unmarshal([]byte(sanitized), &payload); err != nil {
+	if err := json.Unmarshal([]byte(llmOutput), &payload); err != nil {
 		return fmt.Errorf("invalid patch JSON: %w", err)
 	}
 
 	for _, patch := range payload.Patches {
 		cleanPath := filepath.ToSlash(filepath.Clean(patch.File))
 
-		// Local development observability
-		logArgs := []any{"action", patch.Action, "file", cleanPath}
+		args := []any{"action", patch.Action, "file", cleanPath}
 		if patch.Name != "" {
-			logArgs = append(logArgs, "name", patch.Name)
+			args = append(args, "name", patch.Name)
 		}
-		slog.InfoContext(ctx, "applied AST patch", logArgs...)
+		slog.InfoContext(ctx, "applied AST patch", args...)
 
 		if patch.Action == "full_replace" {
 			if err := sandbox.WriteFile(ctx, cleanPath, []byte(patch.Code)); err != nil {
@@ -127,22 +118,4 @@ func (p *GoASTPatcher) replaceFunctionAST(src []byte, funcName string, newCode s
 	newSrc = append(newSrc, src[endOffset:]...)
 
 	return newSrc, nil
-}
-
-func extractJSON(input string) string {
-	start := strings.Index(input, "```json")
-	if start != -1 {
-		start += 7
-		end := strings.Index(input[start:], "```")
-		if end != -1 {
-			return input[start : start+end]
-		}
-	}
-
-	start = strings.Index(input, "{")
-	end := strings.LastIndex(input, "}")
-	if start != -1 && end != -1 && end > start {
-		return input[start : end+1]
-	}
-	return input
 }

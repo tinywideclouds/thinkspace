@@ -102,11 +102,11 @@ func main() {
 	workerModel := activeThinkSpace.Config().Roles.Worker.Model
 	llmAdapter := llm.NewAdapter(modelClient)
 
-	// Pass the Patcher from the active space into the executor
 	subAgentExecutor := llm.NewSubAgentExecutor(
+		logger,
 		modelClient,
 		workerModel,
-		activeThinkSpace.Config().Roles.Worker.SystemPrompt,
+		activeThinkSpace.Config().WorkerSystemPrompt(), // Composed prompt
 		activeThinkSpace.Config().Roles.Worker.MaxTokens,
 		activeThinkSpace.Patcher(),
 	)
@@ -118,7 +118,6 @@ func main() {
 	contextAssembler := session.NewContextAssembler()
 	userInterface := cli.NewTerminalUI()
 
-	// CLI doesn't use WebSockets, so it purely relies on the SlogEmitter
 	emitter := flows.MultiFlowEmitter{flows.NewSlogEmitter(logger)}
 
 	coordinator := session.NewCoordinator(
@@ -129,7 +128,7 @@ func main() {
 		fanOutFlow,
 		emitter,
 		*domainName,
-		spaceConfiguration.Roles.Worker.SystemPrompt,
+		spaceConfiguration.WorkerSystemPrompt(), // Composed prompt
 		flowConfiguration,
 	)
 

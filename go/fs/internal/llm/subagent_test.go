@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
@@ -90,6 +92,7 @@ func TestSubAgentFactory_ExecutionWithPatcher(t *testing.T) {
 	ctx := context.Background()
 	sandbox := newMockSandbox()
 	patcher := &mockPatcher{}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	domainSystemPrompt := "Base domain rules"
 	taskInstruction := "write a main file"
@@ -110,7 +113,7 @@ func TestSubAgentFactory_ExecutionWithPatcher(t *testing.T) {
 		},
 	}
 
-	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", domainSystemPrompt, maxTokens, patcher)
+	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", domainSystemPrompt, maxTokens, patcher)
 	tokenChan := make(chan workspace.AgentToken, 10)
 
 	briefing := workspace.SubAgentBriefing{Instruction: taskInstruction}
@@ -148,6 +151,7 @@ func TestSubAgentFactory_EmptyResponse(t *testing.T) {
 	ctx := context.Background()
 	sandbox := newMockSandbox()
 	patcher := &mockPatcher{}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	spyClient := &spyModelClient{
 		responses: []*genai.GenerateContentResponse{
@@ -163,7 +167,7 @@ func TestSubAgentFactory_EmptyResponse(t *testing.T) {
 		},
 	}
 
-	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", "rules", 100, patcher)
+	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", "rules", 100, patcher)
 
 	err := executor(ctx, workspace.SubAgentBriefing{Instruction: "do work"}, sandbox, 1, nil)
 	if err == nil {
@@ -178,6 +182,7 @@ func TestSubAgentFactory_EmptyResponse(t *testing.T) {
 func TestSubAgentFactory_PatcherFailure(t *testing.T) {
 	ctx := context.Background()
 	sandbox := newMockSandbox()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	patcher := &mockPatcher{
 		errToReturn: errors.New("patching failed structurally"),
 	}
@@ -196,7 +201,7 @@ func TestSubAgentFactory_PatcherFailure(t *testing.T) {
 		},
 	}
 
-	executor := llm.NewSubAgentExecutor(spyClient, "test-worker", "rules", 100, patcher)
+	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", "rules", 100, patcher)
 
 	err := executor(ctx, workspace.SubAgentBriefing{Instruction: "do work"}, sandbox, 1, nil)
 	if err == nil {

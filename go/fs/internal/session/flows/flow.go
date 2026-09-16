@@ -8,9 +8,16 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
+// BranchResult encapsulates the final state of a candidate branch produced by a flow.
+type BranchResult struct {
+	CandidateID string
+	Passed      bool
+	Trace       string
+}
+
 // FlowResult captures the outcome of an executed orchestration flow.
 type FlowResult struct {
-	Branches []string
+	Branches []BranchResult
 	Summary  string
 }
 
@@ -19,7 +26,6 @@ type Flow interface {
 	Name() string
 
 	// Execute runs the lifecycle loop, streaming events via the FlowEmitter.
-	// Note: history has been intentionally removed to enforce the sub-agent vacuum.
 	Execute(
 		ctx context.Context,
 		service *workspace.Service,

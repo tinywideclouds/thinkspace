@@ -73,7 +73,6 @@ files:
   - ../../go/fs/internal/session/flows/fanout_flow.go
   - ../../go/fs/internal/session/flows/flow.go
   - ../../go/fs/internal/spaces/config.go
-  - ../../go/fs/internal/spaces/models.go
   - ../../go/fs/internal/spaces/thinkspace.go
   - ../../go/fs/internal/spaces/verifier.go
   - ../../go/fs/internal/spaces/golang/mapbook.go
@@ -93,4 +92,13 @@ files:
   - ../../go/fs/internal/spaces/golang/patcher_test.go
   - ../../go/fs/internal/spaces/golang/patcher.go
   - ../../go/fs/internal/workspace/patcher.go
-last_context: llm_golang_35.md
+  - ../../go/fs/internal/spaces/generic/patcher.go
+  - ../../go/fs/internal/llm/healer_test.go
+  - ../../go/fs/internal/llm/healer.go
+  - ../../go/fs/internal/llm/testdata/healers/gemini/01_markdown_expected.json
+  - ../../go/fs/internal/llm/testdata/healers/gemini/01_markdown_raw.txt
+  - ../../go/fs/internal/llm/testdata/healers/gemini/02_stray_text_expected.json
+  - ../../go/fs/internal/llm/testdata/healers/gemini/02_stray_text_raw.txt
+  - ../../go/fs/internal/llm/testdata/healers/gemini/03_bad_escapes_expected.json
+  - ../../go/fs/internal/llm/testdata/healers/gemini/03_bad_escapes_raw.txt
+last_context: llm_golang_36.md

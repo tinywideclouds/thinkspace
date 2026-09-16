@@ -114,7 +114,7 @@ func (m *mockFlow) Name() string {
 func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *chat.Thread, space spaces.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier spaces.Verifier) (*flows.FlowResult, error) {
 	m.executeCalled = true
 	return &flows.FlowResult{
-		Branches: []string{"candidate/mock-123"},
+		Branches: []flows.BranchResult{{CandidateID: "candidate/mock-123", Passed: true}},
 		Summary:  "Mock delegation complete",
 	}, nil
 }
@@ -151,7 +151,6 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 	workspaceRoot := t.TempDir()
 
 	bus := chat.NewEventBus()
-	// Must subscribe to write physical events so we can assert the ledger contents later
 	bus.Subscribe(chat.NewLedgerSubscriber())
 
 	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)

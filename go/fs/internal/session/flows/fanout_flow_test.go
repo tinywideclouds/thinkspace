@@ -67,7 +67,6 @@ func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error)
 	if path == "does/not/exist.go" {
 		return nil, errors.New("file not found")
 	}
-	// Return dummy data to simulate a successfully loaded target file
 	return []byte("mock physical file content"), nil
 }
 
@@ -177,15 +176,17 @@ func TestFanOutFlow_CleanRun_WithJITInjection(t *testing.T) {
 		t.Fatalf("expected 1 execution attempt, got %d", len(briefingsReceived))
 	}
 
-	// Verify the physical file content from the Workbench was injected into the sub-agent digest
 	if !strings.Contains(briefingsReceived[0].ContextDigest, "mock physical file content") {
 		t.Errorf("expected JIT workbench content to be injected, got: %s", briefingsReceived[0].ContextDigest)
 	}
 
-	// Assert the new hierarchical branch naming convention
 	expectedBranch := "candidate/chat-1-flow-123-agent-1"
-	if len(result.Branches) != 1 || result.Branches[0] != expectedBranch {
+	if len(result.Branches) != 1 || result.Branches[0].CandidateID != expectedBranch {
 		t.Errorf("expected %s, got %v", expectedBranch, result.Branches)
+	}
+
+	if !result.Branches[0].Passed {
+		t.Errorf("expected branch to have passed verification")
 	}
 
 	if !engine.sandbox.delivered {
@@ -231,22 +232,8 @@ func TestFanOutFlow_FailFast_HallucinatedFile(t *testing.T) {
 		t.Fatalf("expected fanout to fail due to fail-fast boundary, but it succeeded")
 	}
 
-	// Updated to look for the new specific error trace bubbled up from the flow execution
-	if !strings.Contains(err.Error(), "sub-agent execution aborted") {
-		t.Errorf("expected aggregate flow error, got: %v", err)
-	}
-
-	// Verify the FlowError event was successfully emitted to the frontend with the correct fail-fast trace
-	var foundErrorEvent bool
-	for _, e := range emitter.events {
-		if e.Type == flows.FlowError && strings.Contains(e.Trace, "fail-fast: requested target file") {
-			foundErrorEvent = true
-			break
-		}
-	}
-
-	if !foundErrorEvent {
-		t.Errorf("expected FlowError event with fail-fast file trace to be emitted")
+	if !strings.Contains(err.Error(), "fatal system errors") {
+		t.Errorf("expected fatal system error, got: %v", err)
 	}
 }
 
@@ -282,7 +269,10 @@ func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
 		return nil
 	}
 
-	_, _ = flow.Execute(context.Background(), service, thread, space, args, flowConfig, flowContext, emitter, executor, verifier)
+	res, err := flow.Execute(context.Background(), service, thread, space, args, flowConfig, flowContext, emitter, executor, verifier)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if len(briefingsReceived) != 2 {
 		t.Fatalf("expected 2 execution attempts, got %d", len(briefingsReceived))
@@ -291,5 +281,9 @@ func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
 	retryInstruction := briefingsReceived[1].Instruction
 	if !strings.Contains(retryInstruction, "Trace: compile error") {
 		t.Errorf("retry instruction missing error trace: %s", retryInstruction)
+	}
+
+	if !res.Branches[0].Passed {
+		t.Errorf("expected branch to have passed verification after retry")
 	}
 }
