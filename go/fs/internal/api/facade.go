@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-	"uuid"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"uuid"
 
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
 type SpaceState struct {
@@ -204,23 +204,28 @@ func (f *EventFacade) MarshalPreviewContext(ctxData session.TurnContext) ([]byte
 	return f.marshaler.Marshal(event)
 }
 
-func (f *EventFacade) MarshalFlowEvent(event flows.FlowEvent) ([]byte, error) {
+func (f *EventFacade) MarshalTelemetryEvent(channel string, event telemetry.Event) ([]byte, error) {
+	var payloadJSON string
+	if len(event.Payload) > 0 {
+		b, err := json.Marshal(event.Payload)
+		if err != nil {
+			return nil, err
+		}
+		payloadJSON = string(b)
+	}
+
 	pbEvent := &pb.WSEvent{
-		Payload: &pb.WSEvent_FlowEvent{
-			FlowEvent: &pb.FlowEventPayload{
-				FlowId:      event.FlowID,
-				Type:        string(event.Type),
-				Timestamp:   event.Timestamp.Format(time.RFC3339),
-				TaskId:      event.TaskID,
-				AgentCount:  int32(event.AgentCount),
-				AgentId:     event.AgentID,
-				AgentIndex:  int32(event.AgentIndex),
-				Instruction: event.Instruction,
-				Status:      event.Status,
-				Attempt:     int32(event.Attempt),
-				Trace:       event.Trace,
-				CandidateId: event.CandidateID,
-				Passed:      event.Passed,
+		Payload: &pb.WSEvent_TelemetryEvent{
+			TelemetryEvent: &pb.TelemetryEventPayload{
+				Channel: channel,
+				Event: &pb.TelemetryEvent{
+					Id:          event.ID.String(),
+					Type:        event.Type,
+					Timestamp:   event.Timestamp.Format(time.RFC3339),
+					Message:     event.Message,
+					Summary:     event.Summary,
+					PayloadJson: payloadJSON,
+				},
 			},
 		},
 	}

@@ -2,16 +2,16 @@ package flows
 
 import "log/slog"
 
-// MultiFlowEmitter broadcasts a single event to multiple underlying emitters.
-type MultiFlowEmitter []FlowEmitter
+// MultiTelemetryEmitter broadcasts a single event to multiple underlying emitters.
+type MultiTelemetryEmitter []TelemetryEmitter
 
-func (m MultiFlowEmitter) Emit(event FlowEvent) {
+func (m MultiTelemetryEmitter) Emit(channel string, event TelemetryEvent) {
 	for _, e := range m {
-		e.Emit(event)
+		e.Emit(channel, event)
 	}
 }
 
-// SlogEmitter translates structured flow events into terminal/system logs.
+// SlogEmitter translates structured telemetry events into terminal/system logs.
 type SlogEmitter struct {
 	logger *slog.Logger
 }
@@ -20,30 +20,25 @@ func NewSlogEmitter(logger *slog.Logger) *SlogEmitter {
 	return &SlogEmitter{logger: logger}
 }
 
-func (s *SlogEmitter) Emit(event FlowEvent) {
+func (s *SlogEmitter) Emit(channel string, event TelemetryEvent) {
 	log := s.logger.With(
-		"flow_id", event.FlowID,
+		"channel", channel,
+		"event_id", event.ID.String(),
 		"event_type", event.Type,
 	)
 
-	if event.AgentID != "" {
-		log = log.With("agent_id", event.AgentID, "attempt", event.Attempt)
+	// Dynamically unpack the JSON payload into slog attributes
+	for k, v := range event.Payload {
+		log = log.With(k, v)
 	}
 
-	switch event.Type {
-	case FlowStart:
-		log.Info("flow started", "task_id", event.TaskID, "agent_count", event.AgentCount)
-	case FlowSpawn:
-		log.Info("agent spawned", "instruction", event.Instruction)
-	case FlowStatus:
-		log.Info("status update", "status", event.Status)
-	case FlowError:
-		log.Warn("verification failed", "trace", event.Trace)
-	case FlowComplete:
-		if event.Passed {
-			log.Info("flow completed successfully", "candidate_id", event.CandidateID)
-		} else {
-			log.Warn("flow exhausted retries", "candidate_id", event.CandidateID, "final_trace", event.Trace)
-		}
+	if event.Summary != "" {
+		log = log.With("summary", event.Summary)
+	}
+
+	if event.Type == "error" || event.Type == "flow_error" {
+		log.Warn(event.Message)
+	} else {
+		log.Info(event.Message)
 	}
 }

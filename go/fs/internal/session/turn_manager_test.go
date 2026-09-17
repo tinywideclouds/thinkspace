@@ -81,25 +81,20 @@ fanout:
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return &stubEngine{} })
 
-	// Manually configure the space to avoid HTTP management API dependencies
 	manager.UpdateSpaceState("golang-space", func(s *workspace.SpaceState) { s.Domain = "golang-space" })
 
 	spyClient := &spyModelClient{}
 	llmAdapter := llm.NewAdapter(spyClient)
 	dummyFlow := &mockFlow{}
-
-	// Utilizes the mockUserInterface defined in coordinator_test.go
 	ui := &mockUserInterface{}
 
 	turnManager := session.NewTurnManager(logger, registry, manager, llmAdapter, dummyFlow, spyClient)
 
-	// Execute a turn with a new prompt
 	err := turnManager.ExecuteTurn(context.Background(), "golang-space", "chat-1", "Hello sequencing test", ui, &mockEmitter{})
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
 
-	// Assert the context assembly was strictly ordered *after* the ledger write
 	if len(spyClient.capturedHistory) == 0 {
 		t.Fatalf("Expected history to be populated, got 0. The ledger load sequence is fundamentally broken.")
 	}
@@ -109,7 +104,6 @@ fanout:
 		t.Errorf("Expected last history item to be the prompt, got: %s", lastText)
 	}
 
-	// Assert dynamic mapbook injection in the system prompt
 	if spyClient.capturedConfig == nil || spyClient.capturedConfig.SystemInstruction == nil {
 		t.Fatalf("Expected SDK configuration to contain SystemInstruction")
 	}

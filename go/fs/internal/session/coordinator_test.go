@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
-	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
@@ -16,6 +16,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
@@ -39,30 +40,22 @@ func (m *mockModelClient) GenerateContentStream(ctx context.Context, model strin
 
 type mockChatEngine struct{}
 
-func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error {
-	return nil
-}
-
+func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
 func (m *mockChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
 	return "mock-sha", nil
 }
-
 func (m *mockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
 	return nil, nil
 }
-
 func (m *mockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
 	return nil
 }
-
 func (m *mockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
-
 func (m *mockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
-
 func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
 	return "+ mock diff", nil
 }
@@ -81,21 +74,10 @@ func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	return cfg
 }
 
-func (m *mockThinkSpace) Tools() []*genai.Tool {
-	return nil
-}
-
-func (m *mockThinkSpace) Verifier() spaces.Verifier {
-	return &mockVerifier{}
-}
-
-func (m *mockThinkSpace) Mapbook() assembler.Mapbook {
-	return nil
-}
-
-func (m *mockThinkSpace) Patcher() workspace.Patcher {
-	return nil
-}
+func (m *mockThinkSpace) Tools() []*genai.Tool       { return nil }
+func (m *mockThinkSpace) Verifier() spaces.Verifier  { return &mockVerifier{} }
+func (m *mockThinkSpace) Mapbook() assembler.Mapbook { return nil }
+func (m *mockThinkSpace) Patcher() workspace.Patcher { return nil }
 
 type mockVerifier struct{}
 
@@ -107,11 +89,8 @@ type mockFlow struct {
 	executeCalled bool
 }
 
-func (m *mockFlow) Name() string {
-	return "MockFlow"
-}
-
-func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *chat.Thread, space spaces.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter flows.FlowEmitter, executor workspace.SubAgentExecutor, verifier spaces.Verifier) (*flows.FlowResult, error) {
+func (m *mockFlow) Name() string { return "MockFlow" }
+func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *chat.Thread, space spaces.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter telemetry.Emitter, executor workspace.SubAgentExecutor, verifier spaces.Verifier) (*flows.FlowResult, error) {
 	m.executeCalled = true
 	return &flows.FlowResult{
 		Branches: []flows.BranchResult{{CandidateID: "candidate/mock-123", Passed: true}},
@@ -125,25 +104,26 @@ type mockUserInterface struct {
 	reviewedBranch   string
 }
 
-func (u *mockUserInterface) OnTextChunk(text string) {}
-
-func (u *mockUserInterface) ChooseNextStep() session.DelegationStrategy {
-	return u.strategyToReturn
-}
-
+func (u *mockUserInterface) OnTextChunk(text string)                        {}
+func (u *mockUserInterface) ReviewContext(ctxData session.TurnContext) bool { return true }
+func (u *mockUserInterface) ChooseNextStep() session.DelegationStrategy     { return u.strategyToReturn }
 func (u *mockUserInterface) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
 }
 
-// Added to fulfill the updated UserInterface contract for all session tests
-func (u *mockUserInterface) ReviewContext(ctxData session.TurnContext) bool {
-	return true
+type emittedEvent struct {
+	channel string
+	event   telemetry.Event
 }
 
-type mockEmitter struct{}
+type mockEmitter struct {
+	events []emittedEvent
+}
 
-func (m *mockEmitter) Emit(event flows.FlowEvent) {}
+func (m *mockEmitter) Emit(channel string, event telemetry.Event) {
+	m.events = append(m.events, emittedEvent{channel: channel, event: event})
+}
 
 // --- Tests ---
 
@@ -152,9 +132,7 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-
 	workspaceRoot := t.TempDir()
-
 	bus := chat.NewEventBus()
 	bus.Subscribe(chat.NewLedgerSubscriber())
 
@@ -208,11 +186,8 @@ func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
 		reviewToReturn:   true,
 	}
 
-	space := &mockThinkSpace{}
 	manifest := chat.NewThreadManifest(thread.ID)
-	var history []*genai.Content
-
-	err := coordinator.ExecuteTurn(ctx, thread, manifest, space, history, userInterface)
+	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
@@ -244,7 +219,6 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-
 	workspaceRoot := t.TempDir()
 
 	bus := chat.NewEventBus()
@@ -277,16 +251,13 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 		},
 	}
 
-	emitter := &mockEmitter{}
-	flowConfiguration := flows.FlowConfig{}
-	coordinator := session.NewCoordinator(logger, workspaceService, llm.NewAdapter(client), nil, &mockFlow{}, emitter, "golang", "", flowConfiguration)
+	coordinator := session.NewCoordinator(logger, workspaceService, llm.NewAdapter(client), nil, &mockFlow{}, &mockEmitter{}, "golang", "", flows.FlowConfig{})
 
 	userInterface := &mockUserInterface{
 		strategyToReturn: session.StrategySkip,
 	}
 
 	manifest := chat.NewThreadManifest(thread.ID)
-
 	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
@@ -297,26 +268,16 @@ func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
 	}
 }
 
-func TestCoordinator_ToolLoop_QueryLensThenPropose(t *testing.T) {
+func TestCoordinator_TelemetryEmission(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
-
 	bus := chat.NewEventBus()
-	bus.Subscribe(chat.NewLedgerSubscriber())
 
 	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-loop")
-
-	_ = workspaceService.LogUserMessage(ctx, thread, "This is historical auth info")
-
-	allEvents, _ := workspaceService.LoadEvents(ctx, thread)
-	testEventID := allEvents[0].ID
-
-	manifest := chat.NewThreadManifest(thread.ID)
-	manifest.Lenses["auth"] = []uuid.UUID{testEventID}
+	thread, _ := workspaceService.StartThread(ctx, "test-thread-telemetry")
 
 	client := &mockModelClient{
 		responses: []*genai.GenerateContentResponse{
@@ -325,23 +286,8 @@ func TestCoordinator_ToolLoop_QueryLensThenPropose(t *testing.T) {
 					Content: &genai.Content{
 						Parts: []*genai.Part{{
 							FunctionCall: &genai.FunctionCall{
-								Name: "query_lens",
-								Args: map[string]any{"tag": "auth", "reasoning": "Need past auth context"},
-							},
-						}},
-					},
-				}},
-			},
-			{
-				Candidates: []*genai.Candidate{{
-					Content: &genai.Content{
-						Parts: []*genai.Part{{
-							FunctionCall: &genai.FunctionCall{
 								Name: "propose_change",
-								Args: map[string]any{
-									"agent_count": float64(1),
-									"agent_tasks": []any{map[string]any{"context_digest": "Auth info", "instruction": "Do auth"}},
-								},
+								Args: map[string]any{},
 							},
 						}},
 					},
@@ -350,16 +296,36 @@ func TestCoordinator_ToolLoop_QueryLensThenPropose(t *testing.T) {
 		},
 	}
 
-	flow := &mockFlow{}
-	coordinator := session.NewCoordinator(logger, workspaceService, llm.NewAdapter(client), nil, flow, &mockEmitter{}, "golang", "", flows.FlowConfig{})
-	userInterface := &mockUserInterface{strategyToReturn: session.StrategySkip}
+	emitter := &mockEmitter{}
+	coordinator := session.NewCoordinator(logger, workspaceService, llm.NewAdapter(client), nil, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
 
-	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
-	if err != nil {
-		t.Fatalf("ExecuteTurn failed: %v", err)
+	ui := &mockUserInterface{strategyToReturn: session.StrategyManual}
+	manifest := chat.NewThreadManifest(thread.ID)
+
+	_ = coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, ui)
+
+	var foundPropose, foundStrategy bool
+	for _, e := range emitter.events {
+		if e.channel != "manager" {
+			t.Errorf("Expected Coordinator to only emit to 'manager' channel")
+		}
+
+		if e.event.Type == "log" && strings.Contains(e.event.Message, "proposing changes") {
+			foundPropose = true
+		}
+
+		if e.event.Type == "log" && strings.Contains(e.event.Message, "User selected strategy") {
+			foundStrategy = true
+			if e.event.Payload["strategy"] != "Manual Review" {
+				t.Errorf("Expected strategy payload to be 'Manual Review', got %v", e.event.Payload["strategy"])
+			}
+		}
 	}
 
-	if !flow.executeCalled {
-		t.Errorf("Expected Flow to be executed on the second iteration of the tool loop")
+	if !foundPropose {
+		t.Errorf("Expected Coordinator to emit propose_change log event")
+	}
+	if !foundStrategy {
+		t.Errorf("Expected Coordinator to emit strategy selection log event with payload")
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/coder/websocket"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
 type WebSocketEmitter struct {
@@ -21,8 +21,8 @@ func NewWebSocketEmitter(ctx context.Context, conn *websocket.Conn, facade *Even
 	}
 }
 
-func (w *WebSocketEmitter) Emit(event flows.FlowEvent) {
-	bytes, err := w.facade.MarshalFlowEvent(event)
+func (w *WebSocketEmitter) Emit(channel string, event telemetry.Event) {
+	bytes, err := w.facade.MarshalTelemetryEvent(channel, event)
 	if err == nil {
 		if writeErr := w.conn.Write(w.ctx, websocket.MessageText, bytes); writeErr != nil {
 			// Client disconnected, swallow and return cleanly

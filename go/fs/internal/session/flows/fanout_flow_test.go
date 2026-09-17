@@ -12,6 +12,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
@@ -124,12 +125,17 @@ func (m *mockVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSa
 	return nil
 }
 
-type mockEmitter struct {
-	events []flows.FlowEvent
+type emittedEvent struct {
+	channel string
+	event   telemetry.Event
 }
 
-func (m *mockEmitter) Emit(event flows.FlowEvent) {
-	m.events = append(m.events, event)
+type mockEmitter struct {
+	events []emittedEvent
+}
+
+func (m *mockEmitter) Emit(channel string, event telemetry.Event) {
+	m.events = append(m.events, emittedEvent{channel: channel, event: event})
 }
 
 // --- Tests ---
@@ -285,5 +291,84 @@ func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
 
 	if !res.Branches[0].Passed {
 		t.Errorf("expected branch to have passed verification after retry")
+	}
+}
+
+func TestFanOutFlow_TelemetryEmission(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	flow := flows.NewFanOutFlow(logger)
+
+	engine := &mockChatEngine{}
+	workspaceRoot := t.TempDir()
+
+	bus := chat.NewEventBus()
+	service := workspace.NewService(logger, engine, workspaceRoot, bus)
+	thread, _ := service.StartThread(context.Background(), "chat-1")
+
+	verifier := &mockVerifier{}
+	emitter := &mockEmitter{}
+	var space spaces.ThinkSpace = &mockThinkSpace{}
+
+	args := map[string]any{
+		"agent_tasks": []any{
+			map[string]any{
+				"context_digest": "Context",
+				"instruction":    "Instruction",
+			},
+		},
+	}
+	flowConfig := flows.FlowConfig{}
+	flowContext := flows.FlowContext{FlowID: "flow-999", SpaceID: "golang", FlowSummary: "Testing telemetry routing"}
+
+	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+		return nil
+	}
+
+	_, _ = flow.Execute(context.Background(), service, thread, space, args, flowConfig, flowContext, emitter, executor, verifier)
+
+	// Validate the routing and dynamic payload mappings
+	var foundStart, foundSpawn, foundComplete bool
+
+	for _, e := range emitter.events {
+		if e.channel == "manager" {
+			if e.event.Type == "flow_start" {
+				foundStart = true
+				if e.event.Summary != "Testing telemetry routing" {
+					t.Errorf("expected flow_start to carry the FlowSummary, got: %s", e.event.Summary)
+				}
+				if e.event.Payload["agent_count"].(int) != 1 {
+					t.Errorf("expected payload to have agent_count = 1")
+				}
+			}
+		}
+
+		if e.channel == "agent-1" {
+			if e.event.Type == "flow_spawn" {
+				foundSpawn = true
+				if e.event.Payload["instruction"] != "Instruction" {
+					t.Errorf("expected flow_spawn payload to carry instruction")
+				}
+			}
+		}
+
+		// flow_complete routes to the manager so it can summarize
+		if e.channel == "manager" {
+			if e.event.Type == "flow_complete" {
+				foundComplete = true
+				if e.event.Payload["passed"] != true {
+					t.Errorf("expected flow_complete payload to reflect pass state")
+				}
+			}
+		}
+	}
+
+	if !foundStart {
+		t.Errorf("failed to emit flow_start to 'manager' channel")
+	}
+	if !foundSpawn {
+		t.Errorf("failed to emit flow_spawn to 'agent-1' channel")
+	}
+	if !foundComplete {
+		t.Errorf("failed to emit flow_complete back to 'manager' channel")
 	}
 }

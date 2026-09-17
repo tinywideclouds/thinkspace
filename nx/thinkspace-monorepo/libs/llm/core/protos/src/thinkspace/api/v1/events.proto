@@ -38,11 +38,6 @@ message ChatStreamPayload {
   string text = 1;
 }
 
-message LogMessagePayload {
-  string level = 1;
-  string message = 2;
-}
-
 message AgentStreamPayload {
   int32 agent_id = 1;
   string text = 2;
@@ -69,7 +64,7 @@ message AvailableSpacesPayload {
 message PreviewContextPayload {
   string space_id = 1;
   string chat_id = 2;
-  string preview_id = 3; // Hash/UUID to fetch the full markdown file
+  string preview_id = 3; 
   string manager_system_prompt = 4;
   repeated string sticky_digests = 5;
   repeated string recent_history = 6;
@@ -78,29 +73,41 @@ message PreviewContextPayload {
 
 message FileContextMetaData {
   string path = 1;
-  string level = 2; // "structural", "skeleton", "full"
+  string level = 2; 
   int32 token_count = 3;
 }
 
-// The New Unified Flow Protocol
-message FlowEventPayload {
-  string flow_id = 1;
-  string type = 2;          // e.g., "flow_start", "flow_spawn", "flow_status", "flow_complete"
+// --- The New Unified Telemetry Protocol ---
+message TelemetryEvent {
+  string id = 1;            // UUID
+  string type = 2;          // e.g., "log", "flow_start", "flow_status"
   string timestamp = 3;     // RFC3339 formatted time string
-  
-  // Flow-Level Context
-  string task_id = 4;
-  int32 agent_count = 5;
-  
-  // Agent-Level Context
-  string agent_id = 6;
-  int32 agent_index = 7;
-  string instruction = 8;
-  string status = 9;        // e.g., "writing_code", "running_tests"
-  int32 attempt = 10;
-  string trace = 11;        // Compiler output or test failures
-  string candidate_id = 12;
-  bool passed = 13;
+  string message = 4;       // Human readable context
+  string summary = 5;       // Optional overarching task summary
+  string payload_json = 6;  // Arbitrary untyped contextual data
+}
+
+message TelemetryEventPayload {
+  string channel = 1;       // Destination UI Tab (e.g., "manager", "agent-1")
+  TelemetryEvent event = 2;
+}
+
+// --- Schema Registry for UI ---
+message FanOutPayload {
+  string flow_id = 1;
+  string task_id = 2;
+  int32 agent_count = 3;
+  int32 agent_index = 4;
+  string instruction = 5;
+  int32 attempt = 6;
+  string trace = 7;
+  string candidate_id = 8;
+  bool passed = 9;
+}
+
+message ManagerPayload {
+  string branch = 1;
+  string strategy = 2;
 }
 
 // --- Inbound Payloads (Client -> Server) ---
@@ -128,16 +135,13 @@ message WSEvent {
   oneof payload {
     // Outbound
     ChatStreamPayload chat_stream = 1;
-    LogMessagePayload log_message = 2;
+    TelemetryEventPayload telemetry_event = 2; // <-- Replaces old log/flow payloads
     AgentStreamPayload agent_stream = 6;
     RequestStrategyPayload request_strategy = 8;
     RequestReviewPayload request_review = 9;
     AvailableSpacesPayload available_spaces = 10;
     SyncHistoryPayload sync_history = 15;
     PreviewContextPayload preview_context = 16;
-
-    // The New Unified Flow Protocol
-    FlowEventPayload flow_event = 14;
 
     // Inbound
     SubmitPromptPayload submit_prompt = 11;

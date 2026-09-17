@@ -20,6 +20,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -118,7 +119,8 @@ func main() {
 	contextAssembler := session.NewContextAssembler()
 	userInterface := cli.NewTerminalUI()
 
-	emitter := flows.MultiFlowEmitter{flows.NewSlogEmitter(logger)}
+	// Inject the new Universal Telemetry Emitter
+	emitter := telemetry.MultiEmitter{telemetry.NewSlogEmitter(logger)}
 
 	coordinator := session.NewCoordinator(
 		logger,

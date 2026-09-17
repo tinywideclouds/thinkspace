@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
+
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -59,7 +63,14 @@ func (tm *TurnManager) LoadThreadState(ctx context.Context, spaceID, chatID stri
 	return thread, graph, manifest, nil
 }
 
-func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptText string, ui UserInterface, emitter flows.FlowEmitter) error {
+func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptText string, ui UserInterface, emitter telemetry.Emitter) error {
+	emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Initializing workspace turn...",
+	})
+
 	spaceState, err := tm.workspaceManager.GetSpaceState(spaceID)
 	if err != nil {
 		return fmt.Errorf("getting space state: %w", err)
@@ -92,6 +103,13 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		}
 	}
 
+	emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Assembling JIT context from workspace maps and ledger...",
+	})
+
 	graph, manifest, err := tm.playbackEngine.LoadState(ctx, thread)
 	if err != nil {
 		return fmt.Errorf("loading updated state: %w", err)
@@ -108,7 +126,6 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return fmt.Errorf("assembling context: %w", err)
 	}
 
-	// Dump exact full text payload to disk
 	var fullContext strings.Builder
 	fullContext.WriteString("=== SYSTEM PROMPT ===\n")
 	fullContext.WriteString(dynamicSystemPrompt)
@@ -124,7 +141,6 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		tm.logger.WarnContext(ctx, "failed to save context preview", "error", err)
 	}
 
-	// Pack UI Payload
 	var stickyDigests []string
 	for _, d := range manifest.Digests {
 		if d.IsSticky {
@@ -144,8 +160,15 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		ManagerSystemPrompt: thinkSpace.Config().ManagerSystemPrompt(),
 		StickyDigests:       stickyDigests,
 		RecentHistory:       recentHistory,
-		FileContexts:        nil, // We will map AST vs File inclusions here later
+		FileContexts:        nil,
 	}
+
+	emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Context assembled successfully. Yielding for frontend approval...",
+	})
 
 	if !ui.ReviewContext(turnCtx) {
 		tm.logger.Info("Turn cancelled by user during context review")

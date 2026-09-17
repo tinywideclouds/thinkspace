@@ -10,16 +10,64 @@ import (
 	"text/template"
 	"time"
 
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
+
+// FanOutPayload strictly types the agent execution context.
+type FanOutPayload struct {
+	FlowID      string
+	TaskID      string
+	AgentCount  int
+	AgentIndex  int
+	Instruction string
+	Attempt     int
+	Trace       string
+	CandidateID string
+	Passed      bool
+}
+
+// ToMap converts the strictly typed struct into the generic map telemetry requires.
+func (p FanOutPayload) ToMap() map[string]any {
+	m := make(map[string]any)
+	if p.FlowID != "" {
+		m["flow_id"] = p.FlowID
+	}
+	if p.TaskID != "" {
+		m["task_id"] = p.TaskID
+	}
+	if p.AgentCount != 0 {
+		m["agent_count"] = p.AgentCount
+	}
+	if p.AgentIndex != 0 {
+		m["agent_index"] = p.AgentIndex
+	}
+	if p.Instruction != "" {
+		m["instruction"] = p.Instruction
+	}
+	if p.Attempt != 0 {
+		m["attempt"] = p.Attempt
+	}
+	if p.Trace != "" {
+		m["trace"] = p.Trace
+	}
+	if p.CandidateID != "" {
+		m["candidate_id"] = p.CandidateID
+	}
+	m["passed"] = p.Passed
+	return m
+}
 
 type FlowContext struct {
 	FlowID         string
 	SpaceID        string
 	BaseAgentRules string
+	FlowSummary    string
 }
 
 type SubAgentTask struct {
@@ -56,7 +104,7 @@ func (f *FanOutFlow) Execute(
 	args map[string]any,
 	flowConfig FlowConfig,
 	flowContext FlowContext,
-	emitter FlowEmitter,
+	emitter telemetry.Emitter,
 	executor workspace.SubAgentExecutor,
 	verifier spaces.Verifier,
 ) (*FlowResult, error) {
@@ -70,12 +118,17 @@ func (f *FanOutFlow) Execute(
 		)
 	}
 
-	emitter.Emit(FlowEvent{
-		FlowID:     flowContext.FlowID,
-		Type:       FlowStart,
-		Timestamp:  time.Now(),
-		TaskID:     thread.ID,
-		AgentCount: len(tasks),
+	emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_start",
+		Timestamp: time.Now(),
+		Message:   "Starting parallel FanOut Flow",
+		Summary:   flowContext.FlowSummary,
+		Payload: FanOutPayload{
+			FlowID:     flowContext.FlowID,
+			TaskID:     thread.ID,
+			AgentCount: len(tasks),
+		}.ToMap(),
 	})
 
 	f.logger.Info("starting fanout flow", "flow_id", flowContext.FlowID, "agent_count", len(tasks))
@@ -183,20 +236,23 @@ func (f *FanOutFlow) runAgentPipeline(
 	retryTemplate *template.Template,
 	task SubAgentTask,
 	agentIndex int,
-	emitter FlowEmitter,
+	emitter telemetry.Emitter,
 	executor workspace.SubAgentExecutor,
 	verifier spaces.Verifier,
 ) agentResult {
 
 	agentLogger := f.logger.With("flow_id", flowContext.FlowID, "agent_id", task.AgentID)
 
-	emitter.Emit(FlowEvent{
-		FlowID:      flowContext.FlowID,
-		Type:        FlowSpawn,
-		Timestamp:   time.Now(),
-		AgentID:     task.AgentID,
-		AgentIndex:  agentIndex,
-		Instruction: task.Instruction,
+	emitter.Emit(task.AgentID, telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_spawn",
+		Timestamp: time.Now(),
+		Message:   "Agent spawned and parsing context",
+		Payload: FanOutPayload{
+			FlowID:      flowContext.FlowID,
+			AgentIndex:  agentIndex,
+			Instruction: task.Instruction,
+		}.ToMap(),
 	})
 
 	candidateID := fmt.Sprintf("%s-%s-%s", thread.ID, flowContext.FlowID, task.AgentID)
@@ -212,13 +268,15 @@ func (f *FanOutFlow) runAgentPipeline(
 	workbenchText, err := workbench.Build(ctx, sandbox, task.TargetFiles)
 	if err != nil {
 		agentLogger.Error("manager requested invalid target files", "error", err)
-		emitter.Emit(FlowEvent{
-			FlowID:     flowContext.FlowID,
-			Type:       FlowError,
-			Timestamp:  time.Now(),
-			AgentID:    task.AgentID,
-			AgentIndex: agentIndex,
-			Trace:      err.Error(),
+		emitter.Emit(task.AgentID, telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "flow_error",
+			Timestamp: time.Now(),
+			Message:   err.Error(),
+			Payload: FanOutPayload{
+				FlowID:     flowContext.FlowID,
+				AgentIndex: agentIndex,
+			}.ToMap(),
 		})
 		return agentResult{err: err}
 	}
@@ -249,7 +307,6 @@ func (f *FanOutFlow) runAgentPipeline(
 		StateDelta:        "",
 	}
 
-	// Always deliver for review, even if failed. The Manager must see the failure.
 	if err := sandbox.DeliverForReview(ctx); err != nil {
 		agentLogger.Error("failed to deliver candidate", "error", err)
 		return agentResult{err: err}
@@ -258,15 +315,18 @@ func (f *FanOutFlow) runAgentPipeline(
 	diff, _ := service.ReadCandidate(ctx, thread, candidateID)
 	record.StateDelta = diff
 
-	emitter.Emit(FlowEvent{
-		FlowID:      flowContext.FlowID,
-		Type:        FlowComplete,
-		Timestamp:   time.Now(),
-		AgentID:     task.AgentID,
-		AgentIndex:  agentIndex,
-		CandidateID: candidateID,
-		Passed:      passed,
-		Trace:       finalTrace,
+	emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_complete",
+		Timestamp: time.Now(),
+		Message:   "Flow pipeline completed",
+		Payload: FanOutPayload{
+			FlowID:      flowContext.FlowID,
+			AgentIndex:  agentIndex,
+			CandidateID: candidateID,
+			Passed:      passed,
+			Trace:       finalTrace,
+		}.ToMap(),
 	})
 
 	return agentResult{candidateID: fmt.Sprintf("candidate/%s", candidateID), err: nil, passed: passed, record: record}
@@ -280,7 +340,7 @@ func (f *FanOutFlow) executeSingleAttempt(
 	task SubAgentTask,
 	agentIndex int,
 	attempt int,
-	emitter FlowEmitter,
+	emitter telemetry.Emitter,
 	executor workspace.SubAgentExecutor,
 	verifier spaces.Verifier,
 	agentLogger *slog.Logger,
@@ -293,8 +353,6 @@ func (f *FanOutFlow) executeSingleAttempt(
 	}
 
 	if attempt > 1 {
-		agentLogger.Info("compiling retry prompt with previous attempt context")
-
 		var previousAttempt string
 		if traceBytes, err := sandbox.ReadFile(ctx, "trace.jsonl"); err == nil && len(traceBytes) > 0 {
 			lines := strings.Split(strings.TrimSpace(string(traceBytes)), "\n")
@@ -323,62 +381,57 @@ func (f *FanOutFlow) executeSingleAttempt(
 		})
 
 		briefing.Instruction = buf.String()
-		agentLogger.Info("executing retry", "retry_instruction", briefing.Instruction)
 	}
 
-	agentLogger.Info("=== SUB-AGENT PAYLOAD ===",
-		"context_digest_length", len(briefing.ContextDigest),
-		"instruction_length", len(briefing.Instruction),
-	)
-	agentLogger.Debug("--- SUB-AGENT CONTEXT DIGEST ---\n" + briefing.ContextDigest)
-	agentLogger.Debug("--- SUB-AGENT INSTRUCTION ---\n" + briefing.Instruction)
-
-	emitter.Emit(FlowEvent{
-		FlowID:      flowContext.FlowID,
-		Type:        FlowStatus,
-		Timestamp:   time.Now(),
-		AgentID:     task.AgentID,
-		AgentIndex:  agentIndex,
-		Status:      "executing_instructions",
-		Attempt:     attempt,
-		Instruction: briefing.Instruction,
+	emitter.Emit(task.AgentID, telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_status",
+		Timestamp: time.Now(),
+		Message:   "executing_instructions",
+		Payload: FanOutPayload{
+			FlowID:     flowContext.FlowID,
+			AgentIndex: agentIndex,
+			Attempt:    attempt,
+		}.ToMap(),
 	})
 
 	err := executor(ctx, briefing, sandbox, agentIndex, nil)
 	if err != nil {
-		agentLogger.Error("execution failed", "attempt", attempt, "error", err)
 		return false, fmt.Sprintf("Execution Error: %v", err)
 	}
 
 	_ = sandbox.ApplyDraft(ctx, fmt.Sprintf("attempt %d", attempt))
 
-	emitter.Emit(FlowEvent{
-		FlowID:     flowContext.FlowID,
-		Type:       FlowStatus,
-		Timestamp:  time.Now(),
-		AgentID:    task.AgentID,
-		AgentIndex: agentIndex,
-		Status:     "running_tests",
-		Attempt:    attempt,
+	emitter.Emit(task.AgentID, telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_status",
+		Timestamp: time.Now(),
+		Message:   "running_tests",
+		Payload: FanOutPayload{
+			FlowID:     flowContext.FlowID,
+			AgentIndex: agentIndex,
+			Attempt:    attempt,
+		}.ToMap(),
 	})
 
 	err = verifier.Verify(ctx, sandbox)
 	if err == nil {
-		agentLogger.Info("verification passed")
 		return true, ""
 	}
 
 	finalTrace = err.Error()
-	agentLogger.Warn("verification failed", "attempt", attempt, "trace", finalTrace)
 
-	emitter.Emit(FlowEvent{
-		FlowID:     flowContext.FlowID,
-		Type:       FlowError,
-		Timestamp:  time.Now(),
-		AgentID:    task.AgentID,
-		AgentIndex: agentIndex,
-		Attempt:    attempt,
-		Trace:      finalTrace,
+	emitter.Emit(task.AgentID, telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_error",
+		Timestamp: time.Now(),
+		Message:   "verification failed",
+		Payload: FanOutPayload{
+			FlowID:     flowContext.FlowID,
+			AgentIndex: agentIndex,
+			Attempt:    attempt,
+			Trace:      finalTrace,
+		}.ToMap(),
 	})
 
 	return false, finalTrace

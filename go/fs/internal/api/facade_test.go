@@ -5,12 +5,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
 func TestEventFacade_UnmarshalInbound_SelectStrategy(t *testing.T) {
@@ -172,24 +173,26 @@ func TestEventFacade_MarshalPreviewContext(t *testing.T) {
 	}
 }
 
-func TestEventFacade_MarshalFlowEvent(t *testing.T) {
+func TestEventFacade_MarshalTelemetryEvent(t *testing.T) {
 	facade := api.NewEventFacade()
 	testTime := time.Date(2026, 8, 28, 10, 47, 45, 0, time.UTC)
+	eventID := uuid.NewV7()
 
-	domainEvent := flows.FlowEvent{
-		FlowID:      "flow-123",
-		Type:        flows.FlowError,
-		Timestamp:   testTime,
-		AgentID:     "agent-1",
-		Attempt:     2,
-		Trace:       "compile error: undefined variable",
-		CandidateID: "cand-456",
-		Passed:      false,
+	domainEvent := telemetry.Event{
+		ID:        eventID,
+		Type:      "flow_error",
+		Message:   "verification failed",
+		Summary:   "Flow summary",
+		Timestamp: testTime,
+		Payload: map[string]any{
+			"agent_id": "agent-1",
+			"attempt":  2,
+		},
 	}
 
-	data, err := facade.MarshalFlowEvent(domainEvent)
+	data, err := facade.MarshalTelemetryEvent("agent-1", domainEvent)
 	if err != nil {
-		t.Fatalf("failed to marshal flow event: %v", err)
+		t.Fatalf("failed to marshal telemetry event: %v", err)
 	}
 
 	var result map[string]interface{}
@@ -197,24 +200,41 @@ func TestEventFacade_MarshalFlowEvent(t *testing.T) {
 		t.Fatalf("failed to parse protojson output: %v", err)
 	}
 
-	flowEventRaw, ok := result["flowEvent"].(map[string]interface{})
+	payloadRaw, ok := result["telemetryEvent"].(map[string]interface{})
 	if !ok {
-		t.Fatalf("expected 'flowEvent' wrapper in JSON output, got: %s", string(data))
+		t.Fatalf("expected 'telemetryEvent' wrapper in JSON output, got: %s", string(data))
 	}
 
-	if flowEventRaw["flowId"] != "flow-123" {
-		t.Errorf("expected flowId 'flow-123', got %v", flowEventRaw["flowId"])
+	if payloadRaw["channel"] != "agent-1" {
+		t.Errorf("expected channel 'agent-1', got %v", payloadRaw["channel"])
 	}
-	if flowEventRaw["type"] != string(flows.FlowError) {
-		t.Errorf("expected type 'flow_error', got %v", flowEventRaw["type"])
+
+	eventRaw, ok := payloadRaw["event"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected nested 'event' struct in JSON output")
 	}
-	if flowEventRaw["trace"] != "compile error: undefined variable" {
-		t.Errorf("expected trace payload, got %v", flowEventRaw["trace"])
+
+	if eventRaw["id"] != eventID.String() {
+		t.Errorf("expected id %s, got %v", eventID.String(), eventRaw["id"])
+	}
+	if eventRaw["type"] != "flow_error" {
+		t.Errorf("expected type 'flow_error', got %v", eventRaw["type"])
+	}
+	if eventRaw["summary"] != "Flow summary" {
+		t.Errorf("expected summary, got %v", eventRaw["summary"])
 	}
 
 	expectedTime := testTime.Format(time.RFC3339)
-	if flowEventRaw["timestamp"] != expectedTime {
-		t.Errorf("expected timestamp %s, got %v", expectedTime, flowEventRaw["timestamp"])
+	if eventRaw["timestamp"] != expectedTime {
+		t.Errorf("expected timestamp %s, got %v", expectedTime, eventRaw["timestamp"])
+	}
+
+	payloadJSON, ok := eventRaw["payloadJson"].(string)
+	if !ok {
+		t.Fatalf("expected payloadJson string, got %v", eventRaw["payloadJson"])
+	}
+	if !strings.Contains(payloadJSON, `"agent_id":"agent-1"`) {
+		t.Errorf("expected JSON payload to contain nested agent_id, got %s", payloadJSON)
 	}
 }
 

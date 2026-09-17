@@ -18,6 +18,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -39,7 +40,7 @@ func (f *dummyFlow) Execute(
 	arguments map[string]any,
 	flowConfig flows.FlowConfig,
 	flowContext flows.FlowContext,
-	emitter flows.FlowEmitter,
+	emitter telemetry.Emitter,
 	executor workspace.SubAgentExecutor,
 	verifier spaces.Verifier,
 ) (*flows.FlowResult, error) {

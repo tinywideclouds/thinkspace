@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
+
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"google.golang.org/genai"
 )
@@ -24,7 +27,24 @@ const (
 	StrategyRefine
 )
 
-// TurnContext captures the state sent to the UI for inspection before LLM execution.
+// ManagerPayload strictly types the manager's observability context.
+type ManagerPayload struct {
+	Branch   string
+	Strategy string
+}
+
+// ToMap converts the strictly typed struct into the generic map telemetry requires.
+func (p ManagerPayload) ToMap() map[string]any {
+	m := make(map[string]any)
+	if p.Branch != "" {
+		m["branch"] = p.Branch
+	}
+	if p.Strategy != "" {
+		m["strategy"] = p.Strategy
+	}
+	return m
+}
+
 type TurnContext struct {
 	SpaceID             string
 	ChatID              string
@@ -54,7 +74,7 @@ type Coordinator struct {
 	llmAdapter        *llm.Adapter
 	executor          workspace.SubAgentExecutor
 	fanOutFlow        flows.Flow
-	emitter           flows.FlowEmitter
+	emitter           telemetry.Emitter
 	spaceID           string
 	baseAgentRules    string
 	flowConfiguration flows.FlowConfig
@@ -66,7 +86,7 @@ func NewCoordinator(
 	llmAdapter *llm.Adapter,
 	executor workspace.SubAgentExecutor,
 	fanOutFlow flows.Flow,
-	emitter flows.FlowEmitter,
+	emitter telemetry.Emitter,
 	spaceID string,
 	baseAgentRules string,
 	flowConfiguration flows.FlowConfig,
@@ -99,6 +119,13 @@ func (c *Coordinator) ExecuteTurn(
 	maxIterations := 3
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
+		c.emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "log",
+			Timestamp: time.Now(),
+			Message:   "Manager is analyzing context and formulating a plan...",
+		})
+
 		stream := c.llmAdapter.GenerateStream(
 			turnContext,
 			managerModel,
@@ -137,6 +164,12 @@ func (c *Coordinator) ExecuteTurn(
 		}
 
 		if len(interceptedTools) == 0 {
+			c.emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "log",
+				Timestamp: time.Now(),
+				Message:   "Manager has concluded its response.",
+			})
 			break
 		}
 
@@ -145,6 +178,12 @@ func (c *Coordinator) ExecuteTurn(
 		if call.Name == "query_lens" {
 			tag, _ := call.Args["tag"].(string)
 			c.logger.InfoContext(turnContext, "executing query_lens", "tag", tag)
+			c.emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "log",
+				Timestamp: time.Now(),
+				Message:   fmt.Sprintf("Manager invoked query_lens for tag: %s", tag),
+			})
 			userInterface.OnTextChunk(fmt.Sprintf("\n\n🔍 **Searching memory for #%s...**\n", tag))
 
 			var toolResponse strings.Builder
@@ -178,9 +217,21 @@ func (c *Coordinator) ExecuteTurn(
 		}
 
 		if call.Name == "propose_change" {
+			c.emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "log",
+				Timestamp: time.Now(),
+				Message:   "Manager is proposing changes and delegating to sub-agents...",
+			})
 			err := c.executeProposeChange(turnContext, thread, thinkSpace, history, userInterface, call, managerModel)
 			if err != nil {
 				c.logger.WarnContext(turnContext, "tool execution failed, bouncing back to manager", "error", err)
+				c.emitter.Emit("manager", telemetry.Event{
+					ID:        uuid.NewV7(),
+					Type:      "error",
+					Timestamp: time.Now(),
+					Message:   fmt.Sprintf("Delegation failed: %v", err),
+				})
 				userInterface.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** %v\nAsking Manager to self-correct...\n", err))
 
 				history = append(history, &genai.Content{
@@ -209,10 +260,16 @@ func (c *Coordinator) executeProposeChange(
 	var flowSummary strings.Builder
 	uniqueFlowID := fmt.Sprintf("flow-%s", uuid.NewV7().String())
 
+	managerSummary, _ := call.Args["flow_summary"].(string)
+	if managerSummary == "" {
+		managerSummary = "Executing delegated sub-agent tasks"
+	}
+
 	flowContext := flows.FlowContext{
 		FlowID:         uniqueFlowID,
 		SpaceID:        c.spaceID,
 		BaseAgentRules: c.baseAgentRules,
+		FlowSummary:    managerSummary,
 	}
 
 	var assignedTags []string
@@ -228,6 +285,13 @@ func (c *Coordinator) executeProposeChange(
 	if thinkSpace.Config().Roles.Worker.RetryPrompt != "" {
 		activeFlowConfig.RetryPrompt = thinkSpace.Config().Roles.Worker.RetryPrompt
 	}
+
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   fmt.Sprintf("Initiating parallel FanOut Flow: %s", uniqueFlowID),
+	})
 
 	result, err := c.fanOutFlow.Execute(
 		turnContext,
@@ -248,6 +312,12 @@ func (c *Coordinator) executeProposeChange(
 	}
 
 	if len(result.Branches) == 0 {
+		c.emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "log",
+			Timestamp: time.Now(),
+			Message:   "FanOut flow completed with zero valid branches.",
+		})
 		return nil
 	}
 
@@ -262,6 +332,12 @@ func (c *Coordinator) executeProposeChange(
 		_ = c.workspaceService.LogProposal(turnContext, thread, candidateID, fmt.Sprintf("%s %s via sub-agent fan-out.", statusMsg, branch.CandidateID), assignedTags)
 	}
 
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Awaiting user triage strategy selection...",
+	})
 	branchesToReview := branchNames
 	strategy := userInterface.ChooseNextStep()
 
@@ -271,6 +347,14 @@ func (c *Coordinator) executeProposeChange(
 		StrategyReview: "Assisted Review",
 		StrategyRefine: "Refine (Manager synthesized final version)",
 	}
+
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   fmt.Sprintf("User selected strategy: %s", strategyNames[strategy]),
+		Payload:   ManagerPayload{Strategy: strategyNames[strategy]}.ToMap(),
+	})
 
 	_ = c.workspaceService.LogUserMessage(turnContext, thread, fmt.Sprintf("[User selected triage strategy: %s]", strategyNames[strategy]))
 	flowSummary.WriteString(fmt.Sprintf("- User selected triage strategy: %s\n", strategyNames[strategy]))
@@ -302,6 +386,13 @@ func (c *Coordinator) executeProposeChange(
 				continue
 			}
 
+			c.emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "log",
+				Timestamp: time.Now(),
+				Message:   fmt.Sprintf("Awaiting user review for candidate: %s", branch),
+				Payload:   ManagerPayload{Branch: branch}.ToMap(),
+			})
 			accept := userInterface.ReviewCandidate(branch)
 			reason, status := "Rejected via triage", "REJECTED"
 			if accept {
@@ -314,6 +405,12 @@ func (c *Coordinator) executeProposeChange(
 		}
 	}
 
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Turn complete. Manager is providing final summary.",
+	})
 	userInterface.OnTextChunk("\n\n🤖 **Manager summarizing turn...**\n")
 	wrapUpPrompt := fmt.Sprintf(
 		"The sub-agent orchestration flow is now complete. Here is the system trace of the outcome:\n\n%s\n\n"+
@@ -399,6 +496,12 @@ func (c *Coordinator) executeLLMReviewPhase(
 		Parts: []*genai.Part{{Text: llmPrompt}},
 	})
 
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Manager is analyzing candidate diffs...",
+	})
 	userInterface.OnTextChunk("\n\n🤖 **Manager evaluating candidates...**\n")
 
 	managerModel := thinkSpace.Config().Roles.Manager.Model
@@ -428,6 +531,12 @@ func (c *Coordinator) executeLLMReviewPhase(
 		return outputBranches
 	}
 
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Manager synthesizing final refinement candidate...",
+	})
 	userInterface.OnTextChunk("\n\n🚀 **Synthesizing final candidate based on evaluation...**\n")
 
 	refinementArguments := map[string]any{
@@ -466,6 +575,12 @@ func (c *Coordinator) executeLLMReviewPhase(
 
 	if err != nil {
 		c.logger.ErrorContext(ctx, "refinement flow failed", "error", err)
+		c.emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "error",
+			Timestamp: time.Now(),
+			Message:   fmt.Sprintf("Refinement failed: %v", err),
+		})
 		userInterface.OnTextChunk("\n\n⚠️ Refinement orchestration failed. Falling back to original candidates.\n")
 		return outputBranches
 	}
