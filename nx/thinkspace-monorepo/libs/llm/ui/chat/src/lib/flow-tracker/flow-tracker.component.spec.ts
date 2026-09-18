@@ -41,7 +41,9 @@ describe('FlowTrackerComponent', () => {
       ])
     });
 
+    componentRef.setInput('systemLogs', []);
     componentRef.setInput('flows', mockMap);
+    componentRef.setInput('retainLogs', false);
     fixture.detectChanges();
   });
 
@@ -53,11 +55,9 @@ describe('FlowTrackerComponent', () => {
     expect(flows[0].agentsArray[0].agentId).toBe('agent-1');
   });
 
-  it('should render the active flows as a terminal feed', () => {
+  it('should render the dynamic agent status in the tab header', () => {
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.textContent).toContain('Flow: 1');
-    expect(compiled.textContent).toContain('Agent 1');
-    expect(compiled.textContent).toContain('Write a loop');
-    expect(compiled.textContent).toContain('[Attempt 1] Status: running_tests');
+    // Verify the tab button text formatted the status "running_tests" to "running tests"
+    expect(compiled.textContent).toContain('🤖 Agent 1 - running tests ⏳');
   });
 });

@@ -1,20 +1,3 @@
-export interface DomainFlowEvent {
-  type: 'flow_event';
-  flowId: string;
-  eventType: string;
-  timestamp: string;
-  taskId: string;
-  agentCount: number;
-  agentId: string;
-  agentIndex: number;
-  instruction: string;
-  status: string;
-  attempt: number;
-  trace: string;
-  candidateId: string;
-  passed: boolean;
-}
-
 export interface SpaceInfo {
   id: string;
   name: string;
@@ -45,20 +28,30 @@ export interface DomainPreviewContext {
   chatId: string;
   managerSystemPrompt: string;
   stickyDigests: string[];
-  recentHistory: string[]; // <-- Added missing property
+  recentHistory: string[];
   fileContexts: FileContextMetaData[];
+}
+
+export interface DomainTelemetryEvent {
+  type: 'telemetry_event';
+  channel: string;
+  id: string;
+  eventType: string;
+  timestamp: string;
+  message: string;
+  summary: string;
+  payload: any;
 }
 
 export type DomainEvent =
   | { type: 'chat_stream'; text: string }
-  | { type: 'log_message'; level: string; message: string }
   | { type: 'request_strategy'; active: boolean }
   | { type: 'request_review'; branch: string }
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
   | { type: 'sync_history'; recentEvents: DomainLedgerEvent[]; digests: Record<string, DomainDigestMeta> }
   | { type: 'preview_context'; context: DomainPreviewContext }
   | { type: 'agent_stream'; agentId: number; text: string }
-  | DomainFlowEvent;
+  | DomainTelemetryEvent;
 
 export enum DomainDelegationStrategy {
   SKIP = 1,

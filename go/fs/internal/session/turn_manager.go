@@ -7,14 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"uuid"
-
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"uuid"
 )
 
 type TurnManager struct {
@@ -186,7 +185,7 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		thinkSpace.Patcher(),
 	)
 
-	coordinator := NewCoordinator(
+	delegator := NewDelegator(
 		tm.logger,
 		workspaceService,
 		tm.llmAdapter,
@@ -196,6 +195,14 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		spaceID,
 		spaceConfig.WorkerSystemPrompt(),
 		flowConfig,
+	)
+
+	coordinator := NewCoordinator(
+		tm.logger,
+		workspaceService,
+		tm.llmAdapter,
+		emitter,
+		delegator,
 	)
 
 	tm.logger.Info("=== MANAGER CONTEXT ASSEMBLY COMPLETE ===",

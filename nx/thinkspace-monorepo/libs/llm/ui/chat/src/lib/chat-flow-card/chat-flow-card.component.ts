@@ -9,7 +9,7 @@ import { FlowState } from '@org/llm-state-chat';
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         <div>
           <strong style="color: #495057; display: block; font-size: 14px;">
-            {{ flow()?.status === 'running' ? '⏳' : '✅' }} Orchestration Flow
+            {{ flow()?.status === 'running' ? '⏳' : '✅' }} {{ summary() }} {{ flow()?.status === 'completed' ? '(Completed)' : '' }}
           </strong>
         </div>
         <button 
@@ -19,12 +19,12 @@ import { FlowState } from '@org/llm-state-chat';
         </button>
       </div>
       
-      <!-- Live Agent Tickers inside the chat feed -->
       @if (flow()?.status === 'running') {
         <div style="display: flex; flex-direction: column; gap: 4px; padding: 8px; background: #fff; border-radius: 4px; border: 1px dashed #adb5bd;">
           @for (agent of agentsArray(); track agent.agentId) {
             <div style="font-size: 12px; color: #495057; font-family: monospace;">
-              <span style="font-weight: bold;">Agent {{ agent.agentIndex }}:</span> {{ agent.status }}
+              <span style="font-weight: bold;">Agent {{ agent.agentIndex }}:</span> 
+              <span style="text-transform: capitalize;">{{ agent.status.split('_').join(' ') }}</span>
             </div>
           }
         </div>
@@ -34,6 +34,7 @@ import { FlowState } from '@org/llm-state-chat';
 })
 export class ChatFlowCardComponent {
   flow = input.required<FlowState | undefined>();
+  summary = input<string>('Orchestration Flow');
   inspect = output<string>();
 
   agentsArray = computed(() => {

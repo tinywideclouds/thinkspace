@@ -1,7 +1,7 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { TransportService } from '@org/llm-core-transport';
-import { LlmFacade, DomainEvent, DomainDelegationStrategy, DomainFlowEvent, DomainPreviewContext } from '@org/llm-core-facade';
+import { LlmFacade, DomainEvent, DomainDelegationStrategy, DomainTelemetryEvent, DomainPreviewContext } from '@org/llm-core-facade';
 import { firstValueFrom } from 'rxjs';
 import { WorkspaceStateService } from './workspace-state.service';
 
@@ -71,8 +71,8 @@ export class ChatStateService {
   public pendingReviewBranch = signal<string | null>(null);
   public pendingContextReview = signal<DomainPreviewContext | null>(null);
   
-  // UX Preferences
   public autoApproveContext = signal<boolean>(true);
+  public retainLogs = signal<boolean>(false);
   public connected = signal<boolean>(false);
   public inspectedReceipt = signal<string | null>(null);
 
@@ -110,6 +110,18 @@ export class ChatStateService {
     this.inspectedReceipt.set(null);
   }
 
+  private executeTurnAction(): void {
+    if (!this.retainLogs()) {
+      this.systemLogs.set([]);
+    }
+    // Agents are strictly ephemeral; clear them for the new turn.
+    this.flowStates.set(new Map());
+  }
+
+  public manualClearLogs(): void {
+    this.systemLogs.set([]);
+  }
+
   public submitPrompt(text: string): void {
     const spaceId = this.workspaceStateService.activeSpaceId();
     const chatId = this.workspaceStateService.activeChatId();
@@ -119,10 +131,8 @@ export class ChatStateService {
       return;
     }
 
-    // Isolate telemetry to the current turn
-    this.systemLogs.set([]);
+    this.executeTurnAction();
     
-    // Instant UI Feedback
     this.appendCoreChat('user', text);
     this.appendCoreChat('system', 'Manager Thinking...');
     
@@ -131,12 +141,33 @@ export class ChatStateService {
   }
 
   public submitContextApproval(approved: boolean): void {
+    this.executeTurnAction();
     this.pendingContextReview.set(null);
+    
     if (!approved) {
       this.appendSystemLog('INFO', 'Turn aborted by user during context review.');
+      this.coreChat.update(chatHistory => chatHistory.filter(c => !(c.source === 'system' && c.content.includes('Thinking'))));
     }
+    
     const protocolBufferEvent = LlmFacade.createApproveContext(approved);
     this.transportService.send(protocolBufferEvent);
+  }
+
+  public selectStrategy(strategy: DomainDelegationStrategy): void {
+    this.executeTurnAction();
+    this.pendingStrategy.set(false);
+    this.appendCoreChat('user', `Selected Strategy: ${DomainDelegationStrategy[strategy]}`);
+    this.transportService.send(LlmFacade.createSelectStrategy(strategy));
+  }
+
+  public submitReview(accepted: boolean): void {
+    this.executeTurnAction();
+    const branch = this.pendingReviewBranch();
+    if (!branch) return;
+    
+    this.pendingReviewBranch.set(null);
+    this.appendCoreChat('user', `Review for ${branch}: ${accepted ? 'ACCEPTED' : 'REJECTED'}`);
+    this.transportService.send(LlmFacade.createReviewDecision(branch, accepted));
   }
 
   public async inspectFlow(flowId: string): Promise<void> {
@@ -155,6 +186,25 @@ export class ChatStateService {
     }
   }
 
+  public async copyFullContextPreview(previewId: string): Promise<void> {
+    const spaceId = this.workspaceStateService.activeSpaceId();
+    const chatId = this.workspaceStateService.activeChatId();
+
+    if (!spaceId || !chatId) return;
+
+    try {
+      const url = `/api/previews/${encodeURIComponent(chatId)}/${encodeURIComponent(previewId)}?space=${encodeURIComponent(spaceId)}`;
+      const markdownData = await firstValueFrom(this.httpClient.get(url, { responseType: 'text' }));
+      
+      await navigator.clipboard.writeText(markdownData);
+      this.appendSystemLog('INFO', `Successfully copied full context payload (${previewId}) to clipboard.`);
+      
+    } catch (error) {
+      console.error(`Failed to fetch preview ${previewId}`, error);
+      this.appendSystemLog('ERROR', `Failed to copy full context payload.`);
+    }
+  }
+
   private handleEvent(event: DomainEvent): void {
     switch (event.type) {
       case 'preview_context':
@@ -167,11 +217,8 @@ export class ChatStateService {
       case 'chat_stream':
         this.appendToLastModelMessage(event.text);
         break;
-      case 'log_message':
-        this.appendSystemLog(event.level, event.message);
-        break;
-      case 'flow_event':
-        this.handleFlowEvent(event);
+      case 'telemetry_event':
+        this.handleTelemetryEvent(event);
         break;
       case 'request_strategy':
         this.pendingStrategy.set(event.active);
@@ -182,83 +229,117 @@ export class ChatStateService {
     }
   }
 
-  private handleFlowEvent(event: DomainFlowEvent): void {
-    this.flowStates.update(currentFlows => {
-      const updatedMap = new Map(currentFlows);
-      let flow = updatedMap.get(event.flowId);
+  private handleTelemetryEvent(event: DomainTelemetryEvent): void {
+    const payload = event.payload || {};
+    const flowId = payload.flow_id;
 
-      if (event.eventType === 'flow_start') {
-        flow = {
-          flowId: event.flowId,
-          taskId: event.taskId,
-          agentCount: event.agentCount,
-          completedCount: 0,
-          status: 'running',
-          agents: new Map()
-        };
-        updatedMap.set(event.flowId, flow);
-
-        this.coreChat.update(chatHistory => [...chatHistory, { 
-          id: crypto.randomUUID(), 
-          source: 'flow_card', 
-          content: 'Orchestrating Agents...', 
-          flowId: event.flowId,
-          status: 'running'
-        }]);
+    if (event.channel === 'manager') {
+      if (event.eventType === 'log' || event.eventType === 'error') {
+        const level = event.eventType === 'error' ? 'ERROR' : 'INFO';
+        this.appendSystemLog(level, event.message);
       }
 
-      if (!flow) return updatedMap;
+      if (event.eventType === 'flow_start') {
+        this.flowStates.update(currentFlows => {
+          const updatedMap = new Map(currentFlows);
+          updatedMap.set(flowId, {
+            flowId: flowId,
+            taskId: payload.task_id || '',
+            agentCount: payload.agent_count || 1,
+            completedCount: 0,
+            status: 'running',
+            agents: new Map()
+          });
+          return updatedMap;
+        });
 
-      if (event.agentId) {
-        const agent = flow.agents.get(event.agentId) || {
-          agentId: event.agentId,
-          agentIndex: event.agentIndex || 0,
-          instruction: '',
-          status: 'starting',
-          attempt: 1,
-          trace: '',
-          passed: false,
-          timeline: []
-        };
-
-        if (event.instruction) agent.instruction = event.instruction;
-
-        if (event.status && event.status !== agent.status) {
-          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Status: ${event.status}`, isError: false });
-          agent.status = event.status;
-          
-          // Re-trigger coreChat update to refresh live FlowCard
-          this.coreChat.update(chat => [...chat]);
-        }
-        
-        if (event.trace) {
-          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Error: ${event.trace}`, isError: true });
-          agent.trace = event.trace;
-        }
-
-        if (event.attempt) agent.attempt = event.attempt;
-        if (event.passed !== undefined) agent.passed = event.passed;
-
-        flow.agents.set(event.agentId, agent);
+        this.coreChat.update(chatHistory => {
+          const cleanHistory = chatHistory.filter(c => !(c.source === 'system' && c.content.includes('Thinking')));
+          return [...cleanHistory, { 
+            id: crypto.randomUUID(), 
+            source: 'flow_card', 
+            content: event.summary || 'Orchestrating Agents...', 
+            flowId: flowId,
+            status: 'running'
+          }];
+        });
       }
 
       if (event.eventType === 'flow_complete') {
-        flow.completedCount++;
-        if (flow.completedCount === flow.agentCount && flow.status !== 'completed') {
-          flow.status = 'completed';
-          this.coreChat.update(chatHistory => chatHistory.map(item => 
-            item.flowId === event.flowId ? { ...item, status: 'completed' } : item
-          ));
-        }
+        this.flowStates.update(currentFlows => {
+          const updatedMap = new Map(currentFlows);
+          const flow = updatedMap.get(flowId);
+          if (flow) {
+            flow.completedCount++;
+            if (flow.completedCount === flow.agentCount) {
+              updatedMap.set(flowId, { ...flow, status: 'completed' });
+              this.coreChat.update(chatHistory => chatHistory.map(item => 
+                item.flowId === flowId ? { ...item, status: 'completed' } : item
+              ));
+            } else {
+              updatedMap.set(flowId, { ...flow });
+            }
+          }
+          return updatedMap;
+        });
       }
+    }
 
-      return updatedMap;
-    });
+    if (flowId) {
+      const agentIndex = payload.agent_index;
+      if (agentIndex !== undefined) {
+        this.flowStates.update(currentFlows => {
+          const updatedMap = new Map(currentFlows);
+          const flow = updatedMap.get(flowId);
+          if (!flow) return updatedMap;
+
+          const updatedAgents = new Map(flow.agents);
+          const agentId = event.channel.startsWith('agent-') ? event.channel : `agent-${agentIndex}`;
+          
+          const existingAgent = updatedAgents.get(agentId);
+          const agent: FlowAgentState = existingAgent 
+            ? { ...existingAgent, timeline: [...existingAgent.timeline] } 
+            : {
+              agentId,
+              agentIndex,
+              instruction: '',
+              status: 'starting',
+              attempt: 1,
+              trace: '',
+              passed: false,
+              timeline: []
+            };
+
+          if (payload.instruction) agent.instruction = payload.instruction;
+          if (payload.attempt) agent.attempt = payload.attempt;
+          if (payload.passed !== undefined) agent.passed = payload.passed;
+
+          if (event.eventType === 'flow_error') {
+            agent.trace = payload.trace || event.message;
+            agent.status = 'failed';
+            agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Error: ${agent.trace}`, isError: true });
+          } else if (event.eventType === 'flow_status') {
+            const statusMsg = event.message || 'working';
+            if (agent.status !== statusMsg) {
+              agent.status = statusMsg;
+              agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Status: ${statusMsg}`, isError: false });
+            }
+          } else if (event.eventType === 'flow_complete') {
+            agent.status = payload.passed ? 'passed' : 'failed';
+            agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Completed: ${agent.status}`, isError: !payload.passed });
+          }
+
+          updatedAgents.set(agentId, agent);
+          updatedMap.set(flowId, { ...flow, agents: updatedAgents });
+          
+          return updatedMap;
+        });
+      }
+    }
   }
 
   private appendCoreChat(source: ChatItem['source'], content: string): void {
     this.coreChat.update(chatHistory => {
-      // Clean up the "Thinking..." system message before appending real responses
       const cleanHistory = chatHistory.filter(c => !(c.source === 'system' && c.content.includes('Thinking')));
       return [...cleanHistory, { id: crypto.randomUUID(), source, content }];
     });
@@ -280,38 +361,5 @@ export class ChatStateService {
 
   private appendSystemLog(level: string, message: string): void {
     this.systemLogs.update(logs => [...logs, { id: crypto.randomUUID(), timestamp: Date.now(), level, message }]);
-  }
-
-  public selectStrategy(strategy: DomainDelegationStrategy): void {
-    this.pendingStrategy.set(false);
-    this.appendCoreChat('user', `Selected Strategy: ${DomainDelegationStrategy[strategy]}`);
-    this.transportService.send(LlmFacade.createSelectStrategy(strategy));
-  }
-
-  public submitReview(accepted: boolean): void {
-    const branch = this.pendingReviewBranch();
-    if (!branch) return;
-    this.pendingReviewBranch.set(null);
-    this.appendCoreChat('user', `Review for ${branch}: ${accepted ? 'ACCEPTED' : 'REJECTED'}`);
-    this.transportService.send(LlmFacade.createReviewDecision(branch, accepted));
-  }
-
-  public async copyFullContextPreview(previewId: string): Promise<void> {
-    const spaceId = this.workspaceStateService.activeSpaceId();
-    const chatId = this.workspaceStateService.activeChatId();
-
-    if (!spaceId || !chatId) return;
-
-    try {
-      const url = `/api/previews/${encodeURIComponent(chatId)}/${encodeURIComponent(previewId)}?space=${encodeURIComponent(spaceId)}`;
-      const markdownData = await firstValueFrom(this.httpClient.get(url, { responseType: 'text' }));
-      
-      await navigator.clipboard.writeText(markdownData);
-      this.appendSystemLog('INFO', `Successfully copied full context payload (${previewId}) to clipboard.`);
-      
-    } catch (error) {
-      console.error(`Failed to fetch preview ${previewId}`, error);
-      this.appendSystemLog('ERROR', `Failed to copy full context payload.`);
-    }
   }
 }

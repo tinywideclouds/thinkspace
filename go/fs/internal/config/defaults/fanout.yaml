@@ -1,8 +1,47 @@
 fanout:
   type: "flow"
+  name: "Parallel FanOut"
   description: "Delegate a specific coding task to parallel sub-agents."
   retry_prompt: |
     Your previous attempt failed verification. Analyze the following trace and fix the specific errors. Do not rewrite the entire solution if only a localized fix is needed.
     
     Trace:
     {{.ErrorTrace}}
+
+  review_prompt: |
+    The automated sub-agents have completed their proposals. Please evaluate the following candidate diffs. Write a comparative summary and recommend the best approach to the human user.
+    
+    ### Candidate Branches
+    
+    {{ range .Branches }}
+    * [`{{ .CandidateID }}`](#branch:{{ .CandidateID }})
+    
+    #### {{ .CandidateID }}
+    {{ if not .Passed }}⚠️ **VERIFICATION FAILED**:
+    ```text
+    {{ .Trace }}
+    ```
+    {{ end }}
+    ```diff
+    {{ .Diff }}
+    ```
+    {{ end }}
+
+  refine_prompt: |
+    The automated sub-agents have completed their proposals. Please evaluate the following candidate diffs. Write a detailed comparative summary. Based on your evaluation, your entire response will then be used as the architectural instruction for a single, final sub-agent to synthesize the ultimate best version.
+    
+    ### Candidate Branches
+    
+    {{ range .Branches }}
+    * [`{{ .CandidateID }}`](#branch:{{ .CandidateID }})
+    
+    #### {{ .CandidateID }}
+    {{ if not .Passed }}⚠️ **VERIFICATION FAILED**:
+    ```text
+    {{ .Trace }}
+    ```
+    {{ end }}
+    ```diff
+    {{ .Diff }}
+    ```
+    {{ end }}

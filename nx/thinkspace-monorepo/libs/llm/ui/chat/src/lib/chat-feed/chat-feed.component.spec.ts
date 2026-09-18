@@ -18,12 +18,16 @@ describe('ChatFeedComponent', () => {
     component = fixture.componentInstance;
     componentRef = fixture.componentRef;
     
-    // Set required signal inputs
     componentRef.setInput('feed', [
       { id: '1', source: 'user', content: 'Test prompt' },
-      { id: '2', source: 'model', content: 'Test response' }
+      { id: '2', source: 'model', content: 'Test response' },
+      { id: '3', source: 'flow_card', content: 'Flow Card Test', flowId: 'f1' }
     ]);
-    componentRef.setInput('flowStates', new Map<string, FlowState>());
+    
+    const mockStates = new Map<string, FlowState>();
+    mockStates.set('f1', { flowId: 'f1', taskId: 't1', agentCount: 1, completedCount: 0, status: 'running', agents: new Map() });
+    
+    componentRef.setInput('flowStates', mockStates);
     fixture.detectChanges();
   });
 
@@ -31,12 +35,14 @@ describe('ChatFeedComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should render feed items', () => {
+  it('should render feed items and pass summary to flow card', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     const strongTags = compiled.querySelectorAll('strong');
     
-    expect(strongTags.length).toBe(2);
+    expect(strongTags.length).toBe(3);
     expect(strongTags[0].textContent).toContain('user');
     expect(strongTags[1].textContent).toContain('model');
+    // Third strong tag is inside the flow card, verifying the summary was passed
+    expect(strongTags[2].textContent).toContain('Flow Card Test');
   });
 });

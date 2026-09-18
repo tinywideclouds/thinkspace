@@ -1,4 +1,4 @@
-import { Component, input, computed, signal } from '@angular/core';
+import { Component, input, computed, signal, effect, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FlowState, LogItem } from '@org/llm-state-chat';
 
@@ -11,8 +11,21 @@ import { FlowState, LogItem } from '@org/llm-state-chat';
 export class FlowTrackerComponent {
   systemLogs = input.required<LogItem[]>();
   flows = input.required<Map<string, FlowState>>();
+  retainLogs = input.required<boolean>();
+
+  toggleRetainLogs = output<void>();
+  manualClearLogs = output<void>();
 
   activeTab = signal<string>('manager');
+
+  constructor() {
+    // If the active agent is purged from state, gracefully fall back to the manager logs
+    effect(() => {
+      if (this.activeTab() !== 'manager' && !this.activeAgentData()) {
+        this.activeTab.set('manager');
+      }
+    });
+  }
 
   flowsArray = computed(() => {
     return Array.from(this.flows().values())

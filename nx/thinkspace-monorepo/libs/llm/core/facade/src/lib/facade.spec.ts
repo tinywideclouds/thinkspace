@@ -23,8 +23,8 @@ describe('LlmFacade', () => {
           case: 'availableSpaces',
           value: {
             spaces: [
-              { id: 'golang', name: 'Go Developer' },
-              { id: 'angular', name: 'Angular Expert' }
+              { id: 'golang', name: 'Go Developer', isConfigured: true },
+              { id: 'angular', name: 'Angular Expert', isConfigured: false }
             ]
           }
         }
@@ -37,33 +37,6 @@ describe('LlmFacade', () => {
           { id: 'golang', name: 'Go Developer' },
           { id: 'angular', name: 'Angular Expert' }
         ]
-      });
-    });
-
-    it('should map a sync history event correctly', () => {
-      const protocolBufferEvent = create(WSEventSchema, {
-        payload: {
-          case: 'syncHistory',
-          value: {
-            recentEvents: [
-              { id: '1', timestamp: '2026-09-02T15:00:00Z', type: 'prompt', content: 'test', metadata: { key: 'val' } }
-            ],
-            digests: {
-              'abc': { id: 'abc', summary: 'test digest', isSticky: true }
-            }
-          }
-        }
-      });
-
-      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
-      expect(domainEvent).toEqual({
-        type: 'sync_history',
-        recentEvents: [
-          { id: '1', timestamp: '2026-09-02T15:00:00Z', type: 'prompt', content: 'test', metadata: { key: 'val' } }
-        ],
-        digests: {
-          'abc': { id: 'abc', summary: 'test digest', isSticky: true }
-        }
       });
     });
 
@@ -91,6 +64,7 @@ describe('LlmFacade', () => {
           chatId: 'chat-1',
           managerSystemPrompt: 'Test rules',
           stickyDigests: ['Sticky memory'],
+          recentHistory: [],
           fileContexts: [
             { path: 'src/main.go', level: 'structural', tokenCount: 100 }
           ]
@@ -98,44 +72,37 @@ describe('LlmFacade', () => {
       });
     });
 
-    it('should map a flow event correctly', () => {
+    it('should map a telemetry event correctly and parse the JSON payload', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
-          case: 'flowEvent',
+          case: 'telemetryEvent',
           value: {
-            flowId: 'flow-123',
-            type: 'flow_status',
-            timestamp: '2026-09-02T15:00:00Z',
-            taskId: 'task-1',
-            agentCount: 2,
-            agentId: 'agent-1',
-            agentIndex: 1,
-            instruction: 'Do work',
-            status: 'running_tests',
-            attempt: 2,
-            trace: 'compile error',
-            candidateId: 'cand-1',
-            passed: false
+            channel: 'agent-1',
+            event: {
+              id: 'uuid-123',
+              type: 'flow_status',
+              timestamp: '2026-09-02T15:00:00Z',
+              message: 'Compiling Go AST...',
+              summary: 'Testing AST',
+              payloadJson: '{"attempt": 2, "passed": true}'
+            }
           }
         }
       });
 
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
-        type: 'flow_event',
-        flowId: 'flow-123',
+        type: 'telemetry_event',
+        channel: 'agent-1',
+        id: 'uuid-123',
         eventType: 'flow_status',
         timestamp: '2026-09-02T15:00:00Z',
-        taskId: 'task-1',
-        agentCount: 2,
-        agentId: 'agent-1',
-        agentIndex: 1,
-        instruction: 'Do work',
-        status: 'running_tests',
-        attempt: 2,
-        trace: 'compile error',
-        candidateId: 'cand-1',
-        passed: false
+        message: 'Compiling Go AST...',
+        summary: 'Testing AST',
+        payload: {
+          attempt: 2,
+          passed: true
+        }
       });
     });
 

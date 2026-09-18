@@ -16,21 +16,18 @@ describe('ChatInputComponent', () => {
     fixture.detectChanges();
   });
 
-  it('should emit sendPrompt and clear input on submit', () => {
+  it('should emit sendPrompt with trimmed text on submit', () => {
     const emitSpy = vi.spyOn(component.sendPrompt, 'emit');
     
-    component.promptText.set(' Hello World ');
-    component.submit();
+    component.submit(' Hello World ');
 
     expect(emitSpy).toHaveBeenCalledWith('Hello World');
-    expect(component.promptText()).toBe('');
   });
 
   it('should not emit if input is empty', () => {
     const emitSpy = vi.spyOn(component.sendPrompt, 'emit');
     
-    component.promptText.set('   ');
-    component.submit();
+    component.submit('   ');
 
     expect(emitSpy).not.toHaveBeenCalled();
   });

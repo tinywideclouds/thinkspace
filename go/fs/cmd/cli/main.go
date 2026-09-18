@@ -122,7 +122,7 @@ func main() {
 	// Inject the new Universal Telemetry Emitter
 	emitter := telemetry.MultiEmitter{telemetry.NewSlogEmitter(logger)}
 
-	coordinator := session.NewCoordinator(
+	delegator := session.NewDelegator(
 		logger,
 		workspaceService,
 		llmAdapter,
@@ -132,6 +132,14 @@ func main() {
 		*domainName,
 		spaceConfiguration.WorkerSystemPrompt(), // Composed prompt
 		flowConfiguration,
+	)
+
+	coordinator := session.NewCoordinator(
+		logger,
+		workspaceService,
+		llmAdapter,
+		emitter,
+		delegator,
 	)
 
 	fmt.Printf("📂 Workspace root: %s\n", repositoryRoot)

@@ -16,9 +16,6 @@ export class LlmFacade {
       case 'chatStream':
         return { type: 'chat_stream', text: protocolBufferEvent.payload.value.text };
       
-      case 'logMessage':
-        return { type: 'log_message', level: protocolBufferEvent.payload.value.level, message: protocolBufferEvent.payload.value.message };
-      
       case 'agentStream':
         return { type: 'agent_stream', agentId: protocolBufferEvent.payload.value.agentId, text: protocolBufferEvent.payload.value.text };
       
@@ -64,23 +61,27 @@ export class LlmFacade {
           }
         };
 
-      case 'flowEvent':
+      case 'telemetryEvent': {
+        const te = protocolBufferEvent.payload.value;
+        let parsedPayload = {};
+        if (te.event?.payloadJson) {
+          try {
+            parsedPayload = JSON.parse(te.event.payloadJson);
+          } catch (e) {
+            console.warn(`[LlmFacade] Failed to parse telemetry payload_json:`, e);
+          }
+        }
         return {
-          type: 'flow_event',
-          flowId: protocolBufferEvent.payload.value.flowId,
-          eventType: protocolBufferEvent.payload.value.type,
-          timestamp: protocolBufferEvent.payload.value.timestamp,
-          taskId: protocolBufferEvent.payload.value.taskId,
-          agentCount: protocolBufferEvent.payload.value.agentCount,
-          agentId: protocolBufferEvent.payload.value.agentId,
-          agentIndex: protocolBufferEvent.payload.value.agentIndex,
-          instruction: protocolBufferEvent.payload.value.instruction,
-          status: protocolBufferEvent.payload.value.status,
-          attempt: protocolBufferEvent.payload.value.attempt,
-          trace: protocolBufferEvent.payload.value.trace,
-          candidateId: protocolBufferEvent.payload.value.candidateId,
-          passed: protocolBufferEvent.payload.value.passed
+          type: 'telemetry_event',
+          channel: te.channel,
+          id: te.event?.id || '',
+          eventType: te.event?.type || '',
+          timestamp: te.event?.timestamp || '',
+          message: te.event?.message || '',
+          summary: te.event?.summary || '',
+          payload: parsedPayload
         };
+      }
       
       default:
         console.warn(`[LlmFacade] Unhandled inbound protocol buffer case: ${protocolBufferEvent.payload.case}`);

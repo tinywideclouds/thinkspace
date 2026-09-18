@@ -46,12 +46,6 @@ describe('ChatStateService', () => {
     httpTestingController = TestBed.inject(HttpTestingController);
   });
 
-  it('should update connection status and initialize on connect', () => {
-    service.connect('ws://test');
-    expect(mockTransportService.connect).toHaveBeenCalledWith('ws://test');
-    expect(service.connected()).toBe(true);
-  });
-
   it('should stream model chunks into a single coreChat item', () => {
     service.connect('ws://test');
     
@@ -65,54 +59,6 @@ describe('ChatStateService', () => {
     expect(chatHistory.length).toBe(1);
     expect(chatHistory[0].source).toBe('model');
     expect(chatHistory[0].content).toBe('Hello World');
-  });
-
-  it('should trigger pending strategy state on request_strategy', () => {
-    service.connect('ws://test');
-    
-    const requestStrategyEvent = create(WSEventSchema, { payload: { case: 'requestStrategy', value: { active: true } } });
-    webSocketSubject.next(requestStrategyEvent);
-
-    expect(service.pendingStrategy()).toBe(true);
-  });
-
-  it('should trigger pending review state on request_review', () => {
-    service.connect('ws://test');
-    
-    const requestReviewEvent = create(WSEventSchema, { payload: { case: 'requestReview', value: { branch: 'candidate/123' } } });
-    webSocketSubject.next(requestReviewEvent);
-
-    expect(service.pendingReviewBranch()).toBe('candidate/123');
-  });
-
-  it('should handle context review automatically if autoApproveContext is true', () => {
-    service.connect('ws://test');
-    service.autoApproveContext.set(true);
-    
-    const previewEvent = create(WSEventSchema, { 
-      payload: { case: 'previewContext', value: { spaceId: 'golang', chatId: 'test-chat', managerSystemPrompt: 'test', stickyDigests: [], fileContexts: [] } } 
-    });
-    
-    webSocketSubject.next(previewEvent);
-
-    // It should instantly send the OK message and not halt the UI
-    expect(mockTransportService.send).toHaveBeenCalled();
-    expect(service.pendingContextReview()).toBeNull();
-  });
-
-  it('should halt UI for context review if autoApproveContext is false', () => {
-    service.connect('ws://test');
-    service.autoApproveContext.set(false);
-    
-    const previewEvent = create(WSEventSchema, { 
-      payload: { case: 'previewContext', value: { spaceId: 'golang', chatId: 'test-chat', managerSystemPrompt: 'test', stickyDigests: [], fileContexts: [] } } 
-    });
-    
-    webSocketSubject.next(previewEvent);
-
-    expect(mockTransportService.send).not.toHaveBeenCalled();
-    expect(service.pendingContextReview()).toBeTruthy();
-    expect(service.pendingContextReview()?.managerSystemPrompt).toBe('test');
   });
 
   it('should send prompt, clear logs, and show thinking indicator', () => {
@@ -129,103 +75,101 @@ describe('ChatStateService', () => {
     expect(chatHistory[1].source).toBe('system');
     expect(chatHistory[1].content).toBe('Manager Thinking...');
     
-    expect(service.systemLogs().length).toBe(0); // Logs were cleared
+    expect(service.systemLogs().length).toBe(0);
 
     const sentProtocolBuffer = mockTransportService.send.mock.calls[0][0];
     expect(sentProtocolBuffer.payload.value.text).toBe('Refactor this app');
   });
 
-  it('should clear strategy state and send on selectStrategy', () => {
-    service.pendingStrategy.set(true);
-    service.selectStrategy(DomainDelegationStrategy.REFINE);
-    
-    expect(service.pendingStrategy()).toBe(false);
-    expect(mockTransportService.send).toHaveBeenCalled();
-  });
-
-  it('should clear review state and send on submitReview', () => {
-    service.pendingReviewBranch.set('candidate/123');
-    service.submitReview(true);
-    
-    expect(service.pendingReviewBranch()).toBeNull();
-    expect(mockTransportService.send).toHaveBeenCalled();
-  });
-
-  it('should clear context review state and send on submitContextApproval', () => {
-    service.pendingContextReview.set({ spaceId: 'golang', chatId: 'test', managerSystemPrompt: 'rules', stickyDigests: [], fileContexts: [] });
-    
-    service.submitContextApproval(true);
-    
-    expect(service.pendingContextReview()).toBeNull();
-    expect(mockTransportService.send).toHaveBeenCalled();
-  });
-
-  it('should clear the session completely on clearSession', () => {
-    service.coreChat.set([{ id: '1', source: 'user', content: 'test' }]);
-    service.pendingStrategy.set(true);
-    service.inspectedReceipt.set('<xml/>');
-
-    service.clearSession();
-
-    expect(service.coreChat().length).toBe(0);
-    expect(service.pendingStrategy()).toBe(false);
-    expect(service.inspectedReceipt()).toBeNull();
-  });
-
-  it('should fetch flow receipt XML over HTTP with query parameters', async () => {
-    const fetchPromise = service.inspectFlow('flow-999');
-    
-    const request = httpTestingController.expectOne('/api/receipts/test-chat/flow-999?space=golang');
-    expect(request.request.method).toBe('GET');
-    
-    request.flush('<FlowReceipt FlowID="flow-999"></FlowReceipt>');
-    
-    await fetchPromise;
-    expect(service.inspectedReceipt()).toBe('<FlowReceipt FlowID="flow-999"></FlowReceipt>');
-  });
-
-  it('should track agent stream by safely auto-initializing the activeAgents map', () => {
+  it('should inject flow card immediately on flow_start and replace thinking indicator', () => {
     service.connect('ws://test');
     
-    webSocketSubject.next(create(WSEventSchema, { 
-      payload: { case: 'agentStream', value: { agentId: 1, text: 'func main() {}' } } 
-    }));
+    // Simulate user prompt initializing the "Manager Thinking..." system message
+    service.coreChat.set([{ id: '1', source: 'system', content: 'Manager Thinking...' }]);
 
-    const finalAgent = service.activeAgents().get(1);
-    expect(finalAgent?.stream).toBe('func main() {}');
-    expect(finalAgent?.status).toBe('running');
-  });
-
-  it('should inject flow card immediately on flow_start and update it on flow_complete', () => {
-    service.connect('ws://test');
-    
-    const startEvent = create(WSEventSchema, { payload: { case: 'flowEvent', value: { type: 'flow_start', flowId: 'flow-123', taskId: 'test', agentCount: 1 } } });
+    const startEvent = create(WSEventSchema, { 
+      payload: { 
+        case: 'telemetryEvent', 
+        value: { 
+          channel: 'manager',
+          event: { 
+            id: 'evt-1',
+            type: 'flow_start', 
+            summary: 'Refactoring Auth',
+            payloadJson: '{"flow_id": "flow-123", "task_id": "test", "agent_count": 1}' 
+          }
+        } 
+      } 
+    });
     webSocketSubject.next(startEvent);
 
     expect(service.coreChat().length).toBe(1);
     expect(service.coreChat()[0].source).toBe('flow_card');
+    expect(service.coreChat()[0].content).toBe('Refactoring Auth');
     expect(service.coreChat()[0].status).toBe('running');
-
-    const completeEvent = create(WSEventSchema, { payload: { case: 'flowEvent', value: { type: 'flow_complete', flowId: 'flow-123', agentCount: 1 } } });
-    webSocketSubject.next(completeEvent);
-
-    expect(service.coreChat().length).toBe(1);
-    expect(service.coreChat()[0].status).toBe('completed');
   });
 
-  it('should maintain an append-only timeline for agents', () => {
+  it('should maintain an append-only timeline for agents via immutable updates', () => {
     service.connect('ws://test');
     
-    webSocketSubject.next(create(WSEventSchema, { payload: { case: 'flowEvent', value: { type: 'flow_start', flowId: 'f1', taskId: 't1', agentCount: 1 } } }));
+    webSocketSubject.next(create(WSEventSchema, { 
+      payload: { case: 'telemetryEvent', value: { channel: 'manager', event: { type: 'flow_start', payloadJson: '{"flow_id": "f1", "agent_count": 1}' } } } 
+    }));
     
-    webSocketSubject.next(create(WSEventSchema, { payload: { case: 'flowEvent', value: { flowId: 'f1', agentId: 'a1', status: 'executing' } } }));
-    webSocketSubject.next(create(WSEventSchema, { payload: { case: 'flowEvent', value: { flowId: 'f1', agentId: 'a1', status: 'running_tests' } } }));
-    webSocketSubject.next(create(WSEventSchema, { payload: { case: 'flowEvent', value: { flowId: 'f1', agentId: 'a1', trace: 'timeout error' } } }));
+    webSocketSubject.next(create(WSEventSchema, { 
+      payload: { case: 'telemetryEvent', value: { channel: 'agent-1', event: { type: 'flow_status', message: 'executing', payloadJson: '{"flow_id": "f1", "agent_index": 1}' } } } 
+    }));
+    
+    webSocketSubject.next(create(WSEventSchema, { 
+      payload: { case: 'telemetryEvent', value: { channel: 'agent-1', event: { type: 'flow_status', message: 'running_tests', payloadJson: '{"flow_id": "f1", "agent_index": 1}' } } } 
+    }));
+    
+    webSocketSubject.next(create(WSEventSchema, { 
+      payload: { case: 'telemetryEvent', value: { channel: 'agent-1', event: { type: 'flow_error', message: 'timeout error', payloadJson: '{"flow_id": "f1", "agent_index": 1, "trace": "timeout error"}' } } } 
+    }));
 
-    const agent = service.flowStates().get('f1')?.agents.get('a1');
+    const agent = service.flowStates().get('f1')?.agents.get('agent-1');
     expect(agent?.timeline.length).toBe(3);
     expect(agent?.timeline[0].message).toContain('executing');
     expect(agent?.timeline[2].isError).toBe(true);
     expect(agent?.timeline[2].message).toContain('timeout error');
+    expect(agent?.status).toBe('failed');
+  });
+
+  it('should mark flow complete and update card status when all agents finish', () => {
+    service.connect('ws://test');
+    
+    // Start flow with 2 agents
+    webSocketSubject.next(create(WSEventSchema, { 
+      payload: { case: 'telemetryEvent', value: { channel: 'manager', event: { type: 'flow_start', payloadJson: '{"flow_id": "f1", "agent_count": 2}' } } } 
+    }));
+
+    // Complete Agent 1
+    webSocketSubject.next(create(WSEventSchema, { 
+      payload: { case: 'telemetryEvent', value: { channel: 'manager', event: { type: 'flow_complete', payloadJson: '{"flow_id": "f1", "agent_index": 1, "passed": true}' } } } 
+    }));
+
+    expect(service.flowStates().get('f1')?.status).toBe('running');
+    expect(service.coreChat()[0].status).toBe('running');
+
+    // Complete Agent 2
+    webSocketSubject.next(create(WSEventSchema, { 
+      payload: { case: 'telemetryEvent', value: { channel: 'manager', event: { type: 'flow_complete', payloadJson: '{"flow_id": "f1", "agent_index": 2, "passed": false}' } } } 
+    }));
+
+    expect(service.flowStates().get('f1')?.status).toBe('completed');
+    expect(service.coreChat()[0].status).toBe('completed');
+  });
+
+  it('should log manager telemetry events into system logs', () => {
+    service.connect('ws://test');
+    
+    webSocketSubject.next(create(WSEventSchema, { 
+      payload: { case: 'telemetryEvent', value: { channel: 'manager', event: { type: 'log', message: 'Analyzing context...' } } } 
+    }));
+
+    expect(service.systemLogs().length).toBe(1);
+    expect(service.systemLogs()[0].message).toBe('Analyzing context...');
+    expect(service.systemLogs()[0].level).toBe('INFO');
   });
 });

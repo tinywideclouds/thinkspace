@@ -32,7 +32,6 @@ export class FlowInspectorComponent {
   selectedAgentId = signal<string | null>(null);
 
   constructor() {
-    // Parse the XML whenever the input string changes
     effect(() => {
       const xml = this.receiptXml();
       if (!xml) return;
@@ -68,7 +67,7 @@ export class FlowInspectorComponent {
       if (agents.length > 0) {
         this.selectedAgentId.set(agents[0].agentId);
       }
-    }, { allowSignalWrites: true });
+    });
   }
 
   activeAgent = computed(() => {

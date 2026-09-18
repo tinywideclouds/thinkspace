@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -73,7 +72,6 @@ func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	cfg.ApplyDefaults()
 	return cfg
 }
-
 func (m *mockThinkSpace) Tools() []*genai.Tool       { return nil }
 func (m *mockThinkSpace) Verifier() spaces.Verifier  { return &mockVerifier{} }
 func (m *mockThinkSpace) Mapbook() assembler.Mapbook { return nil }
@@ -127,157 +125,17 @@ func (m *mockEmitter) Emit(channel string, event telemetry.Event) {
 
 // --- Tests ---
 
-func TestCoordinator_ExecuteTurn_WithToolCall(t *testing.T) {
+func TestCoordinator_ExecuteTurn_RoutesToDelegator(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 	bus := chat.NewEventBus()
-	bus.Subscribe(chat.NewLedgerSubscriber())
 
 	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
 	thread, _ := workspaceService.StartThread(ctx, "test-thread")
-
 	os.MkdirAll(filepath.Join(workspaceRoot, "chats", "test-thread"), 0755)
-
-	client := &mockModelClient{
-		responses: []*genai.GenerateContentResponse{
-			{
-				Candidates: []*genai.Candidate{
-					{
-						Content: &genai.Content{
-							Parts: []*genai.Part{
-								{Text: "I will implement that now."},
-								{
-									FunctionCall: &genai.FunctionCall{
-										Name: "propose_change",
-										Args: map[string]any{
-											"assigned_tags": []any{"math", "core"},
-											"agent_count":   float64(2),
-											"agent_tasks": []any{
-												map[string]any{"context_digest": "Context A", "instruction": "Do task A"},
-												map[string]any{"context_digest": "Context B", "instruction": "Do task B"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	llmAdapter := llm.NewAdapter(client)
-	flow := &mockFlow{}
-	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
-		return nil
-	}
-
-	emitter := &mockEmitter{}
-	flowConfiguration := flows.FlowConfig{RetryPrompt: "retry"}
-
-	coordinator := session.NewCoordinator(logger, workspaceService, llmAdapter, executor, flow, emitter, "golang", "use /src", flowConfiguration)
-
-	userInterface := &mockUserInterface{
-		strategyToReturn: session.StrategyManual,
-		reviewToReturn:   true,
-	}
-
-	manifest := chat.NewThreadManifest(thread.ID)
-	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
-	if err != nil {
-		t.Fatalf("ExecuteTurn failed: %v", err)
-	}
-
-	if !flow.executeCalled {
-		t.Errorf("Expected Flow to be executed upon intercepting tool call")
-	}
-
-	if userInterface.reviewedBranch != "candidate/mock-123" {
-		t.Errorf("Expected UI to review 'candidate/mock-123', got '%s'", userInterface.reviewedBranch)
-	}
-
-	events, _ := workspaceService.LoadEvents(ctx, thread)
-	foundTags := false
-	for _, ev := range events {
-		if ev.Type == chat.EventCandidate {
-			if len(ev.Tags) == 2 && ev.Tags[0] == "math" {
-				foundTags = true
-			}
-		}
-	}
-	if !foundTags {
-		t.Errorf("Expected candidate events in ledger to contain intercepted assigned_tags")
-	}
-}
-
-func TestCoordinator_ExecuteTurn_SkipStrategy(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	workspaceRoot := t.TempDir()
-
-	bus := chat.NewEventBus()
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-skip")
-
-	client := &mockModelClient{
-		responses: []*genai.GenerateContentResponse{
-			{
-				Candidates: []*genai.Candidate{
-					{
-						Content: &genai.Content{
-							Parts: []*genai.Part{
-								{
-									FunctionCall: &genai.FunctionCall{
-										Name: "propose_change",
-										Args: map[string]any{
-											"agent_count": float64(1),
-											"agent_tasks": []any{
-												map[string]any{"context_digest": "Skip context", "instruction": "Test skip"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	coordinator := session.NewCoordinator(logger, workspaceService, llm.NewAdapter(client), nil, &mockFlow{}, &mockEmitter{}, "golang", "", flows.FlowConfig{})
-
-	userInterface := &mockUserInterface{
-		strategyToReturn: session.StrategySkip,
-	}
-
-	manifest := chat.NewThreadManifest(thread.ID)
-	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
-	if err != nil {
-		t.Fatalf("ExecuteTurn failed: %v", err)
-	}
-
-	if userInterface.reviewedBranch != "" {
-		t.Errorf("Expected UI review step to be skipped, but got review for: %s", userInterface.reviewedBranch)
-	}
-}
-
-func TestCoordinator_TelemetryEmission(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-telemetry")
 
 	client := &mockModelClient{
 		responses: []*genai.GenerateContentResponse{
@@ -296,36 +154,78 @@ func TestCoordinator_TelemetryEmission(t *testing.T) {
 		},
 	}
 
+	llmAdapter := llm.NewAdapter(client)
+	flow := &mockFlow{}
+	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
+		return nil
+	}
 	emitter := &mockEmitter{}
-	coordinator := session.NewCoordinator(logger, workspaceService, llm.NewAdapter(client), nil, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
 
-	ui := &mockUserInterface{strategyToReturn: session.StrategyManual}
+	delegator := session.NewDelegator(logger, workspaceService, llmAdapter, executor, flow, emitter, "golang", "", flows.FlowConfig{})
+	coordinator := session.NewCoordinator(logger, workspaceService, llmAdapter, emitter, delegator)
+
+	userInterface := &mockUserInterface{strategyToReturn: session.StrategyManual, reviewToReturn: true}
 	manifest := chat.NewThreadManifest(thread.ID)
 
-	_ = coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, ui)
-
-	var foundPropose, foundStrategy bool
-	for _, e := range emitter.events {
-		if e.channel != "manager" {
-			t.Errorf("Expected Coordinator to only emit to 'manager' channel")
-		}
-
-		if e.event.Type == "log" && strings.Contains(e.event.Message, "proposing changes") {
-			foundPropose = true
-		}
-
-		if e.event.Type == "log" && strings.Contains(e.event.Message, "User selected strategy") {
-			foundStrategy = true
-			if e.event.Payload["strategy"] != "Manual Review" {
-				t.Errorf("Expected strategy payload to be 'Manual Review', got %v", e.event.Payload["strategy"])
-			}
-		}
+	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
+	if err != nil {
+		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
 
-	if !foundPropose {
-		t.Errorf("Expected Coordinator to emit propose_change log event")
+	if !flow.executeCalled {
+		t.Errorf("Expected Flow to be executed upon intercepting tool call via Delegator")
 	}
-	if !foundStrategy {
-		t.Errorf("Expected Coordinator to emit strategy selection log event with payload")
+}
+
+func TestCoordinator_QueryLens(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	workspaceRoot := t.TempDir()
+	bus := chat.NewEventBus()
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
+	thread, _ := workspaceService.StartThread(ctx, "test-thread-lens")
+
+	client := &mockModelClient{
+		responses: []*genai.GenerateContentResponse{
+			{
+				Candidates: []*genai.Candidate{{
+					Content: &genai.Content{
+						Parts: []*genai.Part{{
+							FunctionCall: &genai.FunctionCall{
+								Name: "query_lens",
+								Args: map[string]any{"tag": "database"},
+							},
+						}},
+					},
+				}},
+			},
+			{
+				Candidates: []*genai.Candidate{{
+					Content: &genai.Content{
+						Parts: []*genai.Part{{Text: "Final answer after querying."}},
+					},
+				}},
+			},
+		},
+	}
+
+	llmAdapter := llm.NewAdapter(client)
+	emitter := &mockEmitter{}
+	delegator := session.NewDelegator(logger, workspaceService, llmAdapter, nil, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
+	coordinator := session.NewCoordinator(logger, workspaceService, llmAdapter, emitter, delegator)
+
+	manifest := chat.NewThreadManifest(thread.ID)
+	_ = coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, &mockUserInterface{})
+
+	foundLensLog := false
+	for _, ev := range emitter.events {
+		if ev.event.Type == "log" && ev.event.Message == "Manager invoked query_lens for tag: database" {
+			foundLensLog = true
+		}
+	}
+	if !foundLensLog {
+		t.Errorf("Expected query_lens to trigger a specific manager telemetry log")
 	}
 }

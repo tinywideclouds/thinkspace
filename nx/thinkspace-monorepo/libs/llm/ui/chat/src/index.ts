@@ -7,3 +7,4 @@ export * from './lib/chat-flow-card/chat-flow-card.component';
 export * from './lib/flow-inspector/flow-inspector.component';
 export * from './lib/chat-header/chat-header.component';
 export * from './lib/context-inspector/context-inspector.component';
+export * from './lib/pipes/markdown.pipe';

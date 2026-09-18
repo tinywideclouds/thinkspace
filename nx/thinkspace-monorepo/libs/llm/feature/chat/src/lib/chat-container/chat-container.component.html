@@ -32,8 +32,8 @@
       <llm-chat-feed 
         [feed]="chatState.coreChat()" 
         [flowStates]="chatState.flowStates()"
-        (inspectFlow)="chatState.inspectFlow($event)"
-      />
+        (inspectFlow)="chatState.inspectFlow($event)">
+      </llm-chat-feed>
 
       <div class="prompt-area">
         @if (chatState.pendingContextReview(); as contextReview) {
@@ -41,21 +41,21 @@
             [context]="contextReview"
             (approve)="chatState.submitContextApproval(true)"
             (reviewCancelled)="chatState.submitContextApproval(false)"
-            (copyFull)="chatState.copyFullContextPreview($event)"
-          />
+            (copyFull)="chatState.copyFullContextPreview($event)">
+          </llm-context-inspector>
         } @else if (chatState.pendingStrategy()) {
           <llm-chat-strategy-prompt 
-            (strategySelected)="chatState.selectStrategy($event)" 
-          />
+            (strategySelected)="chatState.selectStrategy($event)">
+          </llm-chat-strategy-prompt>
         } @else if (chatState.pendingReviewBranch(); as branch) {
           <llm-chat-review-prompt 
             [branch]="branch" 
-            (reviewDecided)="chatState.submitReview($event)" 
-          />
+            (reviewDecided)="chatState.submitReview($event)">
+          </llm-chat-review-prompt>
         } @else {
           <llm-chat-input 
-            (sendPrompt)="chatState.submitPrompt($event)" 
-          />
+            (sendPrompt)="chatState.submitPrompt($event)">
+          </llm-chat-input>
         }
       </div>
     </div>
@@ -64,7 +64,10 @@
   <aside class="chat-drawer">
     <llm-flow-tracker 
       [systemLogs]="chatState.systemLogs()"
-      [flows]="chatState.flowStates()">
+      [flows]="chatState.flowStates()"
+      [retainLogs]="chatState.retainLogs()"
+      (toggleRetainLogs)="chatState.retainLogs.set(!chatState.retainLogs())"
+      (manualClearLogs)="chatState.manualClearLogs()">
     </llm-flow-tracker>
   </aside>
 

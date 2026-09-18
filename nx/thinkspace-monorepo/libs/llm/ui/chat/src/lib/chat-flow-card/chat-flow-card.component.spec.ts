@@ -17,13 +17,14 @@ describe('ChatFlowCardComponent', () => {
     component = fixture.componentInstance;
     componentRef = fixture.componentRef;
     
-    componentRef.setInput('flowId', 'flow-123');
+    componentRef.setInput('flow', { flowId: 'flow-123', status: 'running', agents: new Map() });
+    componentRef.setInput('summary', 'Testing Flow Summary');
     fixture.detectChanges();
   });
 
-  it('should display the flow ID', () => {
+  it('should display the dynamic summary', () => {
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.textContent).toContain('flow-123');
+    expect(compiled.textContent).toContain('Testing Flow Summary');
   });
 
   it('should emit inspect event with flowId on click', () => {
