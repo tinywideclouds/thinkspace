@@ -3,6 +3,8 @@ package workspace
 import (
 	"context"
 	"time"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 )
 
 // AgentToken wraps a text chunk with its source agent ID for UI multiplexing.
@@ -11,15 +13,9 @@ type AgentToken struct {
 	Text    string
 }
 
-// SubAgentBriefing encapsulates the explicitly distilled context handed down by the Manager.
-type SubAgentBriefing struct {
-	ContextDigest string
-	Instruction   string
-}
-
 // SubAgentExecutor allows the Flow to trigger an LLM generation step.
-// It receives ONLY the structured briefing and the physical Sandbox state, operating in a temporal vacuum.
-type SubAgentExecutor func(ctx context.Context, briefing SubAgentBriefing, sandbox CandidateSandbox, agentID int, tokenChan chan<- AgentToken) error
+// It receives the strictly typed cognitive state (ThinkBundle) and the physical Sandbox state.
+type SubAgentExecutor func(ctx context.Context, bundle cognition.ThinkBundle, sandbox CandidateSandbox, agentID int, tokenChan chan<- AgentToken) error
 
 // Candidate represents a "Fast" branch, holding unverified tool outputs.
 type Candidate struct {

@@ -1219,7 +1219,7 @@ type WSEvent struct {
 	//	*WSEvent_RequestReview
 	//	*WSEvent_AvailableSpaces
 	//	*WSEvent_SyncHistory
-	//	*WSEvent_PreviewContext
+	//	*WSEvent_ThinkBundle
 	//	*WSEvent_SubmitPrompt
 	//	*WSEvent_SelectStrategy
 	//	*WSEvent_ReviewDecision
@@ -1329,10 +1329,10 @@ func (x *WSEvent) GetSyncHistory() *SyncHistoryPayload {
 	return nil
 }
 
-func (x *WSEvent) GetPreviewContext() *PreviewContextPayload {
+func (x *WSEvent) GetThinkBundle() *ThinkBundlePayload {
 	if x != nil {
-		if x, ok := x.Payload.(*WSEvent_PreviewContext); ok {
-			return x.PreviewContext
+		if x, ok := x.Payload.(*WSEvent_ThinkBundle); ok {
+			return x.ThinkBundle
 		}
 	}
 	return nil
@@ -1407,8 +1407,8 @@ type WSEvent_SyncHistory struct {
 	SyncHistory *SyncHistoryPayload `protobuf:"bytes,15,opt,name=sync_history,json=syncHistory,proto3,oneof"`
 }
 
-type WSEvent_PreviewContext struct {
-	PreviewContext *PreviewContextPayload `protobuf:"bytes,16,opt,name=preview_context,json=previewContext,proto3,oneof"`
+type WSEvent_ThinkBundle struct {
+	ThinkBundle *ThinkBundlePayload `protobuf:"bytes,16,opt,name=think_bundle,json=thinkBundle,proto3,oneof"`
 }
 
 type WSEvent_SubmitPrompt struct {
@@ -1442,7 +1442,7 @@ func (*WSEvent_AvailableSpaces) isWSEvent_Payload() {}
 
 func (*WSEvent_SyncHistory) isWSEvent_Payload() {}
 
-func (*WSEvent_PreviewContext) isWSEvent_Payload() {}
+func (*WSEvent_ThinkBundle) isWSEvent_Payload() {}
 
 func (*WSEvent_SubmitPrompt) isWSEvent_Payload() {}
 
@@ -1451,6 +1451,366 @@ func (*WSEvent_SelectStrategy) isWSEvent_Payload() {}
 func (*WSEvent_ReviewDecision) isWSEvent_Payload() {}
 
 func (*WSEvent_ApproveContext) isWSEvent_Payload() {}
+
+type SystemRulesPayload struct {
+	state                 protoimpl.MessageState `protogen:"open.v1"`
+	Persona               string                 `protobuf:"bytes,1,opt,name=persona,proto3" json:"persona,omitempty"`
+	FormattingConstraints string                 `protobuf:"bytes,2,opt,name=formatting_constraints,json=formattingConstraints,proto3" json:"formatting_constraints,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *SystemRulesPayload) Reset() {
+	*x = SystemRulesPayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SystemRulesPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SystemRulesPayload) ProtoMessage() {}
+
+func (x *SystemRulesPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SystemRulesPayload.ProtoReflect.Descriptor instead.
+func (*SystemRulesPayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *SystemRulesPayload) GetPersona() string {
+	if x != nil {
+		return x.Persona
+	}
+	return ""
+}
+
+func (x *SystemRulesPayload) GetFormattingConstraints() string {
+	if x != nil {
+		return x.FormattingConstraints
+	}
+	return ""
+}
+
+type MapbookPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Maps          map[string]string      `protobuf:"bytes,1,rep,name=maps,proto3" json:"maps,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MapbookPayload) Reset() {
+	*x = MapbookPayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MapbookPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MapbookPayload) ProtoMessage() {}
+
+func (x *MapbookPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MapbookPayload.ProtoReflect.Descriptor instead.
+func (*MapbookPayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *MapbookPayload) GetMaps() map[string]string {
+	if x != nil {
+		return x.Maps
+	}
+	return nil
+}
+
+type TrajectoryEventPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrajectoryEventPayload) Reset() {
+	*x = TrajectoryEventPayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrajectoryEventPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrajectoryEventPayload) ProtoMessage() {}
+
+func (x *TrajectoryEventPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrajectoryEventPayload.ProtoReflect.Descriptor instead.
+func (*TrajectoryEventPayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *TrajectoryEventPayload) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *TrajectoryEventPayload) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+type TrajectoryPayload struct {
+	state          protoimpl.MessageState    `protogen:"open.v1"`
+	LongTermMemory []string                  `protobuf:"bytes,1,rep,name=long_term_memory,json=longTermMemory,proto3" json:"long_term_memory,omitempty"`
+	WorkingMemory  []*TrajectoryEventPayload `protobuf:"bytes,2,rep,name=working_memory,json=workingMemory,proto3" json:"working_memory,omitempty"`
+	Catalyst       *TrajectoryEventPayload   `protobuf:"bytes,3,opt,name=catalyst,proto3" json:"catalyst,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *TrajectoryPayload) Reset() {
+	*x = TrajectoryPayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrajectoryPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrajectoryPayload) ProtoMessage() {}
+
+func (x *TrajectoryPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrajectoryPayload.ProtoReflect.Descriptor instead.
+func (*TrajectoryPayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *TrajectoryPayload) GetLongTermMemory() []string {
+	if x != nil {
+		return x.LongTermMemory
+	}
+	return nil
+}
+
+func (x *TrajectoryPayload) GetWorkingMemory() []*TrajectoryEventPayload {
+	if x != nil {
+		return x.WorkingMemory
+	}
+	return nil
+}
+
+func (x *TrajectoryPayload) GetCatalyst() *TrajectoryEventPayload {
+	if x != nil {
+		return x.Catalyst
+	}
+	return nil
+}
+
+type WorkbenchItemPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	TokenCount    int32                  `protobuf:"varint,3,opt,name=token_count,json=tokenCount,proto3" json:"token_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkbenchItemPayload) Reset() {
+	*x = WorkbenchItemPayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkbenchItemPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkbenchItemPayload) ProtoMessage() {}
+
+func (x *WorkbenchItemPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkbenchItemPayload.ProtoReflect.Descriptor instead.
+func (*WorkbenchItemPayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *WorkbenchItemPayload) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *WorkbenchItemPayload) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *WorkbenchItemPayload) GetTokenCount() int32 {
+	if x != nil {
+		return x.TokenCount
+	}
+	return 0
+}
+
+type ThinkBundlePayload struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	SpaceId       string                  `protobuf:"bytes,1,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	ChatId        string                  `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	PreviewId     string                  `protobuf:"bytes,3,opt,name=preview_id,json=previewId,proto3" json:"preview_id,omitempty"`
+	Rules         *SystemRulesPayload     `protobuf:"bytes,4,opt,name=rules,proto3" json:"rules,omitempty"`
+	Mapbook       *MapbookPayload         `protobuf:"bytes,5,opt,name=mapbook,proto3" json:"mapbook,omitempty"`
+	Trajectory    *TrajectoryPayload      `protobuf:"bytes,6,opt,name=trajectory,proto3" json:"trajectory,omitempty"`
+	Workbench     []*WorkbenchItemPayload `protobuf:"bytes,7,rep,name=workbench,proto3" json:"workbench,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ThinkBundlePayload) Reset() {
+	*x = ThinkBundlePayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ThinkBundlePayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ThinkBundlePayload) ProtoMessage() {}
+
+func (x *ThinkBundlePayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ThinkBundlePayload.ProtoReflect.Descriptor instead.
+func (*ThinkBundlePayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ThinkBundlePayload) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *ThinkBundlePayload) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *ThinkBundlePayload) GetPreviewId() string {
+	if x != nil {
+		return x.PreviewId
+	}
+	return ""
+}
+
+func (x *ThinkBundlePayload) GetRules() *SystemRulesPayload {
+	if x != nil {
+		return x.Rules
+	}
+	return nil
+}
+
+func (x *ThinkBundlePayload) GetMapbook() *MapbookPayload {
+	if x != nil {
+		return x.Mapbook
+	}
+	return nil
+}
+
+func (x *ThinkBundlePayload) GetTrajectory() *TrajectoryPayload {
+	if x != nil {
+		return x.Trajectory
+	}
+	return nil
+}
+
+func (x *ThinkBundlePayload) GetWorkbench() []*WorkbenchItemPayload {
+	if x != nil {
+		return x.Workbench
+	}
+	return nil
+}
 
 var File_src_thinkspace_api_v1_events_proto protoreflect.FileDescriptor
 
@@ -1542,7 +1902,7 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x1a\n" +
 	"\baccepted\x18\x02 \x01(\bR\baccepted\"3\n" +
 	"\x15ApproveContextPayload\x12\x1a\n" +
-	"\bapproved\x18\x01 \x01(\bR\bapproved\"\xef\a\n" +
+	"\bapproved\x18\x01 \x01(\bR\bapproved\"\xe6\a\n" +
 	"\aWSEvent\x12G\n" +
 	"\vchat_stream\x18\x01 \x01(\v2$.thinkspace.api.v1.ChatStreamPayloadH\x00R\n" +
 	"chatStream\x12S\n" +
@@ -1552,13 +1912,44 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x0erequest_review\x18\t \x01(\v2'.thinkspace.api.v1.RequestReviewPayloadH\x00R\rrequestReview\x12V\n" +
 	"\x10available_spaces\x18\n" +
 	" \x01(\v2).thinkspace.api.v1.AvailableSpacesPayloadH\x00R\x0favailableSpaces\x12J\n" +
-	"\fsync_history\x18\x0f \x01(\v2%.thinkspace.api.v1.SyncHistoryPayloadH\x00R\vsyncHistory\x12S\n" +
-	"\x0fpreview_context\x18\x10 \x01(\v2(.thinkspace.api.v1.PreviewContextPayloadH\x00R\x0epreviewContext\x12M\n" +
+	"\fsync_history\x18\x0f \x01(\v2%.thinkspace.api.v1.SyncHistoryPayloadH\x00R\vsyncHistory\x12J\n" +
+	"\fthink_bundle\x18\x10 \x01(\v2%.thinkspace.api.v1.ThinkBundlePayloadH\x00R\vthinkBundle\x12M\n" +
 	"\rsubmit_prompt\x18\v \x01(\v2&.thinkspace.api.v1.SubmitPromptPayloadH\x00R\fsubmitPrompt\x12S\n" +
 	"\x0fselect_strategy\x18\f \x01(\v2(.thinkspace.api.v1.SelectStrategyPayloadH\x00R\x0eselectStrategy\x12S\n" +
 	"\x0freview_decision\x18\r \x01(\v2(.thinkspace.api.v1.ReviewDecisionPayloadH\x00R\x0ereviewDecision\x12S\n" +
 	"\x0fapprove_context\x18\x11 \x01(\v2(.thinkspace.api.v1.ApproveContextPayloadH\x00R\x0eapproveContextB\t\n" +
-	"\apayload*\xb7\x01\n" +
+	"\apayload\"e\n" +
+	"\x12SystemRulesPayload\x12\x18\n" +
+	"\apersona\x18\x01 \x01(\tR\apersona\x125\n" +
+	"\x16formatting_constraints\x18\x02 \x01(\tR\x15formattingConstraints\"\x8a\x01\n" +
+	"\x0eMapbookPayload\x12?\n" +
+	"\x04maps\x18\x01 \x03(\v2+.thinkspace.api.v1.MapbookPayload.MapsEntryR\x04maps\x1a7\n" +
+	"\tMapsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +
+	"\x16TrajectoryEventPayload\x12\x12\n" +
+	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\"\xd6\x01\n" +
+	"\x11TrajectoryPayload\x12(\n" +
+	"\x10long_term_memory\x18\x01 \x03(\tR\x0elongTermMemory\x12P\n" +
+	"\x0eworking_memory\x18\x02 \x03(\v2).thinkspace.api.v1.TrajectoryEventPayloadR\rworkingMemory\x12E\n" +
+	"\bcatalyst\x18\x03 \x01(\v2).thinkspace.api.v1.TrajectoryEventPayloadR\bcatalyst\"e\n" +
+	"\x14WorkbenchItemPayload\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\tR\acontent\x12\x1f\n" +
+	"\vtoken_count\x18\x03 \x01(\x05R\n" +
+	"tokenCount\"\xee\x02\n" +
+	"\x12ThinkBundlePayload\x12\x19\n" +
+	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x17\n" +
+	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12\x1d\n" +
+	"\n" +
+	"preview_id\x18\x03 \x01(\tR\tpreviewId\x12;\n" +
+	"\x05rules\x18\x04 \x01(\v2%.thinkspace.api.v1.SystemRulesPayloadR\x05rules\x12;\n" +
+	"\amapbook\x18\x05 \x01(\v2!.thinkspace.api.v1.MapbookPayloadR\amapbook\x12D\n" +
+	"\n" +
+	"trajectory\x18\x06 \x01(\v2$.thinkspace.api.v1.TrajectoryPayloadR\n" +
+	"trajectory\x12E\n" +
+	"\tworkbench\x18\a \x03(\v2'.thinkspace.api.v1.WorkbenchItemPayloadR\tworkbench*\xb7\x01\n" +
 	"\x12DelegationStrategy\x12#\n" +
 	"\x1fDELEGATION_STRATEGY_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18DELEGATION_STRATEGY_SKIP\x10\x01\x12\x1e\n" +
@@ -1579,7 +1970,7 @@ func file_src_thinkspace_api_v1_events_proto_rawDescGZIP() []byte {
 }
 
 var file_src_thinkspace_api_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_src_thinkspace_api_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_src_thinkspace_api_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_src_thinkspace_api_v1_events_proto_goTypes = []any{
 	(DelegationStrategy)(0),        // 0: thinkspace.api.v1.DelegationStrategy
 	(*SpaceInfo)(nil),              // 1: thinkspace.api.v1.SpaceInfo
@@ -1602,13 +1993,20 @@ var file_src_thinkspace_api_v1_events_proto_goTypes = []any{
 	(*ReviewDecisionPayload)(nil),  // 18: thinkspace.api.v1.ReviewDecisionPayload
 	(*ApproveContextPayload)(nil),  // 19: thinkspace.api.v1.ApproveContextPayload
 	(*WSEvent)(nil),                // 20: thinkspace.api.v1.WSEvent
-	nil,                            // 21: thinkspace.api.v1.LedgerEvent.MetadataEntry
-	nil,                            // 22: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry
+	(*SystemRulesPayload)(nil),     // 21: thinkspace.api.v1.SystemRulesPayload
+	(*MapbookPayload)(nil),         // 22: thinkspace.api.v1.MapbookPayload
+	(*TrajectoryEventPayload)(nil), // 23: thinkspace.api.v1.TrajectoryEventPayload
+	(*TrajectoryPayload)(nil),      // 24: thinkspace.api.v1.TrajectoryPayload
+	(*WorkbenchItemPayload)(nil),   // 25: thinkspace.api.v1.WorkbenchItemPayload
+	(*ThinkBundlePayload)(nil),     // 26: thinkspace.api.v1.ThinkBundlePayload
+	nil,                            // 27: thinkspace.api.v1.LedgerEvent.MetadataEntry
+	nil,                            // 28: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry
+	nil,                            // 29: thinkspace.api.v1.MapbookPayload.MapsEntry
 }
 var file_src_thinkspace_api_v1_events_proto_depIdxs = []int32{
-	21, // 0: thinkspace.api.v1.LedgerEvent.metadata:type_name -> thinkspace.api.v1.LedgerEvent.MetadataEntry
+	27, // 0: thinkspace.api.v1.LedgerEvent.metadata:type_name -> thinkspace.api.v1.LedgerEvent.MetadataEntry
 	2,  // 1: thinkspace.api.v1.SyncHistoryPayload.recent_events:type_name -> thinkspace.api.v1.LedgerEvent
-	22, // 2: thinkspace.api.v1.SyncHistoryPayload.digests:type_name -> thinkspace.api.v1.SyncHistoryPayload.DigestsEntry
+	28, // 2: thinkspace.api.v1.SyncHistoryPayload.digests:type_name -> thinkspace.api.v1.SyncHistoryPayload.DigestsEntry
 	1,  // 3: thinkspace.api.v1.AvailableSpacesPayload.spaces:type_name -> thinkspace.api.v1.SpaceInfo
 	11, // 4: thinkspace.api.v1.PreviewContextPayload.file_contexts:type_name -> thinkspace.api.v1.FileContextMetaData
 	12, // 5: thinkspace.api.v1.TelemetryEventPayload.event:type_name -> thinkspace.api.v1.TelemetryEvent
@@ -1620,17 +2018,24 @@ var file_src_thinkspace_api_v1_events_proto_depIdxs = []int32{
 	8,  // 11: thinkspace.api.v1.WSEvent.request_review:type_name -> thinkspace.api.v1.RequestReviewPayload
 	9,  // 12: thinkspace.api.v1.WSEvent.available_spaces:type_name -> thinkspace.api.v1.AvailableSpacesPayload
 	6,  // 13: thinkspace.api.v1.WSEvent.sync_history:type_name -> thinkspace.api.v1.SyncHistoryPayload
-	10, // 14: thinkspace.api.v1.WSEvent.preview_context:type_name -> thinkspace.api.v1.PreviewContextPayload
+	26, // 14: thinkspace.api.v1.WSEvent.think_bundle:type_name -> thinkspace.api.v1.ThinkBundlePayload
 	16, // 15: thinkspace.api.v1.WSEvent.submit_prompt:type_name -> thinkspace.api.v1.SubmitPromptPayload
 	17, // 16: thinkspace.api.v1.WSEvent.select_strategy:type_name -> thinkspace.api.v1.SelectStrategyPayload
 	18, // 17: thinkspace.api.v1.WSEvent.review_decision:type_name -> thinkspace.api.v1.ReviewDecisionPayload
 	19, // 18: thinkspace.api.v1.WSEvent.approve_context:type_name -> thinkspace.api.v1.ApproveContextPayload
-	3,  // 19: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry.value:type_name -> thinkspace.api.v1.DigestMeta
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	29, // 19: thinkspace.api.v1.MapbookPayload.maps:type_name -> thinkspace.api.v1.MapbookPayload.MapsEntry
+	23, // 20: thinkspace.api.v1.TrajectoryPayload.working_memory:type_name -> thinkspace.api.v1.TrajectoryEventPayload
+	23, // 21: thinkspace.api.v1.TrajectoryPayload.catalyst:type_name -> thinkspace.api.v1.TrajectoryEventPayload
+	21, // 22: thinkspace.api.v1.ThinkBundlePayload.rules:type_name -> thinkspace.api.v1.SystemRulesPayload
+	22, // 23: thinkspace.api.v1.ThinkBundlePayload.mapbook:type_name -> thinkspace.api.v1.MapbookPayload
+	24, // 24: thinkspace.api.v1.ThinkBundlePayload.trajectory:type_name -> thinkspace.api.v1.TrajectoryPayload
+	25, // 25: thinkspace.api.v1.ThinkBundlePayload.workbench:type_name -> thinkspace.api.v1.WorkbenchItemPayload
+	3,  // 26: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry.value:type_name -> thinkspace.api.v1.DigestMeta
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_src_thinkspace_api_v1_events_proto_init() }
@@ -1646,7 +2051,7 @@ func file_src_thinkspace_api_v1_events_proto_init() {
 		(*WSEvent_RequestReview)(nil),
 		(*WSEvent_AvailableSpaces)(nil),
 		(*WSEvent_SyncHistory)(nil),
-		(*WSEvent_PreviewContext)(nil),
+		(*WSEvent_ThinkBundle)(nil),
 		(*WSEvent_SubmitPrompt)(nil),
 		(*WSEvent_SelectStrategy)(nil),
 		(*WSEvent_ReviewDecision)(nil),
@@ -1658,7 +2063,7 @@ func file_src_thinkspace_api_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_src_thinkspace_api_v1_events_proto_rawDesc), len(file_src_thinkspace_api_v1_events_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   22,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -109,7 +109,6 @@ func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
 }
 
 // --- Verifier Tests ---
-
 func TestGoThinkSpace_Verify_ASTError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -124,7 +123,6 @@ func TestGoThinkSpace_Verify_ASTError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected AST verification to fail on invalid code")
 	}
-
 	if !strings.Contains(err.Error(), "AST syntax or compilation failed") {
 		t.Errorf("Expected error to mention syntax/compilation error, got: %v", err)
 	}
@@ -143,7 +141,6 @@ func TestGoThinkSpace_Verify_MissingGoMod(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to missing go.mod")
 	}
-
 	if !strings.Contains(err.Error(), "no 'go.mod' file found") {
 		t.Errorf("Expected missing go.mod error, got: %v", err)
 	}
@@ -181,19 +178,16 @@ func TestGoThinkSpace_Verify_TimeoutLoop(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to timeout")
 	}
-
 	if !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("Expected timeout error, got: %v", err)
 	}
 }
 
 // --- Mapbook Tests ---
-
 func TestGolangMapbook_GenerateLayers(t *testing.T) {
 	ctx := context.Background()
 	workspaceRoot := t.TempDir()
 
-	// Scaffold a fake Go workspace
 	srcDir := filepath.Join(workspaceRoot, "src")
 	pkgDir := filepath.Join(srcDir, "api")
 	if err := os.MkdirAll(pkgDir, 0755); err != nil {
@@ -229,7 +223,7 @@ func TestGolangMapbook_GenerateLayers(t *testing.T) {
 
 func TestGolangMapbook_GenerateLayers_NoSrcDirectory(t *testing.T) {
 	ctx := context.Background()
-	workspaceRoot := t.TempDir() // Empty directory without a /src folder
+	workspaceRoot := t.TempDir()
 
 	book := golang.NewGolangMapbook()
 	layers, err := book.GenerateLayers(ctx, workspaceRoot)
@@ -242,49 +236,55 @@ func TestGolangMapbook_GenerateLayers_NoSrcDirectory(t *testing.T) {
 		t.Fatalf("missing structural layer")
 	}
 
-	// Should just contain the header with no files listed
 	if strings.Contains(structural, "- src/") {
 		t.Errorf("expected empty structural tree, got: %s", structural)
 	}
 }
 
 // --- Interface Contract Tests ---
-
 func TestGoThinkSpace_InterfaceContracts(t *testing.T) {
 	space := setupGoThinkSpace(t, 15)
 
 	if space.Config().Name != "golang" {
 		t.Errorf("Config() failed to return injected config")
 	}
-
 	if space.Verifier() == nil {
 		t.Errorf("Verifier() returned nil")
 	}
-
 	if space.Mapbook() == nil {
 		t.Errorf("Mapbook() returned nil")
 	}
 
 	tools := space.Tools()
-	if len(tools) != 1 {
-		t.Fatalf("Expected exactly 1 tool, got %d", len(tools))
+	if len(tools) != 2 {
+		t.Fatalf("Expected exactly 2 tools, got %d", len(tools))
 	}
 
 	hasPropose := false
 	hasQueryLens := false
 
-	for _, decl := range tools[0].FunctionDeclarations {
+	for _, decl := range tools {
 		if decl.Name == "propose_change" {
 			hasPropose = true
 			if decl.Description != "mock tool desc" {
 				t.Errorf("Tool description was not correctly mapped from config")
 			}
-			props := decl.Parameters.Properties
-			if props["assigned_tags"].Description != "mock tags desc" {
+			props, ok := decl.Parameters["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("Failed to cast properties map")
+			}
+
+			if tags, ok := props["assigned_tags"].(map[string]any); !ok || tags["description"] != "mock tags desc" {
 				t.Errorf("Schema property mapping failed for assigned_tags")
 			}
-			if props["agent_tasks"].Items.Properties["target_files"].Description != "mock files desc" {
-				t.Errorf("Schema property mapping failed for target_files inside agent_tasks")
+			if tasks, ok := props["agent_tasks"].(map[string]any); ok {
+				if items, ok := tasks["items"].(map[string]any); ok {
+					if itemProps, ok := items["properties"].(map[string]any); ok {
+						if tf, ok := itemProps["target_files"].(map[string]any); !ok || tf["description"] != "mock files desc" {
+							t.Errorf("Schema property mapping failed for target_files inside agent_tasks")
+						}
+					}
+				}
 			}
 		}
 		if decl.Name == "query_lens" {
@@ -292,8 +292,11 @@ func TestGoThinkSpace_InterfaceContracts(t *testing.T) {
 			if decl.Description != "mock query lens desc" {
 				t.Errorf("QueryLens description was not mapped")
 			}
-			props := decl.Parameters.Properties
-			if props["tag"].Description != "mock lens tag" {
+			props, ok := decl.Parameters["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("Failed to cast properties map")
+			}
+			if tagMap, ok := props["tag"].(map[string]any); !ok || tagMap["description"] != "mock lens tag" {
 				t.Errorf("QueryLens tag description was not mapped")
 			}
 		}

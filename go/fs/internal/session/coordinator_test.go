@@ -11,24 +11,24 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"google.golang.org/genai"
 )
 
 // --- Mocks ---
 
 type mockModelClient struct {
-	responses []*genai.GenerateContentResponse
+	responses []llm.StreamChunk
 	callIndex int
 }
 
-func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, configuration *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
-	return func(yield func(*genai.GenerateContentResponse, error) bool) {
+func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
+	return func(yield func(llm.StreamChunk, error) bool) {
 		if m.callIndex < len(m.responses) {
 			resp := m.responses[m.callIndex]
 			m.callIndex++
@@ -72,7 +72,7 @@ func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	cfg.ApplyDefaults()
 	return cfg
 }
-func (m *mockThinkSpace) Tools() []*genai.Tool       { return nil }
+func (m *mockThinkSpace) Tools() []llm.ToolDef       { return nil }
 func (m *mockThinkSpace) Verifier() spaces.Verifier  { return &mockVerifier{} }
 func (m *mockThinkSpace) Mapbook() assembler.Mapbook { return nil }
 func (m *mockThinkSpace) Patcher() workspace.Patcher { return nil }
@@ -138,36 +138,29 @@ func TestCoordinator_ExecuteTurn_RoutesToDelegator(t *testing.T) {
 	os.MkdirAll(filepath.Join(workspaceRoot, "chats", "test-thread"), 0755)
 
 	client := &mockModelClient{
-		responses: []*genai.GenerateContentResponse{
+		responses: []llm.StreamChunk{
 			{
-				Candidates: []*genai.Candidate{{
-					Content: &genai.Content{
-						Parts: []*genai.Part{{
-							FunctionCall: &genai.FunctionCall{
-								Name: "propose_change",
-								Args: map[string]any{},
-							},
-						}},
-					},
+				ToolCalls: []llm.ToolCall{{
+					Name: "propose_change",
+					Args: map[string]any{},
 				}},
 			},
 		},
 	}
 
-	llmAdapter := llm.NewAdapter(client)
 	flow := &mockFlow{}
-	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
+	executor := func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
 		return nil
 	}
 	emitter := &mockEmitter{}
 
-	delegator := session.NewDelegator(logger, workspaceService, llmAdapter, executor, flow, emitter, "golang", "", flows.FlowConfig{})
-	coordinator := session.NewCoordinator(logger, workspaceService, llmAdapter, emitter, delegator)
+	delegator := session.NewDelegator(logger, workspaceService, client, executor, flow, emitter, "golang", "", flows.FlowConfig{})
+	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, delegator)
 
 	userInterface := &mockUserInterface{strategyToReturn: session.StrategyManual, reviewToReturn: true}
 	manifest := chat.NewThreadManifest(thread.ID)
 
-	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, userInterface)
+	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, cognition.ThinkBundle{}, userInterface)
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
@@ -188,36 +181,25 @@ func TestCoordinator_QueryLens(t *testing.T) {
 	thread, _ := workspaceService.StartThread(ctx, "test-thread-lens")
 
 	client := &mockModelClient{
-		responses: []*genai.GenerateContentResponse{
+		responses: []llm.StreamChunk{
 			{
-				Candidates: []*genai.Candidate{{
-					Content: &genai.Content{
-						Parts: []*genai.Part{{
-							FunctionCall: &genai.FunctionCall{
-								Name: "query_lens",
-								Args: map[string]any{"tag": "database"},
-							},
-						}},
-					},
+				ToolCalls: []llm.ToolCall{{
+					Name: "query_lens",
+					Args: map[string]any{"tag": "database"},
 				}},
 			},
 			{
-				Candidates: []*genai.Candidate{{
-					Content: &genai.Content{
-						Parts: []*genai.Part{{Text: "Final answer after querying."}},
-					},
-				}},
+				Text: "Final answer after querying.",
 			},
 		},
 	}
 
-	llmAdapter := llm.NewAdapter(client)
 	emitter := &mockEmitter{}
-	delegator := session.NewDelegator(logger, workspaceService, llmAdapter, nil, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
-	coordinator := session.NewCoordinator(logger, workspaceService, llmAdapter, emitter, delegator)
+	delegator := session.NewDelegator(logger, workspaceService, client, nil, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
+	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, delegator)
 
 	manifest := chat.NewThreadManifest(thread.ID)
-	_ = coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, nil, &mockUserInterface{})
+	_ = coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, cognition.ThinkBundle{}, &mockUserInterface{})
 
 	foundLensLog := false
 	for _, ev := range emitter.events {

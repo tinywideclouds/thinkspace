@@ -6,11 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
-	"google.golang.org/genai"
-
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
@@ -18,14 +16,12 @@ import (
 )
 
 type spyModelClient struct {
-	capturedHistory []*genai.Content
-	capturedConfig  *genai.GenerateContentConfig
+	capturedBundle cognition.ThinkBundle
 }
 
-func (m *spyModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
-	m.capturedHistory = history
-	m.capturedConfig = config
-	return func(yield func(*genai.GenerateContentResponse, error) bool) {}
+func (m *spyModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
+	m.capturedBundle = bundle
+	return func(yield func(llm.StreamChunk, error) bool) {}
 }
 
 type stubEngine struct{}
@@ -64,7 +60,7 @@ golang-space:
   roles:
     manager:
       model: "test-model"
-      system_prompt: ""
+      system_prompt: "manager rules"
     worker:
       model: "test-worker-model"
       system_prompt: ""
@@ -84,32 +80,25 @@ fanout:
 	manager.UpdateSpaceState("golang-space", func(s *workspace.SpaceState) { s.Domain = "golang-space" })
 
 	spyClient := &spyModelClient{}
-	llmAdapter := llm.NewAdapter(spyClient)
 	dummyFlow := &mockFlow{}
-	ui := &mockUserInterface{}
+	ui := &mockUserInterface{reviewToReturn: true}
 
-	turnManager := session.NewTurnManager(logger, registry, manager, llmAdapter, dummyFlow, spyClient)
+	turnManager := session.NewTurnManager(logger, registry, manager, spyClient, dummyFlow)
 
 	err := turnManager.ExecuteTurn(context.Background(), "golang-space", "chat-1", "Hello sequencing test", ui, &mockEmitter{})
 	if err != nil {
 		t.Fatalf("ExecuteTurn failed: %v", err)
 	}
 
-	if len(spyClient.capturedHistory) == 0 {
-		t.Fatalf("Expected history to be populated, got 0. The ledger load sequence is fundamentally broken.")
+	if spyClient.capturedBundle.Trajectory.Catalyst.Content != "Hello sequencing test" {
+		t.Errorf("Expected catalyst to be the prompt, got: %s", spyClient.capturedBundle.Trajectory.Catalyst.Content)
 	}
 
-	lastText := spyClient.capturedHistory[len(spyClient.capturedHistory)-1].Parts[0].Text
-	if lastText != "Hello sequencing test" {
-		t.Errorf("Expected last history item to be the prompt, got: %s", lastText)
+	if spyClient.capturedBundle.Rules.Persona != "manager rules" {
+		t.Errorf("Expected rules to contain manager rules, got: %s", spyClient.capturedBundle.Rules.Persona)
 	}
 
-	if spyClient.capturedConfig == nil || spyClient.capturedConfig.SystemInstruction == nil {
-		t.Fatalf("Expected SDK configuration to contain SystemInstruction")
-	}
-
-	sysPrompt := spyClient.capturedConfig.SystemInstruction.Parts[0].Text
-	if !strings.Contains(sysPrompt, "### THE MAPBOOK") {
-		t.Errorf("Expected Mapbook to be injected into system prompt, got: %s", sysPrompt)
+	if _, ok := spyClient.capturedBundle.Mapbook.Maps["Structural"]; !ok {
+		t.Errorf("Expected Mapbook to contain Structural layer")
 	}
 }

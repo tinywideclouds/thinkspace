@@ -4,25 +4,32 @@ import (
 	"context"
 	"iter"
 
-	"google.golang.org/genai"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 )
 
-// ModelClient defines the interface for streaming LLM generation, allowing for mock implementations.
+type StreamChunk struct {
+	Text      string
+	ToolCalls []ToolCall
+}
+
+type ToolCall struct {
+	Name string
+	Args map[string]any
+}
+
+type ToolDef struct {
+	Name        string
+	Description string
+	Parameters  map[string]any
+	Required    []string
+}
+
+// ModelClient defines the domain-agnostic interface for streaming LLM generation.
 type ModelClient interface {
-	GenerateContentStream(ctx context.Context, model string, history []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error]
-}
-
-// GenAIClient is the physical implementation that wraps the official Google GenAI SDK.
-type GenAIClient struct {
-	client *genai.Client
-}
-
-func NewGenAIClient(client *genai.Client) *GenAIClient {
-	return &GenAIClient{
-		client: client,
-	}
-}
-
-func (c *GenAIClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
-	return c.client.Models.GenerateContentStream(ctx, model, history, config)
+	GenerateContentStream(
+		ctx context.Context,
+		model string,
+		bundle cognition.ThinkBundle,
+		tools []ToolDef,
+	) iter.Seq2[StreamChunk, error]
 }

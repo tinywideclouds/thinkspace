@@ -141,7 +141,8 @@ message WSEvent {
     RequestReviewPayload request_review = 9;
     AvailableSpacesPayload available_spaces = 10;
     SyncHistoryPayload sync_history = 15;
-    PreviewContextPayload preview_context = 16;
+    
+    ThinkBundlePayload think_bundle = 16;
 
     // Inbound
     SubmitPromptPayload submit_prompt = 11;
@@ -149,4 +150,40 @@ message WSEvent {
     ReviewDecisionPayload review_decision = 13;
     ApproveContextPayload approve_context = 17;
   }
+}
+
+message SystemRulesPayload {
+	string persona = 1;
+	string formatting_constraints = 2;
+}
+
+message MapbookPayload {
+	map<string, string> maps = 1;
+}
+
+message TrajectoryEventPayload {
+	string role = 1;
+	string content = 2;
+}
+
+message TrajectoryPayload {
+	repeated string long_term_memory = 1;
+	repeated TrajectoryEventPayload working_memory = 2;
+	TrajectoryEventPayload catalyst = 3;
+}
+
+message WorkbenchItemPayload {
+	string path = 1;
+	string content = 2;
+	int32 token_count = 3;
+}
+
+message ThinkBundlePayload {
+	string space_id = 1;
+	string chat_id = 2;
+	string preview_id = 3;
+	SystemRulesPayload rules = 4;
+	MapbookPayload mapbook = 5;
+	TrajectoryPayload trajectory = 6;
+	repeated WorkbenchItemPayload workbench = 7;
 }

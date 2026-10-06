@@ -2,236 +2,93 @@ package session_test
 
 import (
 	"context"
-	"errors"
-	"iter"
 	"log/slog"
 	"os"
-	"strings"
+	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"google.golang.org/genai"
 )
 
-type mockDelegatorClient struct {
-	responses []*genai.GenerateContentResponse
-	callIndex int
-
-	capturedPrompts []string // Stores the last message of every history submitted to the mock
-}
-
-func (m *mockDelegatorClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, configuration *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
-	if len(history) > 0 && len(history[len(history)-1].Parts) > 0 {
-		m.capturedPrompts = append(m.capturedPrompts, history[len(history)-1].Parts[0].Text)
-	}
-
-	return func(yield func(*genai.GenerateContentResponse, error) bool) {
-		if m.callIndex < len(m.responses) {
-			resp := m.responses[m.callIndex]
-			m.callIndex++
-
-			if resp == nil {
-				yield(nil, errors.New("simulated stream failure"))
-				return
-			}
-			yield(resp, nil)
-		}
-	}
-}
-
-func TestDelegator_ExecuteProposeChange_SkipStrategy(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+func TestDelegator_ExecuteProposeChange_Success(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	workspaceRoot := t.TempDir()
 	bus := chat.NewEventBus()
 
 	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-skip")
+	thread, _ := workspaceService.StartThread(ctx, "test-thread")
+	os.MkdirAll(filepath.Join(workspaceRoot, "chats", "test-thread"), 0755)
 
-	client := &mockDelegatorClient{}
-	llmAdapter := llm.NewAdapter(client)
+	client := &mockModelClient{}
 	flow := &mockFlow{}
 	emitter := &mockEmitter{}
 
-	delegator := session.NewDelegator(logger, workspaceService, llmAdapter, nil, flow, emitter, "golang", "", flows.FlowConfig{})
-	ui := &mockUserInterface{strategyToReturn: session.StrategySkip}
+	delegator := session.NewDelegator(
+		logger, workspaceService, client, nil, flow, emitter, "golang", "Rules", flows.FlowConfig{},
+	)
+
+	userInterface := &mockUserInterface{strategyToReturn: session.StrategyManual, reviewToReturn: true}
 
 	call := llm.ToolCall{
 		Name: "propose_change",
-		Args: map[string]any{},
+		Args: map[string]any{
+			"agent_tasks": []any{
+				map[string]any{"instruction": "do test"},
+			},
+		},
 	}
 
-	err := delegator.ExecuteProposeChange(ctx, thread, &mockThinkSpace{}, nil, ui, call, "test-model")
+	space := &mockThinkSpace{}
+	bundle := cognition.ThinkBundle{}
+
+	err := delegator.ExecuteProposeChange(ctx, thread, space, bundle, userInterface, call, "test-model")
 	if err != nil {
 		t.Fatalf("ExecuteProposeChange failed: %v", err)
+	}
+
+	if !flow.executeCalled {
+		t.Errorf("Expected FanOutFlow to be executed")
+	}
+
+	if userInterface.reviewedBranch != "candidate/mock-123" {
+		t.Errorf("Expected branch 'candidate/mock-123' to be reviewed, got '%s'", userInterface.reviewedBranch)
+	}
+}
+
+func TestDelegator_ExecuteProposeChange_AllFailed(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, t.TempDir(), chat.NewEventBus())
+	thread, _ := workspaceService.StartThread(ctx, "test-thread")
+
+	flow := &mockFlowFail{}
+	delegator := session.NewDelegator(logger, workspaceService, &mockModelClient{}, nil, flow, &mockEmitter{}, "golang", "", flows.FlowConfig{})
+
+	ui := &mockUserInterface{}
+	err := delegator.ExecuteProposeChange(ctx, thread, &mockThinkSpace{}, cognition.ThinkBundle{}, ui, llm.ToolCall{}, "test-model")
+
+	if err != nil {
+		t.Fatalf("Did not expect an error for sub-agent test failures, got %v", err)
 	}
 
 	if ui.reviewedBranch != "" {
-		t.Errorf("Expected UI review step to be skipped, but got review for: %s", ui.reviewedBranch)
+		t.Errorf("Expected no branch to reach manual review when all fail")
 	}
 }
 
-func TestDelegator_ExecuteProposeChange_WrapUpStreamError(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+type mockFlowFail struct{}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-err")
-
-	client := &mockDelegatorClient{
-		responses: []*genai.GenerateContentResponse{
-			nil, // Force the final wrapUpStream loop to fail
-		},
-	}
-	llmAdapter := llm.NewAdapter(client)
-	flow := &mockFlow{}
-	emitter := &mockEmitter{}
-
-	delegator := session.NewDelegator(logger, workspaceService, llmAdapter, nil, flow, emitter, "golang", "", flows.FlowConfig{})
-	ui := &mockUserInterface{strategyToReturn: session.StrategyManual}
-
-	call := llm.ToolCall{
-		Name: "propose_change",
-		Args: map[string]any{},
-	}
-
-	err := delegator.ExecuteProposeChange(ctx, thread, &mockThinkSpace{}, nil, ui, call, "test-model")
-
-	if err != nil {
-		t.Fatalf("Expected delegator to swallow wrap-up stream error and complete gracefully, but it returned: %v", err)
-	}
-}
-
-func TestDelegator_TelemetryEmission(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-telemetry")
-
-	client := &mockDelegatorClient{
-		responses: []*genai.GenerateContentResponse{},
-	}
-
-	emitter := &mockEmitter{}
-	delegator := session.NewDelegator(logger, workspaceService, llm.NewAdapter(client), nil, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
-
-	ui := &mockUserInterface{strategyToReturn: session.StrategyManual}
-	call := llm.ToolCall{Name: "propose_change", Args: map[string]any{}}
-
-	_ = delegator.ExecuteProposeChange(ctx, thread, &mockThinkSpace{}, nil, ui, call, "test-model")
-
-	var foundPropose, foundStrategy bool
-	for _, e := range emitter.events {
-		if e.channel != "manager" {
-			t.Errorf("Expected Delegator to only emit to 'manager' channel")
-		}
-
-		if e.event.Type == "log" && strings.Contains(e.event.Message, "Initiating parallel FanOut Flow") {
-			foundPropose = true
-		}
-
-		if e.event.Type == "log" && strings.Contains(e.event.Message, "User selected strategy") {
-			foundStrategy = true
-			if e.event.Payload["strategy"] != "Manual Review" {
-				t.Errorf("Expected strategy payload to be 'Manual Review', got %v", e.event.Payload["strategy"])
-			}
-		}
-	}
-
-	if !foundPropose {
-		t.Errorf("Expected Delegator to emit fan-out initiation log event")
-	}
-	if !foundStrategy {
-		t.Errorf("Expected Delegator to emit strategy selection log event with payload")
-	}
-}
-
-func TestDelegator_ExecuteProposeChange_ReviewTemplate(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-template")
-
-	client := &mockDelegatorClient{
-		responses: []*genai.GenerateContentResponse{
-			{
-				Candidates: []*genai.Candidate{{
-					Content: &genai.Content{
-						Parts: []*genai.Part{{Text: "Mock LLM Evaluation"}},
-					},
-				}},
-			},
-			{
-				Candidates: []*genai.Candidate{{
-					Content: &genai.Content{
-						Parts: []*genai.Part{{Text: "Wrap up"}},
-					},
-				}},
-			},
-		},
-	}
-
-	llmAdapter := llm.NewAdapter(client)
-	flow := &mockFlow{}
-	emitter := &mockEmitter{}
-
-	// Inject our custom YAML-driven templates
-	config := flows.FlowConfig{
-		ReviewPrompt: "CUSTOM REVIEW:\n{{ range .Branches }}Branch: {{ .CandidateID }} | Passed: {{ .Passed }}\n{{ end }}",
-	}
-
-	delegator := session.NewDelegator(logger, workspaceService, llmAdapter, nil, flow, emitter, "golang", "", config)
-
-	ui := &mockUserInterface{
-		strategyToReturn: session.StrategyReview,
-		reviewToReturn:   true,
-	}
-
-	call := llm.ToolCall{
-		Name: "propose_change",
-		Args: map[string]any{},
-	}
-
-	err := delegator.ExecuteProposeChange(ctx, thread, &mockThinkSpace{}, nil, ui, call, "test-model")
-	if err != nil {
-		t.Fatalf("ExecuteProposeChange failed: %v", err)
-	}
-
-	if len(client.capturedPrompts) == 0 {
-		t.Fatalf("Expected history to be captured by the mock LLM client")
-	}
-
-	expectedOutput := "CUSTOM REVIEW:\nBranch: candidate/mock-123 | Passed: true\n"
-	found := false
-	for _, prompt := range client.capturedPrompts {
-		if strings.Contains(prompt, expectedOutput) {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Errorf("Template execution failed. Expected prompt to contain:\n%s\nGot prompts:\n%v", expectedOutput, client.capturedPrompts)
-	}
+func (m *mockFlowFail) Name() string { return "FailFlow" }
+func (m *mockFlowFail) Execute(ctx context.Context, service *workspace.Service, thread *chat.Thread, space spaces.ThinkSpace, args map[string]any, config flows.FlowConfig, flowCtx flows.FlowContext, emitter telemetry.Emitter, executor workspace.SubAgentExecutor, verifier spaces.Verifier) (*flows.FlowResult, error) {
+	return &flows.FlowResult{
+		Branches: []flows.BranchResult{{CandidateID: "fail-branch", Passed: false}},
+	}, nil
 }

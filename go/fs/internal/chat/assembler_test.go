@@ -1,6 +1,7 @@
 package chat_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"uuid"
@@ -18,59 +19,42 @@ func TestAssembler_Build(t *testing.T) {
 		IsSticky: true,
 	}
 
-	manifest.Lenses["routing"] = []uuid.UUID{uuid.NewV7()}
-
 	assemblyRequest := chat.AssemblyRequest{
-		Manifest:     manifest,
-		ActiveLenses: []string{},
+		Manifest: manifest,
 		RecentEvents: []chat.Event{
-			chat.NewEvent(chat.EventPrompt, "Recent question"),
+			chat.NewEvent(chat.EventModel, "Previous answer"),
+		},
+		Catalyst: &chat.Event{
+			ID:      uuid.NewV7(),
+			Type:    chat.EventPrompt,
+			Content: "Recent question",
 		},
 	}
 
 	assembler := chat.NewAssembler()
-	contextHistory, err := assembler.Build(assemblyRequest)
+	trajectory, err := assembler.Build(context.Background(), assemblyRequest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(contextHistory) != 3 {
-		t.Fatalf("Expected 3 content blocks (sticky + tags + recent event), got %d", len(contextHistory))
+	if len(trajectory.LongTermMemory) != 1 {
+		t.Fatalf("Expected 1 sticky memory, got %d", len(trajectory.LongTermMemory))
 	}
-
-	if !strings.Contains(contextHistory[0].Parts[0].Text, "idiomatic Go") {
+	if !strings.Contains(trajectory.LongTermMemory[0], "idiomatic Go") {
 		t.Errorf("Missing sticky context")
 	}
-	if !strings.Contains(contextHistory[1].Parts[0].Text, "Available Conceptual Tags") || !strings.Contains(contextHistory[1].Parts[0].Text, "routing") {
-		t.Errorf("Missing available conceptual tags projection")
-	}
-	if contextHistory[2].Parts[0].Text != "Recent question" {
-		t.Errorf("Missing recent event context")
-	}
-}
 
-func TestAssembler_Build_TruncatesTrajectory(t *testing.T) {
-	manifest := chat.NewThreadManifest("test-thread")
-
-	var events []chat.Event
-	for i := 0; i < 10; i++ {
-		events = append(events, chat.NewEvent(chat.EventPrompt, "msg"))
+	if len(trajectory.WorkingMemory) != 1 {
+		t.Fatalf("Expected 1 working memory event, got %d", len(trajectory.WorkingMemory))
+	}
+	if trajectory.WorkingMemory[0].Role != "model" {
+		t.Errorf("Expected role 'model', got %s", trajectory.WorkingMemory[0].Role)
 	}
 
-	assemblyRequest := chat.AssemblyRequest{
-		Manifest:     manifest,
-		ActiveLenses: []string{},
-		RecentEvents: events,
+	if trajectory.Catalyst.Content != "Recent question" {
+		t.Errorf("Missing recent catalyst context")
 	}
-
-	assembler := chat.NewAssembler()
-	contextHistory, err := assembler.Build(assemblyRequest)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// 1 system tag message + 5 truncated recent events
-	if len(contextHistory) != 6 {
-		t.Fatalf("Expected exactly 6 content blocks due to sliding window truncation, got %d", len(contextHistory))
+	if trajectory.Catalyst.Role != "user" {
+		t.Errorf("Expected catalyst role 'user', got %s", trajectory.Catalyst.Role)
 	}
 }

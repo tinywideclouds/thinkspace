@@ -1,15 +1,15 @@
 package chat
 
 import (
-	"strings"
+	"context"
 
-	"google.golang.org/genai"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 )
 
 type AssemblyRequest struct {
 	Manifest     *ThreadManifest
-	ActiveLenses []string
 	RecentEvents []Event
+	Catalyst     *Event // The explicit triggering event (usually a user prompt) that initiated the current assembly request.
 }
 
 type Assembler struct{}
@@ -18,65 +18,36 @@ func NewAssembler() *Assembler {
 	return &Assembler{}
 }
 
-func (a *Assembler) Build(request AssemblyRequest) ([]*genai.Content, error) {
-	var contextHistory []*genai.Content
+func (a *Assembler) Build(ctx context.Context, req AssemblyRequest) (cognition.Trajectory, error) {
+	var traj cognition.Trajectory
 
-	for _, digest := range request.Manifest.Digests {
-		if digest.IsSticky {
-			contextHistory = append(contextHistory, &genai.Content{
-				Role:  "user",
-				Parts: []*genai.Part{{Text: "[Sticky Context]: " + digest.Summary}},
-			})
+	for _, d := range req.Manifest.Digests {
+		if d.IsSticky {
+			traj.LongTermMemory = append(traj.LongTermMemory, d.Summary)
 		}
 	}
 
-	for _, tag := range request.ActiveLenses {
-		if digestIDs, exists := request.Manifest.Lenses[tag]; exists {
-			for _, id := range digestIDs {
-				if digest, ok := request.Manifest.Digests[id]; ok {
-					contextHistory = append(contextHistory, &genai.Content{
-						Role:  "user",
-						Parts: []*genai.Part{{Text: "[Context - " + tag + "]: " + digest.Summary}},
-					})
-				}
-			}
-		}
-	}
-
-	// Project the available tags so the LLM knows what to query
-	var availableTags []string
-	for tag := range request.Manifest.Lenses {
-		availableTags = append(availableTags, tag)
-	}
-
-	tagMessage := "[No historical tags currently defined in workspace]"
-	if len(availableTags) > 0 {
-		tagMessage = "[Available Conceptual Tags for memory retrieval: " + strings.Join(availableTags, ", ") + "]"
-	}
-
-	contextHistory = append(contextHistory, &genai.Content{
-		Role:  "user",
-		Parts: []*genai.Part{{Text: tagMessage}},
-	})
-
-	// Append the recent conversational events (capped to the last 5 to avoid bloating)
-	windowSize := 5
-	start := 0
-	if len(request.RecentEvents) > windowSize {
-		start = len(request.RecentEvents) - windowSize
-	}
-
-	for i := start; i < len(request.RecentEvents); i++ {
-		event := request.RecentEvents[i]
+	for _, ev := range req.RecentEvents {
 		role := "user"
-		if event.Type == EventModel {
+		if ev.Type == EventModel {
 			role = "model"
 		}
-		contextHistory = append(contextHistory, &genai.Content{
-			Role:  role,
-			Parts: []*genai.Part{{Text: event.Content}},
+		traj.WorkingMemory = append(traj.WorkingMemory, cognition.TrajectoryEvent{
+			Role:    role,
+			Content: ev.Content,
 		})
 	}
 
-	return contextHistory, nil
+	if req.Catalyst != nil {
+		role := "user"
+		if req.Catalyst.Type == EventModel {
+			role = "model"
+		}
+		traj.Catalyst = cognition.TrajectoryEvent{
+			Role:    role,
+			Content: req.Catalyst.Content,
+		}
+	}
+
+	return traj, nil
 }

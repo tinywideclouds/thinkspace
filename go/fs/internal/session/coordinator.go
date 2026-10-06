@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"google.golang.org/genai"
 	"uuid"
 )
 
@@ -67,7 +67,7 @@ type UserInterface interface {
 type Coordinator struct {
 	logger           *slog.Logger
 	workspaceService *workspace.Service
-	llmAdapter       *llm.Adapter
+	modelClient      llm.ModelClient
 	emitter          telemetry.Emitter
 	delegator        *Delegator
 }
@@ -75,14 +75,14 @@ type Coordinator struct {
 func NewCoordinator(
 	logger *slog.Logger,
 	workspaceService *workspace.Service,
-	llmAdapter *llm.Adapter,
+	modelClient llm.ModelClient,
 	emitter telemetry.Emitter,
 	delegator *Delegator,
 ) *Coordinator {
 	return &Coordinator{
 		logger:           logger,
 		workspaceService: workspaceService,
-		llmAdapter:       llmAdapter,
+		modelClient:      modelClient,
 		emitter:          emitter,
 		delegator:        delegator,
 	}
@@ -93,7 +93,7 @@ func (c *Coordinator) ExecuteTurn(
 	thread *chat.Thread,
 	manifest *chat.ThreadManifest,
 	thinkSpace spaces.ThinkSpace,
-	history []*genai.Content,
+	bundle cognition.ThinkBundle,
 	userInterface UserInterface,
 ) error {
 	turnContext, cancel := context.WithTimeout(ctx, thinkSpace.Config().TurnTimeout())
@@ -101,6 +101,7 @@ func (c *Coordinator) ExecuteTurn(
 
 	managerModel := thinkSpace.Config().Roles.Manager.Model
 	maxIterations := 3
+	tools := thinkSpace.Tools()
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		c.emitter.Emit("manager", telemetry.Event{
@@ -110,12 +111,11 @@ func (c *Coordinator) ExecuteTurn(
 			Message:   "Manager is analyzing context and formulating a plan...",
 		})
 
-		stream := c.llmAdapter.GenerateStream(
+		stream := c.modelClient.GenerateContentStream(
 			turnContext,
 			managerModel,
-			thinkSpace.Config().ManagerSystemPrompt(),
-			thinkSpace.Tools(),
-			history,
+			bundle,
+			tools,
 		)
 
 		var fullModelResponse strings.Builder
@@ -126,24 +126,21 @@ func (c *Coordinator) ExecuteTurn(
 				return fmt.Errorf("generation stream failed: %w", err)
 			}
 
-			if len(chunk.Candidates) > 0 && chunk.Candidates[0].Content != nil {
-				for _, part := range chunk.Candidates[0].Content.Parts {
-					if part.Text != "" {
-						userInterface.OnTextChunk(part.Text)
-						fullModelResponse.WriteString(part.Text)
-					}
-				}
+			if chunk.Text != "" {
+				userInterface.OnTextChunk(chunk.Text)
+				fullModelResponse.WriteString(chunk.Text)
 			}
 
-			calls := c.llmAdapter.InterceptToolCalls(chunk)
-			interceptedTools = append(interceptedTools, calls...)
+			if len(chunk.ToolCalls) > 0 {
+				interceptedTools = append(interceptedTools, chunk.ToolCalls...)
+			}
 		}
 
 		if fullModelResponse.Len() > 0 {
 			_ = c.workspaceService.LogModelResponse(turnContext, thread, fullModelResponse.String())
-			history = append(history, &genai.Content{
-				Role:  "model",
-				Parts: []*genai.Part{{Text: fullModelResponse.String()}},
+			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+				Role:    "model",
+				Content: fullModelResponse.String(),
 			})
 		}
 
@@ -193,9 +190,9 @@ func (c *Coordinator) ExecuteTurn(
 				}
 			}
 
-			history = append(history, &genai.Content{
-				Role:  "user",
-				Parts: []*genai.Part{{Text: toolResponse.String()}},
+			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+				Role:    "user",
+				Content: toolResponse.String(),
 			})
 			continue
 		}
@@ -208,7 +205,7 @@ func (c *Coordinator) ExecuteTurn(
 				Message:   "Manager is proposing changes and delegating to sub-agents...",
 			})
 
-			err := c.delegator.ExecuteProposeChange(turnContext, thread, thinkSpace, history, userInterface, call, managerModel)
+			err := c.delegator.ExecuteProposeChange(turnContext, thread, thinkSpace, bundle, userInterface, call, managerModel)
 
 			if err != nil {
 				c.logger.WarnContext(turnContext, "tool execution failed, bouncing back to manager", "error", err)
@@ -220,9 +217,9 @@ func (c *Coordinator) ExecuteTurn(
 				})
 				userInterface.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** %v\nAsking Manager to self-correct...\n", err))
 
-				history = append(history, &genai.Content{
-					Role:  "user",
-					Parts: []*genai.Part{{Text: fmt.Sprintf("[System Tool Error: propose_change failed with: %v. Please review your requested target_files and parameters, and retry.]", err)}},
+				bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+					Role:    "user",
+					Content: fmt.Sprintf("[System Tool Error: propose_change failed with: %v. Please review your requested target_files and parameters, and retry.]", err),
 				})
 				continue
 			}

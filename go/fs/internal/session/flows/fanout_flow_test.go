@@ -10,11 +10,12 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"google.golang.org/genai"
 )
 
 // --- Mocks ---
@@ -94,7 +95,7 @@ func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	return spaces.ThinkSpaceConfig{}
 }
 
-func (m *mockThinkSpace) Tools() []*genai.Tool {
+func (m *mockThinkSpace) Tools() []llm.ToolDef {
 	return nil
 }
 
@@ -102,8 +103,16 @@ func (m *mockThinkSpace) Verifier() spaces.Verifier {
 	return nil
 }
 
+type mockMapbook struct{}
+
+func (m *mockMapbook) GenerateLayers(ctx context.Context, workspaceRoot string) (map[assembler.MapbookLayer]string, error) {
+	return map[assembler.MapbookLayer]string{
+		assembler.LayerStructural: "Mock Tree",
+	}, nil
+}
+
 func (m *mockThinkSpace) Mapbook() assembler.Mapbook {
-	return nil
+	return &mockMapbook{}
 }
 
 func (m *mockThinkSpace) Patcher() workspace.Patcher {
@@ -140,7 +149,7 @@ func (m *mockEmitter) Emit(channel string, event telemetry.Event) {
 
 // --- Tests ---
 
-func TestFanOutFlow_CleanRun_WithJITInjection(t *testing.T) {
+func TestFanOutFlow_CleanRun_WithThinkBundle(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	flow := flows.NewFanOutFlow(logger)
 
@@ -165,11 +174,11 @@ func TestFanOutFlow_CleanRun_WithJITInjection(t *testing.T) {
 		},
 	}
 	flowConfig := flows.FlowConfig{RetryPrompt: "Trace: {{.ErrorTrace}}"}
-	flowContext := flows.FlowContext{FlowID: "flow-123", SpaceID: "golang"}
+	flowContext := flows.FlowContext{FlowID: "flow-123", SpaceID: "golang", BaseAgentRules: "Worker Persona"}
 
-	var briefingsReceived []workspace.SubAgentBriefing
-	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
-		briefingsReceived = append(briefingsReceived, briefing)
+	var bundlesReceived []cognition.ThinkBundle
+	executor := func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+		bundlesReceived = append(bundlesReceived, bundle)
 		return nil
 	}
 
@@ -178,12 +187,19 @@ func TestFanOutFlow_CleanRun_WithJITInjection(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(briefingsReceived) != 1 {
-		t.Fatalf("expected 1 execution attempt, got %d", len(briefingsReceived))
+	if len(bundlesReceived) != 1 {
+		t.Fatalf("expected 1 execution attempt, got %d", len(bundlesReceived))
 	}
 
-	if !strings.Contains(briefingsReceived[0].ContextDigest, "mock physical file content") {
-		t.Errorf("expected JIT workbench content to be injected, got: %s", briefingsReceived[0].ContextDigest)
+	bundle := bundlesReceived[0]
+	if bundle.Rules.Persona != "Worker Persona" {
+		t.Errorf("expected Worker Persona in rules")
+	}
+	if len(bundle.Workbench) != 1 || bundle.Workbench[0].Path != "src/main.go" {
+		t.Errorf("expected Workbench to materialize target file")
+	}
+	if len(bundle.Trajectory.LongTermMemory) != 1 || bundle.Trajectory.LongTermMemory[0] != "Basic server built" {
+		t.Errorf("expected context digest in long term memory")
 	}
 
 	expectedBranch := "candidate/chat-1-flow-123-agent-1"
@@ -227,7 +243,7 @@ func TestFanOutFlow_FailFast_HallucinatedFile(t *testing.T) {
 	flowConfig := flows.FlowConfig{}
 	flowContext := flows.FlowContext{FlowID: "flow-123", SpaceID: "golang"}
 
-	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+	executor := func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
 		t.Fatal("executor should never be called; flow should fail-fast beforehand")
 		return nil
 	}
@@ -269,9 +285,9 @@ func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
 	flowConfig := flows.FlowConfig{RetryPrompt: "Trace: {{.ErrorTrace}}\nRules: {{.BaseAgentRules}}"}
 	flowContext := flows.FlowContext{FlowID: "flow-123", BaseAgentRules: "Must use /src dir"}
 
-	var briefingsReceived []workspace.SubAgentBriefing
-	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
-		briefingsReceived = append(briefingsReceived, briefing)
+	var bundlesReceived []cognition.ThinkBundle
+	executor := func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+		bundlesReceived = append(bundlesReceived, bundle)
 		return nil
 	}
 
@@ -280,11 +296,11 @@ func TestFanOutFlow_RetryInjectsContext(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(briefingsReceived) != 2 {
-		t.Fatalf("expected 2 execution attempts, got %d", len(briefingsReceived))
+	if len(bundlesReceived) != 2 {
+		t.Fatalf("expected 2 execution attempts, got %d", len(bundlesReceived))
 	}
 
-	retryInstruction := briefingsReceived[1].Instruction
+	retryInstruction := bundlesReceived[1].Trajectory.Catalyst.Content
 	if !strings.Contains(retryInstruction, "Trace: compile error") {
 		t.Errorf("retry instruction missing error trace: %s", retryInstruction)
 	}
@@ -320,13 +336,12 @@ func TestFanOutFlow_TelemetryEmission(t *testing.T) {
 	flowConfig := flows.FlowConfig{}
 	flowContext := flows.FlowContext{FlowID: "flow-999", SpaceID: "golang", FlowSummary: "Testing telemetry routing"}
 
-	executor := func(ctx context.Context, briefing workspace.SubAgentBriefing, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
+	executor := func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
 		return nil
 	}
 
 	_, _ = flow.Execute(context.Background(), service, thread, space, args, flowConfig, flowContext, emitter, executor, verifier)
 
-	// Validate the routing and dynamic payload mappings
 	var foundStart, foundSpawn, foundComplete bool
 
 	for _, e := range emitter.events {
@@ -351,7 +366,6 @@ func TestFanOutFlow_TelemetryEmission(t *testing.T) {
 			}
 		}
 
-		// flow_complete routes to the manager so it can summarize
 		if e.channel == "manager" {
 			if e.event.Type == "flow_complete" {
 				foundComplete = true

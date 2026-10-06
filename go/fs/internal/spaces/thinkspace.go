@@ -2,13 +2,13 @@ package spaces
 
 import (
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
+	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"google.golang.org/genai"
 )
 
 type ThinkSpace interface {
 	Config() ThinkSpaceConfig
-	Tools() []*genai.Tool
+	Tools() []llm.ToolDef
 	Verifier() Verifier
 	Mapbook() assembler.Mapbook
 

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"google.golang.org/genai"
 )
 
 // --- Mocks ---
@@ -45,21 +45,26 @@ func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { re
 func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
 
 type spyModelClient struct {
-	responses       []*genai.GenerateContentResponse
-	err             error
-	capturedModel   string
-	capturedHistory []*genai.Content
-	capturedConfig  *genai.GenerateContentConfig
+	responses      []llm.StreamChunk
+	err            error
+	capturedModel  string
+	capturedBundle cognition.ThinkBundle
+	capturedTools  []llm.ToolDef
 }
 
-func (m *spyModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
+func (m *spyModelClient) GenerateContentStream(
+	ctx context.Context,
+	model string,
+	bundle cognition.ThinkBundle,
+	tools []llm.ToolDef,
+) iter.Seq2[llm.StreamChunk, error] {
 	m.capturedModel = model
-	m.capturedHistory = history
-	m.capturedConfig = config
+	m.capturedBundle = bundle
+	m.capturedTools = tools
 
-	return func(yield func(*genai.GenerateContentResponse, error) bool) {
+	return func(yield func(llm.StreamChunk, error) bool) {
 		if m.err != nil {
-			yield(nil, m.err)
+			yield(llm.StreamChunk{}, m.err)
 			return
 		}
 		for _, resp := range m.responses {
@@ -97,36 +102,37 @@ func TestSubAgentFactory_ExecutionWithPatcher(t *testing.T) {
 	domainSystemPrompt := "Base domain rules"
 	taskInstruction := "write a main file"
 	llmOutput := `{"patches": []}`
-	maxTokens := 8192
 
 	spyClient := &spyModelClient{
-		responses: []*genai.GenerateContentResponse{
-			{
-				Candidates: []*genai.Candidate{
-					{
-						Content: &genai.Content{
-							Parts: []*genai.Part{{Text: llmOutput}},
-						},
-					},
-				},
+		responses: []llm.StreamChunk{
+			{Text: llmOutput},
+		},
+	}
+
+	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", patcher)
+	tokenChan := make(chan workspace.AgentToken, 10)
+
+	bundle := cognition.ThinkBundle{
+		Rules: cognition.SystemRules{
+			Persona: domainSystemPrompt,
+		},
+		Trajectory: cognition.Trajectory{
+			Catalyst: cognition.TrajectoryEvent{
+				Role:    "user",
+				Content: taskInstruction,
 			},
 		},
 	}
 
-	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", domainSystemPrompt, maxTokens, patcher)
-	tokenChan := make(chan workspace.AgentToken, 10)
-
-	briefing := workspace.SubAgentBriefing{Instruction: taskInstruction}
-	err := executor(ctx, briefing, sandbox, 1, tokenChan)
+	err := executor(ctx, bundle, sandbox, 1, tokenChan)
 	if err != nil {
 		t.Fatalf("executor failed: %v", err)
 	}
 	close(tokenChan)
 
-	// Assert Instructions Fused
-	actualSysPrompt := spyClient.capturedConfig.SystemInstruction.Parts[0].Text
-	if !strings.Contains(actualSysPrompt, "Base domain rules") || !strings.Contains(actualSysPrompt, "Mock patcher formatting rules") {
-		t.Errorf("expected combined system prompt, got %q", actualSysPrompt)
+	// Assert Formatting Rules were injected into the bundle
+	if spyClient.capturedBundle.Rules.FormattingConstraints != "Mock patcher formatting rules" {
+		t.Errorf("expected patcher instructions to be injected into bundle rules, got %q", spyClient.capturedBundle.Rules.FormattingConstraints)
 	}
 
 	// Assert Patcher Call
@@ -154,22 +160,14 @@ func TestSubAgentFactory_EmptyResponse(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 	spyClient := &spyModelClient{
-		responses: []*genai.GenerateContentResponse{
-			{
-				Candidates: []*genai.Candidate{
-					{
-						Content: &genai.Content{
-							Parts: []*genai.Part{{Text: ""}},
-						},
-					},
-				},
-			},
+		responses: []llm.StreamChunk{
+			{Text: ""},
 		},
 	}
 
-	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", "rules", 100, patcher)
+	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", patcher)
 
-	err := executor(ctx, workspace.SubAgentBriefing{Instruction: "do work"}, sandbox, 1, nil)
+	err := executor(ctx, cognition.ThinkBundle{}, sandbox, 1, nil)
 	if err == nil {
 		t.Fatalf("expected error on empty response, got nil")
 	}
@@ -188,22 +186,14 @@ func TestSubAgentFactory_PatcherFailure(t *testing.T) {
 	}
 
 	spyClient := &spyModelClient{
-		responses: []*genai.GenerateContentResponse{
-			{
-				Candidates: []*genai.Candidate{
-					{
-						Content: &genai.Content{
-							Parts: []*genai.Part{{Text: "some output"}},
-						},
-					},
-				},
-			},
+		responses: []llm.StreamChunk{
+			{Text: "some output"},
 		},
 	}
 
-	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", "rules", 100, patcher)
+	executor := llm.NewSubAgentExecutor(logger, spyClient, "test-worker", patcher)
 
-	err := executor(ctx, workspace.SubAgentBriefing{Instruction: "do work"}, sandbox, 1, nil)
+	err := executor(ctx, cognition.ThinkBundle{}, sandbox, 1, nil)
 	if err == nil {
 		t.Fatalf("expected error bubbling from patcher, got nil")
 	}

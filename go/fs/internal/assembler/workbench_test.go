@@ -47,8 +47,8 @@ func TestWorkbench_Build(t *testing.T) {
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if res != "" {
-			t.Errorf("expected empty string, got %s", res)
+		if len(res) != 0 {
+			t.Errorf("expected empty items slice, got %d items", len(res))
 		}
 	})
 
@@ -57,11 +57,14 @@ func TestWorkbench_Build(t *testing.T) {
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		if !strings.Contains(res, "package main") {
-			t.Errorf("missing file content in output: %s", res)
+		if len(res) != 1 {
+			t.Fatalf("expected 1 item, got %d", len(res))
 		}
-		if !strings.Contains(res, "### Workbench Files") {
-			t.Errorf("missing markdown header in output")
+		if res[0].Path != "src/main.go" {
+			t.Errorf("expected path 'src/main.go', got '%s'", res[0].Path)
+		}
+		if !strings.Contains(res[0].Content, "package main") {
+			t.Errorf("missing file content in output: %s", res[0].Content)
 		}
 	})
 

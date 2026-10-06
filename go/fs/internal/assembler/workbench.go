@@ -3,8 +3,8 @@ package assembler
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -17,21 +17,24 @@ func NewWorkbench() *Workbench {
 
 // Build reads requested files from the agent's sandbox.
 // It fails fast and returns an error if the Manager hallucinated a file path.
-func (w *Workbench) Build(ctx context.Context, sandbox workspace.CandidateSandbox, targetFiles []string) (string, error) {
+func (w *Workbench) Build(ctx context.Context, sandbox workspace.CandidateSandbox, targetFiles []string) ([]cognition.WorkbenchItem, error) {
 	if len(targetFiles) == 0 {
-		return "", nil
+		return nil, nil
 	}
 
-	var workbenchContext strings.Builder
-	workbenchContext.WriteString("\n\n### Workbench Files (Current State)\n")
+	var items []cognition.WorkbenchItem
 
 	for _, filePath := range targetFiles {
 		content, err := sandbox.ReadFile(ctx, filePath)
 		if err != nil || len(content) == 0 {
-			return "", fmt.Errorf("fail-fast: requested target file '%s' does not exist or is empty", filePath)
+			return nil, fmt.Errorf("fail-fast: requested target file '%s' does not exist or is empty", filePath)
 		}
-		workbenchContext.WriteString(fmt.Sprintf("\n--- %s ---\n```\n%s\n```\n", filePath, string(content)))
+		items = append(items, cognition.WorkbenchItem{
+			Path:       filePath,
+			Content:    string(content),
+			TokenCount: 0, // Placeholder for future token counting integration
+		})
 	}
 
-	return workbenchContext.String(), nil
+	return items, nil
 }

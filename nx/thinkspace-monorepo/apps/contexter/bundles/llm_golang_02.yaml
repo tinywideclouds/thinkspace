@@ -29,7 +29,6 @@ files:
   - ../../go/fs/internal/gitfs/gogit_engine.go
   - ../../go/fs/internal/llm/client.go
   - ../../go/fs/internal/llm/llm.md
-  - ../../go/fs/internal/llm/mock_client_test.go
   - ../../go/fs/internal/llm/subagent_test.go
   - ../../go/fs/internal/llm/subagent.go
   - ../../go/fs/internal/llm/tools.go
@@ -49,8 +48,6 @@ files:
   - ../../go/fs/internal/workspace/manager_test.go
   - ../../go/fs/internal/workspace/manager.go
   - ../../go/fs/internal/config/scaffold.go
-  - ../../go/fs/internal/llm/adapter_test.go
-  - ../../go/fs/internal/llm/adapter.go
   - ../../go/fs/internal/config/bootstrap.go
   - ../../go/fs/internal/config/defaults/fanout.yaml
   - ../../go/fs/internal/config/defaults/golang.yaml
@@ -87,8 +84,6 @@ files:
   - ../../go/fs/internal/chat/assembler_test.go
   - ../../go/fs/internal/chat/assembler.go
   - ../../go/fs/internal/gitfs/implementation.md
-  - ../../go/fs/internal/session/context_assembler_test.go
-  - ../../go/fs/internal/session/context_assembler.go
   - ../../go/fs/internal/spaces/golang/patcher_test.go
   - ../../go/fs/internal/spaces/golang/patcher.go
   - ../../go/fs/internal/workspace/patcher.go
@@ -101,4 +96,10 @@ files:
   - ../../go/fs/internal/llm/testdata/healers/gemini/02_stray_text_raw.txt
   - ../../go/fs/internal/llm/testdata/healers/gemini/03_bad_escapes_expected.json
   - ../../go/fs/internal/llm/testdata/healers/gemini/03_bad_escapes_raw.txt
-last_context: llm_golang_36.md
+  - ../../go/fs/docs/think_bundles.md
+  - ../../go/fs/internal/llm/gemini/adapter.go
+  - ../../go/fs/internal/session/delegator_test.go
+  - ../../go/fs/internal/session/delegator.go
+  - ../../go/fs/internal/telemetry/emitter.go
+  - ../../go/fs/internal/llm/client_test.go
+last_context: llm_golang_42.md

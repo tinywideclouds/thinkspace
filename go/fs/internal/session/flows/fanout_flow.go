@@ -14,6 +14,7 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -85,11 +86,15 @@ type agentResult struct {
 }
 
 type FanOutFlow struct {
-	logger *slog.Logger
+	logger    *slog.Logger
+	workbench *assembler.Workbench
 }
 
 func NewFanOutFlow(logger *slog.Logger) *FanOutFlow {
-	return &FanOutFlow{logger: logger}
+	return &FanOutFlow{
+		logger:    logger,
+		workbench: assembler.NewWorkbench(),
+	}
 }
 
 func (f *FanOutFlow) Name() string {
@@ -143,7 +148,7 @@ func (f *FanOutFlow) Execute(
 	for i, task := range tasks {
 		go func(agentIndex int, task SubAgentTask) {
 			results <- f.runAgentPipeline(
-				ctx, service, thread, flowContext, retryTemplate, task, agentIndex, emitter, executor, verifier,
+				ctx, service, thread, space, flowContext, retryTemplate, task, agentIndex, emitter, executor, verifier,
 			)
 		}(i+1, task)
 	}
@@ -232,6 +237,7 @@ func (f *FanOutFlow) runAgentPipeline(
 	ctx context.Context,
 	service *workspace.Service,
 	thread *chat.Thread,
+	space spaces.ThinkSpace,
 	flowContext FlowContext,
 	retryTemplate *template.Template,
 	task SubAgentTask,
@@ -264,8 +270,8 @@ func (f *FanOutFlow) runAgentPipeline(
 	}
 	defer sandbox.TearDown(ctx)
 
-	workbench := assembler.NewWorkbench()
-	workbenchText, err := workbench.Build(ctx, sandbox, task.TargetFiles)
+	// 1. Build The Workbench
+	workbenchItems, err := f.workbench.Build(ctx, sandbox, task.TargetFiles)
 	if err != nil {
 		agentLogger.Error("manager requested invalid target files", "error", err)
 		emitter.Emit(task.AgentID, telemetry.Event{
@@ -281,7 +287,28 @@ func (f *FanOutFlow) runAgentPipeline(
 		return agentResult{err: err}
 	}
 
-	task.ContextDigest += workbenchText
+	// 2. Build the Agent's Mapbook
+	rawMapbook, _ := space.Mapbook().GenerateLayers(ctx, service.WorkspaceRoot())
+	stringMaps := make(map[string]string)
+	for k, v := range rawMapbook {
+		stringMaps[string(k)] = v
+	}
+
+	// 3. Assemble the Execution ThinkBundle
+	agentBundle := cognition.ThinkBundle{
+		Rules: cognition.SystemRules{
+			Persona: flowContext.BaseAgentRules,
+		},
+		Mapbook: cognition.Mapbook{Maps: stringMaps},
+		Trajectory: cognition.Trajectory{
+			LongTermMemory: []string{task.ContextDigest},
+			Catalyst: cognition.TrajectoryEvent{
+				Role:    "user",
+				Content: task.Instruction,
+			},
+		},
+		Workbench: workbenchItems,
+	}
 
 	var passed bool
 	var finalTrace string
@@ -289,7 +316,7 @@ func (f *FanOutFlow) runAgentPipeline(
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		passed, finalTrace = f.executeSingleAttempt(
-			ctx, sandbox, flowContext, retryTemplate, task, agentIndex, attempt, emitter, executor, verifier, agentLogger, finalTrace,
+			ctx, sandbox, agentBundle, flowContext, retryTemplate, task, agentIndex, attempt, emitter, executor, verifier, agentLogger, finalTrace,
 		)
 		if passed {
 			break
@@ -335,6 +362,7 @@ func (f *FanOutFlow) runAgentPipeline(
 func (f *FanOutFlow) executeSingleAttempt(
 	ctx context.Context,
 	sandbox workspace.CandidateSandbox,
+	bundle cognition.ThinkBundle,
 	flowContext FlowContext,
 	retryTemplate *template.Template,
 	task SubAgentTask,
@@ -346,11 +374,6 @@ func (f *FanOutFlow) executeSingleAttempt(
 	agentLogger *slog.Logger,
 	previousTrace string,
 ) (passed bool, finalTrace string) {
-
-	briefing := workspace.SubAgentBriefing{
-		ContextDigest: task.ContextDigest,
-		Instruction:   task.Instruction,
-	}
 
 	if attempt > 1 {
 		var previousAttempt string
@@ -380,7 +403,7 @@ func (f *FanOutFlow) executeSingleAttempt(
 			PreviousAttempt: previousAttempt,
 		})
 
-		briefing.Instruction = buf.String()
+		bundle.Trajectory.Catalyst.Content = buf.String()
 	}
 
 	emitter.Emit(task.AgentID, telemetry.Event{
@@ -395,7 +418,7 @@ func (f *FanOutFlow) executeSingleAttempt(
 		}.ToMap(),
 	})
 
-	err := executor(ctx, briefing, sandbox, agentIndex, nil)
+	err := executor(ctx, bundle, sandbox, agentIndex, nil)
 	if err != nil {
 		return false, fmt.Sprintf("Execution Error: %v", err)
 	}

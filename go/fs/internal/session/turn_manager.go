@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
@@ -20,30 +20,27 @@ type TurnManager struct {
 	logger           *slog.Logger
 	registry         *config.Registry
 	workspaceManager *workspace.ServiceManager
-	llmAdapter       *llm.Adapter
-	playbackEngine   *chat.PlaybackEngine
-	contextAssembler *ContextAssembler
-	fanOutFlow       flows.Flow
 	modelClient      llm.ModelClient
+	playbackEngine   *chat.PlaybackEngine
+	chatAssembler    *chat.Assembler
+	fanOutFlow       flows.Flow
 }
 
 func NewTurnManager(
 	logger *slog.Logger,
 	registry *config.Registry,
 	workspaceManager *workspace.ServiceManager,
-	llmAdapter *llm.Adapter,
-	fanOutFlow flows.Flow,
 	modelClient llm.ModelClient,
+	fanOutFlow flows.Flow,
 ) *TurnManager {
 	return &TurnManager{
 		logger:           logger,
 		registry:         registry,
 		workspaceManager: workspaceManager,
-		llmAdapter:       llmAdapter,
-		playbackEngine:   chat.NewPlaybackEngine(),
-		contextAssembler: NewContextAssembler(),
-		fanOutFlow:       fanOutFlow,
 		modelClient:      modelClient,
+		playbackEngine:   chat.NewPlaybackEngine(),
+		chatAssembler:    chat.NewAssembler(),
+		fanOutFlow:       fanOutFlow,
 	}
 }
 
@@ -96,10 +93,12 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return fmt.Errorf("starting thread: %w", err)
 	}
 
+	var catalystEvent *chat.Event
 	if promptText != "" {
 		if err := workspaceService.LogUserPrompt(ctx, thread, promptText); err != nil {
 			return fmt.Errorf("logging user prompt: %w", err)
 		}
+		catalystEvent = &chat.Event{Type: chat.EventPrompt, Content: promptText}
 	}
 
 	emitter.Emit("manager", telemetry.Event{
@@ -114,51 +113,38 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return fmt.Errorf("loading updated state: %w", err)
 	}
 
-	assemblyReq := chat.AssemblyRequest{
+	rawMapbook, err := thinkSpace.Mapbook().GenerateLayers(ctx, workspaceService.WorkspaceRoot())
+	if err != nil {
+		return fmt.Errorf("generating mapbook layers: %w", err)
+	}
+	stringMaps := make(map[string]string)
+	for k, v := range rawMapbook {
+		stringMaps[string(k)] = v
+	}
+
+	trajectory, err := tm.chatAssembler.Build(ctx, chat.AssemblyRequest{
 		Manifest:     manifest,
-		ActiveLenses: []string{},
 		RecentEvents: graph.RecentEvents,
-	}
-
-	dynamicSystemPrompt, history, err := tm.contextAssembler.Build(ctx, thinkSpace, workspaceService.WorkspaceRoot(), assemblyReq)
+		Catalyst:     catalystEvent,
+	})
 	if err != nil {
-		return fmt.Errorf("assembling context: %w", err)
+		return fmt.Errorf("assembling trajectory: %w", err)
 	}
 
-	var fullContext strings.Builder
-	fullContext.WriteString("=== SYSTEM PROMPT ===\n")
-	fullContext.WriteString(dynamicSystemPrompt)
-	fullContext.WriteString("\n\n=== CHAT HISTORY ===\n")
-	for _, h := range history {
-		if len(h.Parts) > 0 {
-			fullContext.WriteString(fmt.Sprintf("[%s]: %s\n\n", h.Role, h.Parts[0].Text))
-		}
-	}
-
-	previewID, err := workspaceService.SaveContextPreview(ctx, thread, fullContext.String())
-	if err != nil {
-		tm.logger.WarnContext(ctx, "failed to save context preview", "error", err)
-	}
-
-	var stickyDigests []string
-	for _, d := range manifest.Digests {
-		if d.IsSticky {
-			stickyDigests = append(stickyDigests, d.Summary)
-		}
-	}
-
-	var recentHistory []string
-	for _, ev := range graph.RecentEvents {
-		recentHistory = append(recentHistory, fmt.Sprintf("[%s] %s", ev.Type, ev.Content))
+	managerBundle := cognition.ThinkBundle{
+		Rules: cognition.SystemRules{
+			Persona: thinkSpace.Config().ManagerSystemPrompt(),
+		},
+		Mapbook:    cognition.Mapbook{Maps: stringMaps},
+		Trajectory: trajectory,
+		Workbench:  []cognition.WorkbenchItem{},
 	}
 
 	turnCtx := TurnContext{
 		SpaceID:             spaceID,
 		ChatID:              chatID,
-		PreviewID:           previewID,
-		ManagerSystemPrompt: thinkSpace.Config().ManagerSystemPrompt(),
-		StickyDigests:       stickyDigests,
-		RecentHistory:       recentHistory,
+		ManagerSystemPrompt: managerBundle.Rules.Persona,
+		StickyDigests:       managerBundle.Trajectory.LongTermMemory,
 		FileContexts:        nil,
 	}
 
@@ -174,21 +160,17 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		return nil
 	}
 
-	workerModel := thinkSpace.Config().Roles.Worker.Model
-
 	executor := llm.NewSubAgentExecutor(
 		tm.logger,
 		tm.modelClient,
-		workerModel,
-		thinkSpace.Config().WorkerSystemPrompt(),
-		thinkSpace.Config().Roles.Worker.MaxTokens,
+		thinkSpace.Config().Roles.Worker.Model,
 		thinkSpace.Patcher(),
 	)
 
 	delegator := NewDelegator(
 		tm.logger,
 		workspaceService,
-		tm.llmAdapter,
+		tm.modelClient,
 		executor,
 		tm.fanOutFlow,
 		emitter,
@@ -200,17 +182,10 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 	coordinator := NewCoordinator(
 		tm.logger,
 		workspaceService,
-		tm.llmAdapter,
+		tm.modelClient,
 		emitter,
 		delegator,
 	)
 
-	tm.logger.Info("=== MANAGER CONTEXT ASSEMBLY COMPLETE ===",
-		"system_prompt_length", len(dynamicSystemPrompt),
-		"history_length", len(history),
-	)
-
-	wrappedThinkSpace := WrapSpace(thinkSpace, dynamicSystemPrompt)
-
-	return coordinator.ExecuteTurn(ctx, thread, manifest, wrappedThinkSpace, history, ui)
+	return coordinator.ExecuteTurn(ctx, thread, manifest, thinkSpace, managerBundle, ui)
 }
