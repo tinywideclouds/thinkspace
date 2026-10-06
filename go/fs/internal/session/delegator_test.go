@@ -29,10 +29,11 @@ func TestDelegator_ExecuteProposeChange_Success(t *testing.T) {
 
 	client := &mockModelClient{}
 	flow := &mockFlow{}
+	digestFlow := &mockFlow{}
 	emitter := &mockEmitter{}
 
 	delegator := session.NewDelegator(
-		logger, workspaceService, client, nil, flow, emitter, "golang", "Rules", flows.FlowConfig{},
+		logger, workspaceService, client, nil, flow, digestFlow, emitter, "golang", "Rules", flows.FlowConfig{},
 	)
 
 	userInterface := &mockUserInterface{strategyToReturn: session.StrategyManual, reviewToReturn: true}
@@ -70,7 +71,8 @@ func TestDelegator_ExecuteProposeChange_AllFailed(t *testing.T) {
 	thread, _ := workspaceService.StartThread(ctx, "test-thread")
 
 	flow := &mockFlowFail{}
-	delegator := session.NewDelegator(logger, workspaceService, &mockModelClient{}, nil, flow, &mockEmitter{}, "golang", "", flows.FlowConfig{})
+	digestFlow := &mockFlowFail{}
+	delegator := session.NewDelegator(logger, workspaceService, &mockModelClient{}, nil, flow, digestFlow, &mockEmitter{}, "golang", "", flows.FlowConfig{})
 
 	ui := &mockUserInterface{}
 	err := delegator.ExecuteProposeChange(ctx, thread, &mockThinkSpace{}, cognition.ThinkBundle{}, ui, llm.ToolCall{}, "test-model")
@@ -81,6 +83,54 @@ func TestDelegator_ExecuteProposeChange_AllFailed(t *testing.T) {
 
 	if ui.reviewedBranch != "" {
 		t.Errorf("Expected no branch to reach manual review when all fail")
+	}
+}
+
+func TestDelegator_ExecuteCreateDigest_Success(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	workspaceRoot := t.TempDir()
+	bus := chat.NewEventBus()
+
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
+	thread, _ := workspaceService.StartThread(ctx, "test-thread")
+
+	client := &mockModelClient{}
+	fanOutFlow := &mockFlow{}
+	digestFlow := &mockFlow{}
+	emitter := &mockEmitter{}
+
+	delegator := session.NewDelegator(
+		logger, workspaceService, client, nil, fanOutFlow, digestFlow, emitter, "concept", "Rules", flows.FlowConfig{},
+	)
+
+	call := llm.ToolCall{
+		Name: "create_digest",
+		Args: map[string]any{
+			"instruction": "Summarize",
+		},
+	}
+
+	bundle := cognition.ThinkBundle{
+		Trajectory: cognition.Trajectory{
+			WorkingMemory: []cognition.TrajectoryEvent{
+				{Role: "user", Content: "Let's talk about auth"},
+			},
+		},
+	}
+
+	err := delegator.ExecuteCreateDigest(ctx, thread, &mockThinkSpace{}, bundle, call)
+	if err != nil {
+		t.Fatalf("ExecuteCreateDigest failed: %v", err)
+	}
+
+	if !digestFlow.executeCalled {
+		t.Errorf("Expected DigestFlow to be executed")
+	}
+
+	finalInstruction, ok := call.Args["instruction"].(string)
+	if !ok || finalInstruction == "Summarize" {
+		t.Errorf("Expected instruction to be mutated with working memory, got: %v", finalInstruction)
 	}
 }
 

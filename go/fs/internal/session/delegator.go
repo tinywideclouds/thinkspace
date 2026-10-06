@@ -22,6 +22,7 @@ type Delegator struct {
 	modelClient      llm.ModelClient
 	executor         workspace.SubAgentExecutor
 	fanOutFlow       flows.Flow
+	digestFlow       flows.Flow
 	emitter          telemetry.Emitter
 	spaceID          string
 	baseAgentRules   string
@@ -34,6 +35,7 @@ func NewDelegator(
 	modelClient llm.ModelClient,
 	executor workspace.SubAgentExecutor,
 	fanOutFlow flows.Flow,
+	digestFlow flows.Flow,
 	emitter telemetry.Emitter,
 	spaceID string,
 	baseAgentRules string,
@@ -45,6 +47,7 @@ func NewDelegator(
 		modelClient:      modelClient,
 		executor:         executor,
 		fanOutFlow:       fanOutFlow,
+		digestFlow:       digestFlow,
 		emitter:          emitter,
 		spaceID:          spaceID,
 		baseAgentRules:   baseAgentRules,
@@ -112,41 +115,71 @@ func (d *Delegator) ExecuteProposeChange(
 	}
 
 	if len(validBranches) == 0 {
-		userInterface.OnTextChunk("\n\n❌ **All sub-agents failed verification.** Check the trace logs for details.\n")
-		_ = d.workspaceService.LogResolution(ctx, thread, flowID, false, "All candidates failed verification")
-		return nil
+		return fmt.Errorf("all %d sub-agents failed to produce verifiable code", len(result.Branches))
 	}
-
-	var branchOptions []string
-	for _, branch := range validBranches {
-		branchOptions = append(branchOptions, branch.CandidateID)
-	}
-
-	userInterface.OnTextChunk(fmt.Sprintf("\n\n✅ Sub-agents have produced %d valid candidate branches.\n", len(validBranches)))
 
 	strategy := userInterface.ChooseNextStep()
 
-	switch strategy {
-	case StrategySkip:
-		userInterface.OnTextChunk("\nSkipping candidates. The conversation will continue without merging.\n")
-		_ = d.workspaceService.LogResolution(ctx, thread, flowID, false, "Skipped by user")
-		return nil
-
-	case StrategyManual:
-		for _, branchID := range branchOptions {
-			if userInterface.ReviewCandidate(branchID) {
-				userInterface.OnTextChunk(fmt.Sprintf("\nMerging %s...\n", branchID))
-				_ = d.workspaceService.ResolveCandidate(ctx, thread, branchID, true, "Manually accepted by user")
-				return nil
-			}
+	if strategy == StrategySkip {
+		for _, branch := range validBranches {
+			_ = d.workspaceService.ResolveCandidate(ctx, thread, branch.CandidateID, false, "Skipped by user")
 		}
-		_ = d.workspaceService.LogResolution(ctx, thread, flowID, false, "All candidates manually rejected")
-		userInterface.OnTextChunk("\nNo branches selected. Continuing.\n")
-		return nil
-
-	default:
-		userInterface.OnTextChunk("\nUnsupported strategy. Defaulting to skip.\n")
-		_ = d.workspaceService.LogResolution(ctx, thread, flowID, false, "Unsupported strategy fallback")
 		return nil
 	}
+
+	var selectedBranch string
+
+	if strategy == StrategyManual {
+		for _, branch := range validBranches {
+			accepted := userInterface.ReviewCandidate(branch.CandidateID)
+			if accepted {
+				selectedBranch = branch.CandidateID
+				break
+			}
+		}
+	}
+
+	if selectedBranch != "" {
+		for _, branch := range validBranches {
+			if branch.CandidateID == selectedBranch {
+				_ = d.workspaceService.ResolveCandidate(ctx, thread, branch.CandidateID, true, "Manually accepted by user")
+			} else {
+				_ = d.workspaceService.ResolveCandidate(ctx, thread, branch.CandidateID, false, "Discarded in favor of another candidate")
+			}
+		}
+	} else {
+		for _, branch := range validBranches {
+			_ = d.workspaceService.ResolveCandidate(ctx, thread, branch.CandidateID, false, "Rejected by user")
+		}
+	}
+
+	return nil
+}
+
+func (d *Delegator) ExecuteCreateDigest(
+	ctx context.Context,
+	thread *chat.Thread,
+	space spaces.ThinkSpace,
+	bundle cognition.ThinkBundle,
+	call llm.ToolCall,
+) error {
+	flowContext := flows.FlowContext{
+		FlowID:         fmt.Sprintf("digest-%d", time.Now().Unix()),
+		SpaceID:        d.spaceID,
+		BaseAgentRules: d.baseAgentRules,
+	}
+
+	// We push the manager's recent working memory as part of the context instruction
+	// so the background agent actually has something to summarize.
+	workingMemoryStr := ""
+	for _, memory := range bundle.Trajectory.WorkingMemory {
+		workingMemoryStr += fmt.Sprintf("[%s]: %s\n\n", memory.Role, memory.Content)
+	}
+
+	call.Args["instruction"] = fmt.Sprintf("Recent Conversation Context:\n%s\n\nTask: %s", workingMemoryStr, call.Args["instruction"])
+
+	_, err := d.digestFlow.Execute(
+		ctx, d.workspaceService, thread, space, call.Args, d.flowConfig, flowContext, d.emitter, d.executor, space.Verifier(),
+	)
+	return err
 }

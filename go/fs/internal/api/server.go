@@ -27,7 +27,6 @@ func NewServer(
 	logger *slog.Logger,
 	registry *config.Registry,
 	manager *workspace.ServiceManager,
-	llmAdapter *llm.Adapter,
 	fanOutFlow flows.Flow,
 	modelClient llm.ModelClient,
 ) *Server {
@@ -35,7 +34,7 @@ func NewServer(
 		logger:      logger,
 		registry:    registry,
 		manager:     manager,
-		turnManager: session.NewTurnManager(logger, registry, manager, llmAdapter, fanOutFlow, modelClient),
+		turnManager: session.NewTurnManager(logger, registry, manager, modelClient, fanOutFlow),
 	}
 }
 

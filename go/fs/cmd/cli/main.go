@@ -15,9 +15,11 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cli"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
@@ -41,7 +43,8 @@ func main() {
 		logger.Error("Failed to initialize GenAI client", "error", err)
 		os.Exit(1)
 	}
-	modelClient := llm.NewGenAIClient(client)
+	// Use the gemini adapter which implements the llm.ModelClient interface
+	modelClient := gemini.NewAdapter(client)
 
 	homeDirectory, err := os.UserHomeDir()
 	if err != nil {
@@ -62,7 +65,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Ensure default templates exist before loading
 	config.ScaffoldDefaults(logger, configurationsDirectory)
 
 	var stateEngine workspace.ChatEngine
@@ -96,48 +98,45 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Wire Domain Dependencies
 	bus := chat.NewEventBus()
 	bus.Subscribe(chat.NewLedgerSubscriber())
 
 	workerModel := activeThinkSpace.Config().Roles.Worker.Model
-	llmAdapter := llm.NewAdapter(modelClient)
 
 	subAgentExecutor := llm.NewSubAgentExecutor(
 		logger,
 		modelClient,
 		workerModel,
-		activeThinkSpace.Config().WorkerSystemPrompt(), // Composed prompt
-		activeThinkSpace.Config().Roles.Worker.MaxTokens,
 		activeThinkSpace.Patcher(),
 	)
 
 	fanOutFlow := flows.NewFanOutFlow(logger)
+	digestFlow := flows.NewDigestFlow(logger) // NEW
 	workspaceService := workspace.NewService(logger, stateEngine, repositoryRoot, bus)
 
 	playbackEngine := chat.NewPlaybackEngine()
-	contextAssembler := session.NewContextAssembler()
+	contextAssembler := chat.NewAssembler()
 	userInterface := cli.NewTerminalUI()
 
-	// Inject the new Universal Telemetry Emitter
-	emitter := telemetry.MultiEmitter{telemetry.NewSlogEmitter(logger)}
+	emitter := telemetry.MultiTelemetryEmitter{flows.NewSlogEmitter(logger)}
 
 	delegator := session.NewDelegator(
 		logger,
 		workspaceService,
-		llmAdapter,
+		modelClient,
 		subAgentExecutor,
 		fanOutFlow,
+		digestFlow, // NEW
 		emitter,
 		*domainName,
-		spaceConfiguration.WorkerSystemPrompt(), // Composed prompt
+		spaceConfiguration.WorkerSystemPrompt(),
 		flowConfiguration,
 	)
 
 	coordinator := session.NewCoordinator(
 		logger,
 		workspaceService,
-		llmAdapter,
+		modelClient,
 		emitter,
 		delegator,
 	)
@@ -159,7 +158,7 @@ func main() {
 
 	if isNewThread {
 		fmt.Printf("🌱 Creating new exploration thread: %s\n", *chatName)
-		initialPrompt := "Generate a function to check if a point is in a unit circle. Fan this out to 2 agents using different mathematical approaches, and require unit tests."
+		initialPrompt := "Hello! Let's explore some concepts."
 		fmt.Printf("💬 Initial Prompt: %s\n", initialPrompt)
 
 		_ = workspaceService.LogUserPrompt(ctx, thread, initialPrompt)
@@ -184,30 +183,54 @@ func main() {
 		_ = workspaceService.LogUserPrompt(ctx, thread, input)
 	}
 
-	// Build the assembled LLM history from the persistent state
 	graph, manifest, err := playbackEngine.LoadState(ctx, thread)
 	if err != nil {
 		logger.Error("Failed to load playback state", "error", err)
 		os.Exit(1)
 	}
 
-	assemblyReq := chat.AssemblyRequest{
-		Manifest:     manifest,
-		ActiveLenses: []string{},
-		RecentEvents: graph.RecentEvents,
+	var catalystEvent *chat.Event
+	if len(graph.RecentEvents) > 0 {
+		last := graph.RecentEvents[len(graph.RecentEvents)-1]
+		catalystEvent = &last
+		graph.RecentEvents = graph.RecentEvents[:len(graph.RecentEvents)-1]
 	}
 
-	dynamicSystemPrompt, history, err := contextAssembler.Build(ctx, activeThinkSpace, workspaceService.WorkspaceRoot(), assemblyReq)
+	assemblyReq := chat.AssemblyRequest{
+		Manifest:     manifest,
+		RecentEvents: graph.RecentEvents,
+		Catalyst:     catalystEvent,
+	}
+
+	trajectory, err := contextAssembler.Build(ctx, assemblyReq)
 	if err != nil {
 		logger.Error("Failed to assemble context", "error", err)
 		os.Exit(1)
 	}
 
-	wrappedThinkSpace := session.WrapSpace(activeThinkSpace, dynamicSystemPrompt)
+	rawMapbook, err := activeThinkSpace.Mapbook().GenerateLayers(ctx, workspaceService.WorkspaceRoot())
+	if err != nil {
+		logger.Error("Failed to generate mapbook", "error", err)
+		os.Exit(1)
+	}
+
+	stringMaps := make(map[string]string)
+	for k, v := range rawMapbook {
+		stringMaps[string(k)] = v
+	}
+
+	managerBundle := cognition.ThinkBundle{
+		Rules: cognition.SystemRules{
+			Persona: activeThinkSpace.Config().ManagerSystemPrompt(),
+		},
+		Mapbook:    cognition.Mapbook{Maps: stringMaps},
+		Trajectory: trajectory,
+		Workbench:  []cognition.WorkbenchItem{},
+	}
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	if err := coordinator.ExecuteTurn(ctx, thread, manifest, wrappedThinkSpace, history, userInterface); err != nil {
+	if err := coordinator.ExecuteTurn(ctx, thread, manifest, activeThinkSpace, managerBundle, userInterface); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)
 	}

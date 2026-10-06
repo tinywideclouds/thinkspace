@@ -337,3 +337,16 @@ func (s *Service) GetContextPreview(ctx context.Context, thread *chat.Thread, pr
 	path := filepath.Join(thread.Dir, "previews", fmt.Sprintf("%s.md", previewID))
 	return os.ReadFile(path)
 }
+
+func (s *Service) LogDigest(ctx context.Context, thread *chat.Thread, summary string, tags []string, isSticky bool) error {
+	event := chat.NewEvent(chat.EventDigest, summary)
+	event.Tags = tags
+	isStickyStr := "false"
+	if isSticky {
+		isStickyStr = "true"
+	}
+	event.Metadata = map[string]string{
+		"is_sticky": isStickyStr,
+	}
+	return s.bus.Publish(ctx, thread, event)
+}

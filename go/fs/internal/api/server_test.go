@@ -10,10 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"google.golang.org/genai"
-
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
@@ -24,8 +23,8 @@ import (
 
 type mockModelClient struct{}
 
-func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, history []*genai.Content, config *genai.GenerateContentConfig) iter.Seq2[*genai.GenerateContentResponse, error] {
-	return func(yield func(*genai.GenerateContentResponse, error) bool) {}
+func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
+	return func(yield func(llm.StreamChunk, error) bool) {}
 }
 
 type dummyFlow struct{}
@@ -92,7 +91,6 @@ fanout:
 	manager := workspace.NewServiceManager(logger, baseRoot, factory)
 
 	mockClient := &mockModelClient{}
-	llmAdapter := llm.NewAdapter(mockClient)
 	dummyFlowInstance := &dummyFlow{}
 
 	mux := http.NewServeMux()
@@ -101,7 +99,7 @@ fanout:
 	mgmtAPI := api.NewManagementAPI(registry, manager, appConfig)
 	mgmtAPI.RegisterHandlers(mux)
 
-	wsServer := api.NewServer(logger, registry, manager, llmAdapter, dummyFlowInstance, mockClient)
+	wsServer := api.NewServer(logger, registry, manager, dummyFlowInstance, mockClient)
 	wsServer.RegisterHandlers(mux)
 
 	return mux, "golang", manager

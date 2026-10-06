@@ -149,12 +149,13 @@ func TestCoordinator_ExecuteTurn_RoutesToDelegator(t *testing.T) {
 	}
 
 	flow := &mockFlow{}
+	digestFlow := &mockFlow{}
 	executor := func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
 		return nil
 	}
 	emitter := &mockEmitter{}
 
-	delegator := session.NewDelegator(logger, workspaceService, client, executor, flow, emitter, "golang", "", flows.FlowConfig{})
+	delegator := session.NewDelegator(logger, workspaceService, client, executor, flow, digestFlow, emitter, "golang", "", flows.FlowConfig{})
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, delegator)
 
 	userInterface := &mockUserInterface{strategyToReturn: session.StrategyManual, reviewToReturn: true}
@@ -195,7 +196,7 @@ func TestCoordinator_QueryLens(t *testing.T) {
 	}
 
 	emitter := &mockEmitter{}
-	delegator := session.NewDelegator(logger, workspaceService, client, nil, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
+	delegator := session.NewDelegator(logger, workspaceService, client, nil, &mockFlow{}, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, delegator)
 
 	manifest := chat.NewThreadManifest(thread.ID)
@@ -209,5 +210,43 @@ func TestCoordinator_QueryLens(t *testing.T) {
 	}
 	if !foundLensLog {
 		t.Errorf("Expected query_lens to trigger a specific manager telemetry log")
+	}
+}
+
+func TestCoordinator_CreateDigest(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	workspaceRoot := t.TempDir()
+	bus := chat.NewEventBus()
+	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
+	thread, _ := workspaceService.StartThread(ctx, "test-thread-digest")
+
+	client := &mockModelClient{
+		responses: []llm.StreamChunk{
+			{
+				ToolCalls: []llm.ToolCall{{
+					Name: "create_digest",
+					Args: map[string]any{
+						"topic_name":  "Memory Compression",
+						"tags":        []any{"auth"},
+						"instruction": "Summarize the auth discussion.",
+					},
+				}},
+			},
+		},
+	}
+
+	emitter := &mockEmitter{}
+	digestFlow := &mockFlow{}
+	delegator := session.NewDelegator(logger, workspaceService, client, nil, &mockFlow{}, digestFlow, emitter, "golang", "", flows.FlowConfig{})
+	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, delegator)
+
+	manifest := chat.NewThreadManifest(thread.ID)
+	_ = coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, cognition.ThinkBundle{}, &mockUserInterface{})
+
+	if !digestFlow.executeCalled {
+		t.Errorf("Expected create_digest tool to route execution to the injected DigestFlow")
 	}
 }

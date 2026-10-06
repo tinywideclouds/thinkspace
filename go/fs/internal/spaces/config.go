@@ -42,6 +42,14 @@ type WorkerConfig struct {
 type ToolsConfig struct {
 	ProposeChange ToolProposeChangeConfig `yaml:"propose_change"`
 	QueryLens     ToolQueryLensConfig     `yaml:"query_lens"`
+	CreateDigest  ToolCreateDigestConfig  `yaml:"create_digest"`
+}
+
+type ToolCreateDigestConfig struct {
+	Description            string `yaml:"description"`
+	TopicNameDescription   string `yaml:"topic_name_description"`
+	TagsDescription        string `yaml:"tags_description"`
+	InstructionDescription string `yaml:"instruction_description"`
 }
 
 type ToolProposeChangeConfig struct {

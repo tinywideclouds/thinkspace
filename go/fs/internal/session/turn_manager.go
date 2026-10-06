@@ -24,6 +24,7 @@ type TurnManager struct {
 	playbackEngine   *chat.PlaybackEngine
 	chatAssembler    *chat.Assembler
 	fanOutFlow       flows.Flow
+	digestFlow       flows.Flow
 }
 
 func NewTurnManager(
@@ -41,6 +42,7 @@ func NewTurnManager(
 		playbackEngine:   chat.NewPlaybackEngine(),
 		chatAssembler:    chat.NewAssembler(),
 		fanOutFlow:       fanOutFlow,
+		digestFlow:       flows.NewDigestFlow(logger),
 	}
 }
 
@@ -173,6 +175,7 @@ func (tm *TurnManager) ExecuteTurn(ctx context.Context, spaceID, chatID, promptT
 		tm.modelClient,
 		executor,
 		tm.fanOutFlow,
+		tm.digestFlow,
 		emitter,
 		spaceID,
 		spaceConfig.WorkerSystemPrompt(),

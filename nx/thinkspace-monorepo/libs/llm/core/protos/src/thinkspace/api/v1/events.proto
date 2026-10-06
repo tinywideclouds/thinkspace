@@ -143,6 +143,7 @@ message WSEvent {
     SyncHistoryPayload sync_history = 15;
     
     ThinkBundlePayload think_bundle = 16;
+    PreviewContextPayload preview_context = 18; // NEW: Wired up for facade.go
 
     // Inbound
     SubmitPromptPayload submit_prompt = 11;

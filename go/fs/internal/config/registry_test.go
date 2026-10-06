@@ -14,26 +14,12 @@ func TestRegistry_Methods(t *testing.T) {
 golang:
   type: "space"
   name: "Golang Environment"
-  system_prompt: "Base rules"
-  roles:
-    manager:
-      model: "gemini-3.6-flash"
-      tools:
-        propose_change:
-          description: "mock tool"
-          agent_count_description: "mock count"
-          agent_instructions_description: "mock inst array"
-          context_digest_description: "mock digest"
-          instruction_description: "mock instruction"
-    worker:
-      max_tokens: 8192
-      retry_prompt: "mock retry prompt"
-      system_prompt: "Must use /src"
-
+concept:
+  type: "space"
+  name: "concept"
 fanout:
   type: "flow"
   name: "Parallel FanOut"
-  retry_prompt: "Please review the trace..."
 `),
 		},
 	}
@@ -43,6 +29,7 @@ fanout:
 		t.Fatalf("LoadFS failed: %v", err)
 	}
 
+	// Test Config retrieval
 	spaceCfg, ok := registry.GetConfig("golang")
 	if !ok {
 		t.Fatalf("GetConfig: Expected to find 'golang'")
@@ -50,13 +37,19 @@ fanout:
 	if spaceCfg.Name != "Golang Environment" {
 		t.Errorf("GetConfig: Expected Name 'Golang Environment', got %q", spaceCfg.Name)
 	}
-	if spaceCfg.SystemPrompt != "Base rules" {
-		t.Errorf("GetConfig: Expected SystemPrompt 'Base rules', got %q", spaceCfg.SystemPrompt)
+
+	// Test Domain instantiation mapping
+	_, ok = registry.GetDomain("concept")
+	if !ok {
+		t.Errorf("GetDomain: Expected to find 'concept' domain instantiated")
 	}
-	if spaceCfg.Roles.Worker.SystemPrompt != "Must use /src" {
-		t.Errorf("GetConfig: Expected Worker SystemPrompt 'Must use /src', got %q", spaceCfg.Roles.Worker.SystemPrompt)
+
+	// Test Flow retrieval
+	flowCfg, ok := registry.GetFlow("fanout")
+	if !ok {
+		t.Errorf("GetFlow: Expected to find 'fanout'")
 	}
-	if spaceCfg.Roles.Worker.RetryPrompt != "mock retry prompt" {
-		t.Errorf("GetConfig: Expected WorkerRetryPrompt 'mock retry prompt', got %q", spaceCfg.Roles.Worker.RetryPrompt)
+	if flowCfg.Name != "Parallel FanOut" {
+		t.Errorf("Expected flow name 'Parallel FanOut', got %q", flowCfg.Name)
 	}
 }

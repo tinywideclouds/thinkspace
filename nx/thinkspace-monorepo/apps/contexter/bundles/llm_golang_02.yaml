@@ -102,4 +102,9 @@ files:
   - ../../go/fs/internal/session/delegator.go
   - ../../go/fs/internal/telemetry/emitter.go
   - ../../go/fs/internal/llm/client_test.go
+  - ../../go/fs/internal/config/defaults/concept.yaml
+  - ../../go/fs/internal/session/flows/digest_flow.go
+  - ../../go/fs/internal/spaces/generic/verifier.go
+  - ../../go/fs/internal/spaces/concept/mapbook.go
+  - ../../go/fs/internal/spaces/concept/space.go
 last_context: llm_golang_42.md

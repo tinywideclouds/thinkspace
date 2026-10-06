@@ -15,7 +15,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
-	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -39,7 +39,9 @@ func main() {
 		logger.Error("Failed to initialize GenAI client", "error", err)
 		os.Exit(1)
 	}
-	modelClient := llm.NewGenAIClient(client)
+
+	// Instantiate the model client interface using the gemini adapter
+	modelClient := gemini.NewAdapter(client)
 
 	homeDirectory, err := os.UserHomeDir()
 	if err != nil {
@@ -81,7 +83,6 @@ func main() {
 		SupportedDomains: supportedDomains,
 	}
 
-	llmAdapter := llm.NewAdapter(modelClient)
 	fanOutFlow := flows.NewFanOutFlow(logger)
 
 	mux := http.NewServeMux()
@@ -89,7 +90,8 @@ func main() {
 	managementAPI := api.NewManagementAPI(registry, serviceManager, appConfig)
 	managementAPI.RegisterHandlers(mux)
 
-	webSocketServer := api.NewServer(logger, registry, serviceManager, llmAdapter, fanOutFlow, modelClient)
+	// Updated signature: removed the dead llmAdapter parameter
+	webSocketServer := api.NewServer(logger, registry, serviceManager, fanOutFlow, modelClient)
 	webSocketServer.RegisterHandlers(mux)
 
 	serverAddress := fmt.Sprintf(":%d", *port)

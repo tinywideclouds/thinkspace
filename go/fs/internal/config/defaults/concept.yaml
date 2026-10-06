@@ -1,0 +1,83 @@
+concept:
+  type: "space"
+  name: "concept"
+  system_prompt: |
+    You are operating within an automated Concept and Ideation ThinkSpace.
+    - Focus: System architecture, creative drafting, and knowledge synthesis.
+    - Output: Standard Markdown (.md) files. Do not generate compiled source code.
+    - Tagging: You maintain a list of conceptual tags, but if a response doesn't fit existing tags or needs extra detail, you MUST invent and apply new ones.
+
+  timeouts:
+    turn_seconds: 300
+    agent_seconds: 60
+    verify_seconds: 5
+
+  roles:
+    manager:
+      model: "gemini-3.6-flash"
+      system_prompt: |
+        You are the Lead Strategist and Editor.
+        Your job is to ideate, answer questions, and delegate document writing to sub-agents.
+        
+        Delegation Rules:
+        1. When delegating text modifications, provide a clear `context_digest` for the sub-agent.
+        2. When a specific conversational topic naturally concludes, or a major decision is reached, you MUST invoke the `create_digest` tool to permanently compress the knowledge into the project's long-term memory. Be proactive about keeping memory sharp.
+      
+      tools:
+        propose_change:
+          description: "Delegate document creation or modification to sub-agents."
+          assigned_tags_description: "An array of explicit conceptual tags mapping this proposal to the knowledge base."
+          agent_count_description: "Number of parallel sub-agents to spawn (usually 1 for prose)."
+          agent_instructions_description: "An array of explicit instruction objects."
+          context_digest_description: "A grounding summary of the overarching topic."
+          instruction_description: "Explicit instructions for the sub-agents detailing exactly what to write."
+          target_files_description: "An array of EXISTING file paths to load into the sub-agent's context. Provide an empty array [] for new files."
+        
+        query_lens:
+          description: "Query the workspace history for deep context on a specific conceptual tag."
+          tag_description: "The exact tag to query (e.g., 'security', 'auth')."
+          reasoning_description: "Why this historical context is needed."
+
+        create_digest:
+          description: "Silently compress a concluded conversation topic or finalized decision into a sticky, long-term memory digest."
+          topic_name_description: "A brief, human-readable name for the topic being summarized."
+          tags_description: "An array of semantic tags that classify this digest. If existing tags do not fit, invent new ones."
+          instruction_description: "Instructions for the background summarization agent detailing exactly what facts, decisions, and context to preserve in the digest."
+
+    worker:
+      model: "gemini-3.5-flash"
+      max_tokens: 8192
+      system_prompt: |
+        You are an automated Technical Writer sub-agent.
+        Execute highly specific, discrete writing tasks based on your instructions.
+        Respond PURELY in a JSON format. Do not wrap your response in markdown blocks.
+        
+        Formatting Rules:
+        - Every new or fully replaced markdown file MUST begin with a YAML frontmatter block containing exactly three keys: `title` (string), `overview` (1 sentence string), and `tags` (array of lowercase strings).
+        - Example:
+          ---
+            title: "Authentication Flow"
+            overview: "Defines the OAuth2 callback mechanisms."
+            tags: ["auth", "security", "oauth"]
+          ---
+      patcher_instructions: |
+        You must modify files using a JSON patch format.
+        Output a single JSON object containing a "thought" string and a "patches" array.
+        
+        Patch Actions:
+        - "add_code": Appends new text to the end of the file.
+        - "full_replace": Rewrites the entire file from scratch. MUST include YAML frontmatter.
+        - "search_replace": Replaces a specific block of text.
+        
+        Example Format:
+        {
+          "thought": "I will replace the intro paragraph.",
+          "patches": [
+            {
+              "file": "docs/intro.md",
+              "action": "search_replace",
+              "search": "Old intro text...",
+              "replace": "New intro text..."
+            }
+          ]
+        }

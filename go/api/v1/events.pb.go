@@ -1220,6 +1220,7 @@ type WSEvent struct {
 	//	*WSEvent_AvailableSpaces
 	//	*WSEvent_SyncHistory
 	//	*WSEvent_ThinkBundle
+	//	*WSEvent_PreviewContext
 	//	*WSEvent_SubmitPrompt
 	//	*WSEvent_SelectStrategy
 	//	*WSEvent_ReviewDecision
@@ -1338,6 +1339,15 @@ func (x *WSEvent) GetThinkBundle() *ThinkBundlePayload {
 	return nil
 }
 
+func (x *WSEvent) GetPreviewContext() *PreviewContextPayload {
+	if x != nil {
+		if x, ok := x.Payload.(*WSEvent_PreviewContext); ok {
+			return x.PreviewContext
+		}
+	}
+	return nil
+}
+
 func (x *WSEvent) GetSubmitPrompt() *SubmitPromptPayload {
 	if x != nil {
 		if x, ok := x.Payload.(*WSEvent_SubmitPrompt); ok {
@@ -1411,6 +1421,10 @@ type WSEvent_ThinkBundle struct {
 	ThinkBundle *ThinkBundlePayload `protobuf:"bytes,16,opt,name=think_bundle,json=thinkBundle,proto3,oneof"`
 }
 
+type WSEvent_PreviewContext struct {
+	PreviewContext *PreviewContextPayload `protobuf:"bytes,18,opt,name=preview_context,json=previewContext,proto3,oneof"` // NEW: Wired up for facade.go
+}
+
 type WSEvent_SubmitPrompt struct {
 	// Inbound
 	SubmitPrompt *SubmitPromptPayload `protobuf:"bytes,11,opt,name=submit_prompt,json=submitPrompt,proto3,oneof"`
@@ -1443,6 +1457,8 @@ func (*WSEvent_AvailableSpaces) isWSEvent_Payload() {}
 func (*WSEvent_SyncHistory) isWSEvent_Payload() {}
 
 func (*WSEvent_ThinkBundle) isWSEvent_Payload() {}
+
+func (*WSEvent_PreviewContext) isWSEvent_Payload() {}
 
 func (*WSEvent_SubmitPrompt) isWSEvent_Payload() {}
 
@@ -1902,7 +1918,7 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x1a\n" +
 	"\baccepted\x18\x02 \x01(\bR\baccepted\"3\n" +
 	"\x15ApproveContextPayload\x12\x1a\n" +
-	"\bapproved\x18\x01 \x01(\bR\bapproved\"\xe6\a\n" +
+	"\bapproved\x18\x01 \x01(\bR\bapproved\"\xbb\b\n" +
 	"\aWSEvent\x12G\n" +
 	"\vchat_stream\x18\x01 \x01(\v2$.thinkspace.api.v1.ChatStreamPayloadH\x00R\n" +
 	"chatStream\x12S\n" +
@@ -1913,7 +1929,8 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x10available_spaces\x18\n" +
 	" \x01(\v2).thinkspace.api.v1.AvailableSpacesPayloadH\x00R\x0favailableSpaces\x12J\n" +
 	"\fsync_history\x18\x0f \x01(\v2%.thinkspace.api.v1.SyncHistoryPayloadH\x00R\vsyncHistory\x12J\n" +
-	"\fthink_bundle\x18\x10 \x01(\v2%.thinkspace.api.v1.ThinkBundlePayloadH\x00R\vthinkBundle\x12M\n" +
+	"\fthink_bundle\x18\x10 \x01(\v2%.thinkspace.api.v1.ThinkBundlePayloadH\x00R\vthinkBundle\x12S\n" +
+	"\x0fpreview_context\x18\x12 \x01(\v2(.thinkspace.api.v1.PreviewContextPayloadH\x00R\x0epreviewContext\x12M\n" +
 	"\rsubmit_prompt\x18\v \x01(\v2&.thinkspace.api.v1.SubmitPromptPayloadH\x00R\fsubmitPrompt\x12S\n" +
 	"\x0fselect_strategy\x18\f \x01(\v2(.thinkspace.api.v1.SelectStrategyPayloadH\x00R\x0eselectStrategy\x12S\n" +
 	"\x0freview_decision\x18\r \x01(\v2(.thinkspace.api.v1.ReviewDecisionPayloadH\x00R\x0ereviewDecision\x12S\n" +
@@ -2019,23 +2036,24 @@ var file_src_thinkspace_api_v1_events_proto_depIdxs = []int32{
 	9,  // 12: thinkspace.api.v1.WSEvent.available_spaces:type_name -> thinkspace.api.v1.AvailableSpacesPayload
 	6,  // 13: thinkspace.api.v1.WSEvent.sync_history:type_name -> thinkspace.api.v1.SyncHistoryPayload
 	26, // 14: thinkspace.api.v1.WSEvent.think_bundle:type_name -> thinkspace.api.v1.ThinkBundlePayload
-	16, // 15: thinkspace.api.v1.WSEvent.submit_prompt:type_name -> thinkspace.api.v1.SubmitPromptPayload
-	17, // 16: thinkspace.api.v1.WSEvent.select_strategy:type_name -> thinkspace.api.v1.SelectStrategyPayload
-	18, // 17: thinkspace.api.v1.WSEvent.review_decision:type_name -> thinkspace.api.v1.ReviewDecisionPayload
-	19, // 18: thinkspace.api.v1.WSEvent.approve_context:type_name -> thinkspace.api.v1.ApproveContextPayload
-	29, // 19: thinkspace.api.v1.MapbookPayload.maps:type_name -> thinkspace.api.v1.MapbookPayload.MapsEntry
-	23, // 20: thinkspace.api.v1.TrajectoryPayload.working_memory:type_name -> thinkspace.api.v1.TrajectoryEventPayload
-	23, // 21: thinkspace.api.v1.TrajectoryPayload.catalyst:type_name -> thinkspace.api.v1.TrajectoryEventPayload
-	21, // 22: thinkspace.api.v1.ThinkBundlePayload.rules:type_name -> thinkspace.api.v1.SystemRulesPayload
-	22, // 23: thinkspace.api.v1.ThinkBundlePayload.mapbook:type_name -> thinkspace.api.v1.MapbookPayload
-	24, // 24: thinkspace.api.v1.ThinkBundlePayload.trajectory:type_name -> thinkspace.api.v1.TrajectoryPayload
-	25, // 25: thinkspace.api.v1.ThinkBundlePayload.workbench:type_name -> thinkspace.api.v1.WorkbenchItemPayload
-	3,  // 26: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry.value:type_name -> thinkspace.api.v1.DigestMeta
-	27, // [27:27] is the sub-list for method output_type
-	27, // [27:27] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	10, // 15: thinkspace.api.v1.WSEvent.preview_context:type_name -> thinkspace.api.v1.PreviewContextPayload
+	16, // 16: thinkspace.api.v1.WSEvent.submit_prompt:type_name -> thinkspace.api.v1.SubmitPromptPayload
+	17, // 17: thinkspace.api.v1.WSEvent.select_strategy:type_name -> thinkspace.api.v1.SelectStrategyPayload
+	18, // 18: thinkspace.api.v1.WSEvent.review_decision:type_name -> thinkspace.api.v1.ReviewDecisionPayload
+	19, // 19: thinkspace.api.v1.WSEvent.approve_context:type_name -> thinkspace.api.v1.ApproveContextPayload
+	29, // 20: thinkspace.api.v1.MapbookPayload.maps:type_name -> thinkspace.api.v1.MapbookPayload.MapsEntry
+	23, // 21: thinkspace.api.v1.TrajectoryPayload.working_memory:type_name -> thinkspace.api.v1.TrajectoryEventPayload
+	23, // 22: thinkspace.api.v1.TrajectoryPayload.catalyst:type_name -> thinkspace.api.v1.TrajectoryEventPayload
+	21, // 23: thinkspace.api.v1.ThinkBundlePayload.rules:type_name -> thinkspace.api.v1.SystemRulesPayload
+	22, // 24: thinkspace.api.v1.ThinkBundlePayload.mapbook:type_name -> thinkspace.api.v1.MapbookPayload
+	24, // 25: thinkspace.api.v1.ThinkBundlePayload.trajectory:type_name -> thinkspace.api.v1.TrajectoryPayload
+	25, // 26: thinkspace.api.v1.ThinkBundlePayload.workbench:type_name -> thinkspace.api.v1.WorkbenchItemPayload
+	3,  // 27: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry.value:type_name -> thinkspace.api.v1.DigestMeta
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_src_thinkspace_api_v1_events_proto_init() }
@@ -2052,6 +2070,7 @@ func file_src_thinkspace_api_v1_events_proto_init() {
 		(*WSEvent_AvailableSpaces)(nil),
 		(*WSEvent_SyncHistory)(nil),
 		(*WSEvent_ThinkBundle)(nil),
+		(*WSEvent_PreviewContext)(nil),
 		(*WSEvent_SubmitPrompt)(nil),
 		(*WSEvent_SelectStrategy)(nil),
 		(*WSEvent_ReviewDecision)(nil),
