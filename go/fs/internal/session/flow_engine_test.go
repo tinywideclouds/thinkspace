@@ -47,6 +47,9 @@ func (m *feMockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID str
 	m.sandbox = &feMockSandbox{candidateID: candidateID}
 	return m.sandbox, nil
 }
+func (u *feMockChatEngine) ConfirmTransition(targetDomain string, reasoning string) bool {
+	return true
+}
 
 type feMockSandbox struct {
 	candidateID string
@@ -111,7 +114,9 @@ func (u *feMockUI) OnTextChunk(text string)                        {}
 func (u *feMockUI) ReviewContext(ctxData session.TurnContext) bool { return true }
 func (u *feMockUI) ChooseNextStep() flows.FlowStrategy             { return u.strategyToReturn }
 func (u *feMockUI) ReviewCandidate(branch string) bool             { return u.reviewToReturn }
-func (u *feMockUI) ConfirmTransition(targetDomain string) bool     { return true }
+func (u *feMockUI) ConfirmTransition(targetDomain string, reasoning string) bool {
+	return true
+}
 
 // --- Tests ---
 

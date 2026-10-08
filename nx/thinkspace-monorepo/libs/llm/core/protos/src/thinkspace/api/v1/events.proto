@@ -57,6 +57,11 @@ message RequestReviewPayload {
   string branch = 1;
 }
 
+message RequestTransitionPayload {
+  string target_domain = 1;
+  string reasoning = 2;
+}
+
 message AvailableSpacesPayload {
   repeated SpaceInfo spaces = 1;
 }
@@ -130,12 +135,16 @@ message ApproveContextPayload {
   bool approved = 1;
 }
 
+message TransitionDecisionPayload {
+  bool approved = 1;
+}
+
 // --- The Master Envelope ---
 message WSEvent {
   oneof payload {
     // Outbound
     ChatStreamPayload chat_stream = 1;
-    TelemetryEventPayload telemetry_event = 2; // <-- Replaces old log/flow payloads
+    TelemetryEventPayload telemetry_event = 2; 
     AgentStreamPayload agent_stream = 6;
     RequestStrategyPayload request_strategy = 8;
     RequestReviewPayload request_review = 9;
@@ -143,13 +152,15 @@ message WSEvent {
     SyncHistoryPayload sync_history = 15;
     
     ThinkBundlePayload think_bundle = 16;
-    PreviewContextPayload preview_context = 18; // NEW: Wired up for facade.go
+    PreviewContextPayload preview_context = 18; 
+    RequestTransitionPayload request_transition = 20;
 
     // Inbound
     SubmitPromptPayload submit_prompt = 11;
-    SelectStrategyPayload select_xegy = 12;
+    SelectStrategyPayload select_strategy = 12;
     ReviewDecisionPayload review_decision = 13;
     ApproveContextPayload approve_context = 17;
+    TransitionDecisionPayload transition_decision = 21;
   }
 }
 

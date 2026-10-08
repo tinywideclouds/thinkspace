@@ -24,6 +24,13 @@ export class LlmFacade {
       
       case 'requestReview':
         return { type: 'request_review', branch: protocolBufferEvent.payload.value.branch };
+
+      case 'requestTransition':
+        return { 
+          type: 'request_transition', 
+          targetDomain: protocolBufferEvent.payload.value.targetDomain, 
+          reasoning: protocolBufferEvent.payload.value.reasoning 
+        };
       
       case 'availableSpaces':
         return { type: 'available_spaces', spaces: protocolBufferEvent.payload.value.spaces.map(space => ({ id: space.id, name: space.name })) };
@@ -110,6 +117,12 @@ export class LlmFacade {
   static createReviewDecision(branch: string, accepted: boolean): WSEvent {
     return create(WSEventSchema, {
       payload: { case: 'reviewDecision', value: { branch, accepted } }
+    });
+  }
+
+  static createTransitionDecision(approved: boolean): WSEvent {
+    return create(WSEventSchema, {
+      payload: { case: 'transitionDecision', value: { approved } }
     });
   }
 }

@@ -17,54 +17,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type ManagerPayload struct {
-	Branch   string
-	Strategy string
-}
-
-func (p ManagerPayload) ToMap() map[string]any {
-	m := make(map[string]any)
-	if p.Branch != "" {
-		m["branch"] = p.Branch
-	}
-	if p.Strategy != "" {
-		m["strategy"] = p.Strategy
-	}
-	return m
-}
-
-type TurnContext struct {
-	SpaceID             string
-	ChatID              string
-	PreviewID           string
-	ManagerSystemPrompt string
-	StickyDigests       []string
-	RecentHistory       []string
-	FileContexts        []FileContext
-}
-
-type FileContext struct {
-	Path       string
-	Level      string
-	TokenCount int
-}
-
-type UserInterface interface {
-	OnTextChunk(text string)
-	ReviewContext(ctxData TurnContext) bool
-	ChooseNextStep() flows.FlowStrategy
-	ReviewCandidate(branch string) (accepted bool)
-	ConfirmTransition(targetDomain string) bool
-}
-
-type TransitionRequest struct {
-	TargetDomain string
-}
-
-func (e *TransitionRequest) Error() string {
-	return "domain transition requested to: " + e.TargetDomain
-}
-
 type Coordinator struct {
 	logger           *slog.Logger
 	workspaceService *workspace.Service
@@ -171,8 +123,9 @@ func (c *Coordinator) RunAgentLoop(
 
 		if call.Name == "transition_workspace" {
 			targetDomain, _ := call.Args["target_domain"].(string)
+			reasoning, _ := call.Args["reasoning"].(string)
 
-			c.logger.InfoContext(turnContext, "intercepted transition request", "target", targetDomain)
+			c.logger.InfoContext(turnContext, "intercepted transition request", "target", targetDomain, "reasoning", reasoning)
 			c.emitter.Emit("manager", telemetry.Event{
 				ID:        uuid.NewV7(),
 				Type:      "log",
@@ -180,7 +133,7 @@ func (c *Coordinator) RunAgentLoop(
 				Message:   fmt.Sprintf("Manager requested workspace transition to '%s'", targetDomain),
 			})
 
-			if userInterface.ConfirmTransition(targetDomain) {
+			if userInterface.ConfirmTransition(targetDomain, reasoning) {
 				c.emitter.Emit("manager", telemetry.Event{
 					ID:        uuid.NewV7(),
 					Type:      "log",

@@ -195,6 +195,9 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		case "approve_context":
 			ui.PushContextApproval(inbound.ApproveContext.Approved)
+
+		case "transition_decision":
+			ui.PushTransitionDecision(inbound.TransitionDecision.Approved)
 		}
 	}
 }

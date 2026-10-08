@@ -94,6 +94,7 @@ type coordMockUI struct {
 	reviewToReturn     bool
 	reviewedBranch     string
 	transitionToReturn bool
+	capturedReasoning  string
 }
 
 func (u *coordMockUI) OnTextChunk(text string)                        {}
@@ -103,7 +104,8 @@ func (u *coordMockUI) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
 }
-func (u *coordMockUI) ConfirmTransition(targetDomain string) bool {
+func (u *coordMockUI) ConfirmTransition(targetDomain string, reasoning string) bool {
+	u.capturedReasoning = reasoning
 	return u.transitionToReturn
 }
 
@@ -311,5 +313,9 @@ func TestCoordinator_TransitionWorkspace_Approved(t *testing.T) {
 
 	if transReq.TargetDomain != "golang-space" {
 		t.Errorf("Expected transition to 'golang-space', got '%s'", transReq.TargetDomain)
+	}
+
+	if ui.capturedReasoning != "Needs compilation" {
+		t.Errorf("Expected reasoning 'Needs compilation', got '%s'", ui.capturedReasoning)
 	}
 }

@@ -12,32 +12,35 @@ import (
 )
 
 type WebSocketUI struct {
-	ctx          context.Context
-	conn         *websocket.Conn
-	facade       *EventFacade
-	writeMu      sync.Mutex
-	strategyChan chan flows.FlowStrategy
-	reviewChan   chan bool
-	approveChan  chan bool
-	tokenChan    chan<- workspace.AgentToken
+	ctx            context.Context
+	conn           *websocket.Conn
+	facade         *EventFacade
+	writeMu        sync.Mutex
+	strategyChan   chan flows.FlowStrategy
+	reviewChan     chan bool
+	approveChan    chan bool
+	transitionChan chan bool
+	tokenChan      chan<- workspace.AgentToken
 }
 
 func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- workspace.AgentToken) *WebSocketUI {
 	return &WebSocketUI{
-		ctx:          ctx,
-		conn:         conn,
-		facade:       NewEventFacade(),
-		strategyChan: make(chan flows.FlowStrategy),
-		reviewChan:   make(chan bool),
-		approveChan:  make(chan bool),
-		tokenChan:    tokenChan,
+		ctx:            ctx,
+		conn:           conn,
+		facade:         NewEventFacade(),
+		strategyChan:   make(chan flows.FlowStrategy),
+		reviewChan:     make(chan bool),
+		approveChan:    make(chan bool),
+		transitionChan: make(chan bool),
+		tokenChan:      tokenChan,
 	}
 }
 
-func (ui *WebSocketUI) ConfirmTransition(targetDomain string) bool {
-	// STUB: We will wire up the explicit Protobuf payloads for the frontend later.
-	// For now, auto-approve so the server compiles and can execute transitions.
-	return true
+func (ui *WebSocketUI) ConfirmTransition(targetDomain string, reasoning string) bool {
+	if data, err := ui.facade.MarshalRequestTransition(targetDomain, reasoning); err == nil {
+		ui.sendBytes(data)
+	}
+	return <-ui.transitionChan
 }
 
 func (ui *WebSocketUI) sendBytes(data []byte) {
@@ -60,7 +63,6 @@ func (ui *WebSocketUI) ReviewContext(ctxData session.TurnContext) bool {
 	if data, err := ui.facade.MarshalPreviewContext(ctxData); err == nil {
 		ui.sendBytes(data)
 	}
-	// Blocks until the frontend responds (either instantly or after user review)
 	return <-ui.approveChan
 }
 
@@ -92,4 +94,8 @@ func (ui *WebSocketUI) PushReviewDecision(accepted bool) {
 
 func (ui *WebSocketUI) PushContextApproval(approved bool) {
 	ui.approveChan <- approved
+}
+
+func (ui *WebSocketUI) PushTransitionDecision(approved bool) {
+	ui.transitionChan <- approved
 }

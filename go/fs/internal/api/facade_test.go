@@ -133,6 +133,27 @@ func TestEventFacade_UnmarshalInbound_ApproveContext(t *testing.T) {
 	}
 }
 
+func TestEventFacade_UnmarshalInbound_TransitionDecision(t *testing.T) {
+	facade := api.NewEventFacade()
+	payload := []byte(`{
+		"transitionDecision": {
+			"approved": true
+		}
+	}`)
+
+	inbound, err := facade.UnmarshalInbound(payload)
+	if err != nil {
+		t.Fatalf("unexpected error unmarshaling: %v", err)
+	}
+
+	if inbound.Type != "transition_decision" {
+		t.Errorf("expected 'transition_decision', got '%s'", inbound.Type)
+	}
+	if !inbound.TransitionDecision.Approved {
+		t.Errorf("expected approved to be true")
+	}
+}
+
 func TestEventFacade_MarshalPreviewContext(t *testing.T) {
 	facade := api.NewEventFacade()
 
@@ -293,5 +314,31 @@ func TestEventFacade_InvalidInbound(t *testing.T) {
 	_, err = facade.UnmarshalInbound([]byte(`{bad json`))
 	if err == nil {
 		t.Errorf("expected error for malformed json")
+	}
+}
+
+func TestEventFacade_MarshalRequestTransition(t *testing.T) {
+	facade := api.NewEventFacade()
+
+	data, err := facade.MarshalRequestTransition("golang", "need to compile")
+	if err != nil {
+		t.Fatalf("failed to marshal request transition: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("failed to parse protojson output: %v", err)
+	}
+
+	reqRaw, ok := result["requestTransition"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected 'requestTransition' wrapper in JSON output, got: %s", string(data))
+	}
+
+	if reqRaw["targetDomain"] != "golang" {
+		t.Errorf("expected targetDomain 'golang', got %v", reqRaw["targetDomain"])
+	}
+	if reqRaw["reasoning"] != "need to compile" {
+		t.Errorf("expected reasoning 'need to compile', got %v", reqRaw["reasoning"])
 	}
 }

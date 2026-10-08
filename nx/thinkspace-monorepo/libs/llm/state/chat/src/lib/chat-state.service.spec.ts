@@ -81,10 +81,34 @@ describe('ChatStateService', () => {
     expect(sentProtocolBuffer.payload.value.text).toBe('Refactor this app');
   });
 
+  it('should handle request_transition and submitTransitionDecision', () => {
+    service.connect('ws://test');
+
+    const reqEvent = create(WSEventSchema, {
+      payload: {
+        case: 'requestTransition',
+        value: { targetDomain: 'golang', reasoning: 'need compilation' }
+      }
+    });
+    webSocketSubject.next(reqEvent);
+
+    expect(service.pendingTransition()).toEqual({ targetDomain: 'golang', reasoning: 'need compilation' });
+
+    service.submitTransitionDecision(true);
+
+    expect(service.pendingTransition()).toBeNull();
+    expect(mockTransportService.send).toHaveBeenCalled();
+
+    const sentEvent = mockTransportService.send.mock.calls[0][0];
+    expect(sentEvent.payload.case).toBe('transitionDecision');
+    if (sentEvent.payload.case === 'transitionDecision') {
+      expect(sentEvent.payload.value.approved).toBe(true);
+    }
+  });
+
   it('should inject flow card immediately on flow_start and replace thinking indicator', () => {
     service.connect('ws://test');
     
-    // Simulate user prompt initializing the "Manager Thinking..." system message
     service.coreChat.set([{ id: '1', source: 'system', content: 'Manager Thinking...' }]);
 
     const startEvent = create(WSEventSchema, { 
@@ -139,12 +163,10 @@ describe('ChatStateService', () => {
   it('should mark flow complete and update card status when all agents finish', () => {
     service.connect('ws://test');
     
-    // Start flow with 2 agents
     webSocketSubject.next(create(WSEventSchema, { 
       payload: { case: 'telemetryEvent', value: { channel: 'manager', event: { type: 'flow_start', payloadJson: '{"flow_id": "f1", "agent_count": 2}' } } } 
     }));
 
-    // Complete Agent 1
     webSocketSubject.next(create(WSEventSchema, { 
       payload: { case: 'telemetryEvent', value: { channel: 'manager', event: { type: 'flow_complete', payloadJson: '{"flow_id": "f1", "agent_index": 1, "passed": true}' } } } 
     }));
@@ -152,7 +174,6 @@ describe('ChatStateService', () => {
     expect(service.flowStates().get('f1')?.status).toBe('running');
     expect(service.coreChat()[0].status).toBe('running');
 
-    // Complete Agent 2
     webSocketSubject.next(create(WSEventSchema, { 
       payload: { case: 'telemetryEvent', value: { channel: 'manager', event: { type: 'flow_complete', payloadJson: '{"flow_id": "f1", "agent_index": 2, "passed": false}' } } } 
     }));

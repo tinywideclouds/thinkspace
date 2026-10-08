@@ -43,6 +43,12 @@
             (reviewCancelled)="chatState.submitContextApproval(false)"
             (copyFull)="chatState.copyFullContextPreview($event)">
           </llm-context-inspector>
+        } @else if (chatState.pendingTransition(); as transition) {
+          <llm-chat-transition-prompt 
+            [targetDomain]="transition.targetDomain"
+            [reasoning]="transition.reasoning"
+            (transitionDecided)="chatState.submitTransitionDecision($event)">
+          </llm-chat-transition-prompt>
         } @else if (chatState.pendingStrategy()) {
           <llm-chat-strategy-prompt 
             (strategySelected)="chatState.selectStrategy($event)">

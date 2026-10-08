@@ -120,4 +120,40 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	if string(data) != `{"type":"sync_history"}` {
 		t.Errorf("expected sync history payload, got '%s'", string(data))
 	}
+
+	// Test 4: ConfirmTransition Blocking and Channel Push
+	transitionChosen := make(chan bool)
+	go func() {
+		transitionChosen <- ui.ConfirmTransition("golang", "need code")
+	}()
+
+	_, data, err = conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("failed to read transition request: %v", err)
+	}
+
+	var transPayload struct {
+		RequestTransition struct {
+			TargetDomain string `json:"targetDomain"`
+			Reasoning    string `json:"reasoning"`
+		} `json:"requestTransition"`
+	}
+
+	if err := json.Unmarshal(data, &transPayload); err != nil {
+		t.Fatalf("failed to unmarshal transition request: %v (data: %s)", err, string(data))
+	}
+	if transPayload.RequestTransition.TargetDomain != "golang" {
+		t.Errorf("expected golang, got %s", transPayload.RequestTransition.TargetDomain)
+	}
+
+	ui.PushTransitionDecision(true)
+
+	select {
+	case decision := <-transitionChosen:
+		if !decision {
+			t.Errorf("expected transition decision true, got false")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for transition channel to unblock")
+	}
 }

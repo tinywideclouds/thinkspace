@@ -47,6 +47,7 @@ export type DomainEvent =
   | { type: 'chat_stream'; text: string }
   | { type: 'request_strategy'; active: boolean }
   | { type: 'request_review'; branch: string }
+  | { type: 'request_transition'; targetDomain: string; reasoning: string }
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
   | { type: 'sync_history'; recentEvents: DomainLedgerEvent[]; digests: Record<string, DomainDigestMeta> }
   | { type: 'preview_context'; context: DomainPreviewContext }

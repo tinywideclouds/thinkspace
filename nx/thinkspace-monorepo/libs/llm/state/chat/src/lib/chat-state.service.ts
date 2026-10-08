@@ -1,7 +1,7 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { TransportService } from '@org/llm-core-transport';
-import { LlmFacade, DomainEvent, DomainDelegationStrategy, DomainTelemetryEvent, DomainPreviewContext } from '@org/llm-core-facade';
+import { LlmFacade, DomainEvent, DomainDelegationStrategy, DomainPreviewContext, DomainTelemetryEvent } from '@org/llm-core-facade';
 import { firstValueFrom } from 'rxjs';
 import { WorkspaceStateService } from './workspace-state.service';
 
@@ -70,6 +70,7 @@ export class ChatStateService {
   public pendingStrategy = signal<boolean>(false);
   public pendingReviewBranch = signal<string | null>(null);
   public pendingContextReview = signal<DomainPreviewContext | null>(null);
+  public pendingTransition = signal<{targetDomain: string, reasoning: string} | null>(null);
   
   public autoApproveContext = signal<boolean>(true);
   public retainLogs = signal<boolean>(false);
@@ -107,6 +108,7 @@ export class ChatStateService {
     this.pendingStrategy.set(false);
     this.pendingReviewBranch.set(null);
     this.pendingContextReview.set(null);
+    this.pendingTransition.set(null);
     this.inspectedReceipt.set(null);
   }
 
@@ -170,6 +172,21 @@ export class ChatStateService {
     this.transportService.send(LlmFacade.createReviewDecision(branch, accepted));
   }
 
+  public submitTransitionDecision(approved: boolean): void {
+    this.executeTurnAction();
+    const transition = this.pendingTransition();
+    this.pendingTransition.set(null);
+
+    if (approved) {
+      this.appendSystemLog('INFO', `Workspace transition to '${transition?.targetDomain}' approved by user.`);
+    } else {
+      this.appendSystemLog('INFO', 'Workspace transition aborted by user.');
+    }
+
+    const protocolBufferEvent = LlmFacade.createTransitionDecision(approved);
+    this.transportService.send(protocolBufferEvent);
+  }
+
   public async inspectFlow(flowId: string): Promise<void> {
     const spaceId = this.workspaceStateService.activeSpaceId();
     const chatId = this.workspaceStateService.activeChatId();
@@ -225,6 +242,9 @@ export class ChatStateService {
         break;
       case 'request_review':
         this.pendingReviewBranch.set(event.branch);
+        break;
+      case 'request_transition':
+        this.pendingTransition.set({ targetDomain: event.targetDomain, reasoning: event.reasoning });
         break;
     }
   }

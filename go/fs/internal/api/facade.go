@@ -22,11 +22,12 @@ type SpaceState struct {
 }
 
 type InboundEvent struct {
-	Type           string
-	SubmitPrompt   *SubmitPromptPayload
-	SelectStrategy *SelectStrategyPayload
-	ReviewDecision *ReviewDecisionPayload
-	ApproveContext *ApproveContextPayload
+	Type               string
+	SubmitPrompt       *SubmitPromptPayload
+	SelectStrategy     *SelectStrategyPayload
+	ReviewDecision     *ReviewDecisionPayload
+	ApproveContext     *ApproveContextPayload
+	TransitionDecision *TransitionDecisionPayload
 }
 
 type SubmitPromptPayload struct {
@@ -45,6 +46,10 @@ type ReviewDecisionPayload struct {
 }
 
 type ApproveContextPayload struct {
+	Approved bool
+}
+
+type TransitionDecisionPayload struct {
 	Approved bool
 }
 
@@ -170,6 +175,18 @@ func (f *EventFacade) MarshalRequestReview(branch string) ([]byte, error) {
 	return f.marshaler.Marshal(event)
 }
 
+func (f *EventFacade) MarshalRequestTransition(targetDomain string, reasoning string) ([]byte, error) {
+	event := &pb.WSEvent{
+		Payload: &pb.WSEvent_RequestTransition{
+			RequestTransition: &pb.RequestTransitionPayload{
+				TargetDomain: targetDomain,
+				Reasoning:    reasoning,
+			},
+		},
+	}
+	return f.marshaler.Marshal(event)
+}
+
 func (f *EventFacade) MarshalAgentStream(agentID int, text string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_AgentStream{
@@ -275,6 +292,11 @@ func (f *EventFacade) UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		domainEvent.Type = "approve_context"
 		domainEvent.ApproveContext = &ApproveContextPayload{
 			Approved: payload.ApproveContext.Approved,
+		}
+	case *pb.WSEvent_TransitionDecision:
+		domainEvent.Type = "transition_decision"
+		domainEvent.TransitionDecision = &TransitionDecisionPayload{
+			Approved: payload.TransitionDecision.Approved,
 		}
 	default:
 		return nil, errors.New("unsupported or unknown inbound event type")

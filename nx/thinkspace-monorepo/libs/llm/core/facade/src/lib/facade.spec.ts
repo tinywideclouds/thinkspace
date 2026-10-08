@@ -72,6 +72,25 @@ describe('LlmFacade', () => {
       });
     });
 
+    it('should map a request transition event correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'requestTransition',
+          value: {
+            targetDomain: 'golang',
+            reasoning: 'Need to compile things'
+          }
+        }
+      });
+
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'request_transition',
+        targetDomain: 'golang',
+        reasoning: 'Need to compile things'
+      });
+    });
+
     it('should map a telemetry event correctly and parse the JSON payload', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
@@ -149,6 +168,15 @@ describe('LlmFacade', () => {
       if (protocolBufferEvent.payload.case === 'reviewDecision') {
         expect(protocolBufferEvent.payload.value.branch).toBe('candidate/123');
         expect(protocolBufferEvent.payload.value.accepted).toBe(true);
+      }
+    });
+
+    it('should create a valid TransitionDecision WSEvent', () => {
+      const protocolBufferEvent = LlmFacade.createTransitionDecision(false);
+      
+      expect(protocolBufferEvent.payload.case).toBe('transitionDecision');
+      if (protocolBufferEvent.payload.case === 'transitionDecision') {
+        expect(protocolBufferEvent.payload.value.approved).toBe(false);
       }
     });
   });
