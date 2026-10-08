@@ -11,13 +11,11 @@ import (
 	"testing"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
-	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -29,21 +27,10 @@ func (m *mockModelClient) GenerateContentStream(ctx context.Context, model strin
 
 type dummyFlow struct{}
 
-func (f *dummyFlow) Name() string { return "dummy" }
-
-func (f *dummyFlow) Execute(
-	ctx context.Context,
-	service *workspace.Service,
-	thread *chat.Thread,
-	space spaces.ThinkSpace,
-	arguments map[string]any,
-	flowConfig flows.FlowConfig,
-	flowContext flows.FlowContext,
-	emitter telemetry.Emitter,
-	executor workspace.SubAgentExecutor,
-	verifier spaces.Verifier,
-) (*flows.FlowResult, error) {
-	return &flows.FlowResult{}, nil
+func (f *dummyFlow) Name() string  { return "dummy" }
+func (f *dummyFlow) MaxSteps() int { return 1 }
+func (f *dummyFlow) Next(state flows.FlowState) flows.FlowDirective {
+	return flows.FlowDirective{Action: flows.ActionFinish}
 }
 
 func setupTestServer(t *testing.T) (*http.ServeMux, string, *workspace.ServiceManager) {
@@ -92,6 +79,7 @@ fanout:
 
 	mockClient := &mockModelClient{}
 	dummyFlowInstance := &dummyFlow{}
+	digestManager := session.NewDigestManager(logger, mockClient, session.DigestConfig{})
 
 	mux := http.NewServeMux()
 
@@ -99,7 +87,7 @@ fanout:
 	mgmtAPI := api.NewManagementAPI(registry, manager, appConfig)
 	mgmtAPI.RegisterHandlers(mux)
 
-	wsServer := api.NewServer(logger, registry, manager, dummyFlowInstance, mockClient)
+	wsServer := api.NewServer(logger, registry, manager, dummyFlowInstance, digestManager, mockClient)
 	wsServer.RegisterHandlers(mux)
 
 	return mux, "golang", manager

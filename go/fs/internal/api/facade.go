@@ -11,6 +11,7 @@ import (
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
@@ -35,7 +36,7 @@ type SubmitPromptPayload struct {
 }
 
 type SelectStrategyPayload struct {
-	StrategyID session.DelegationStrategy
+	StrategyID flows.FlowStrategy
 }
 
 type ReviewDecisionPayload struct {
@@ -250,18 +251,18 @@ func (f *EventFacade) UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		}
 	case *pb.WSEvent_SelectStrategy:
 		domainEvent.Type = "select_strategy"
-		var strategy session.DelegationStrategy
+		var strategy flows.FlowStrategy
 		switch payload.SelectStrategy.StrategyId {
 		case pb.DelegationStrategy_DELEGATION_STRATEGY_SKIP:
-			strategy = session.StrategySkip
+			strategy = flows.StrategySkip
 		case pb.DelegationStrategy_DELEGATION_STRATEGY_MANUAL:
-			strategy = session.StrategyManual
+			strategy = flows.StrategyManual
 		case pb.DelegationStrategy_DELEGATION_STRATEGY_REVIEW:
-			strategy = session.StrategyReview
+			strategy = flows.StrategyReview
 		case pb.DelegationStrategy_DELEGATION_STRATEGY_REFINE:
-			strategy = session.StrategyRefine
+			strategy = flows.StrategyRefine
 		default:
-			strategy = session.StrategyManual
+			strategy = flows.StrategyManual
 		}
 		domainEvent.SelectStrategy = &SelectStrategyPayload{StrategyID: strategy}
 	case *pb.WSEvent_ReviewDecision:

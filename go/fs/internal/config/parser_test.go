@@ -39,25 +39,27 @@ golang:
 			},
 		},
 		{
-			name: "Concept Space with Create Digest",
+			name: "Core System Config",
 			yaml: `
-concept:
-  type: "space"
-  name: "Concept Environment"
-  roles:
-    manager:
-      tools:
-        create_digest:
-          description: "mock digest description"
-          topic_name_description: "mock topic"
+digest:
+  type: "core"
+  name: "Digest Manager"
 `,
 			validate: func(t *testing.T, parsed *config.ParsedConfig) {
-				cfg, ok := parsed.Spaces["concept"]
+				node, ok := parsed.Core["digest"]
 				if !ok {
-					t.Fatalf("missing concept space")
+					t.Fatalf("missing digest core config")
 				}
-				if cfg.Roles.Manager.Tools.CreateDigest.Description != "mock digest description" {
-					t.Errorf("expected 'mock digest description', got %q", cfg.Roles.Manager.Tools.CreateDigest.Description)
+
+				var cfg struct {
+					Name string `yaml:"name"`
+				}
+				if err := node.Decode(&cfg); err != nil {
+					t.Fatalf("failed to decode node: %v", err)
+				}
+
+				if cfg.Name != "Digest Manager" {
+					t.Errorf("expected 'Digest Manager', got %q", cfg.Name)
 				}
 			},
 		},
@@ -69,10 +71,18 @@ fanout:
   name: "Parallel FanOut"
 `,
 			validate: func(t *testing.T, parsed *config.ParsedConfig) {
-				cfg, ok := parsed.Flows["fanout"]
+				node, ok := parsed.Flows["fanout"]
 				if !ok {
 					t.Fatalf("missing fanout flow")
 				}
+
+				var cfg struct {
+					Name string `yaml:"name"`
+				}
+				if err := node.Decode(&cfg); err != nil {
+					t.Fatalf("failed to decode node: %v", err)
+				}
+
 				if cfg.Name != "Parallel FanOut" {
 					t.Errorf("expected 'Parallel FanOut', got %q", cfg.Name)
 				}

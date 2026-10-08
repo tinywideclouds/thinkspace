@@ -1,13 +1,15 @@
 package config
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"gopkg.in/yaml.v3"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces/golang"
 )
@@ -16,14 +18,16 @@ type Registry struct {
 	mu      sync.RWMutex
 	domains map[string]spaces.ThinkSpace
 	configs map[string]spaces.ThinkSpaceConfig
-	flows   map[string]flows.FlowConfig
+	flows   map[string]yaml.Node
+	core    map[string]yaml.Node
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
 		domains: make(map[string]spaces.ThinkSpace),
 		configs: make(map[string]spaces.ThinkSpaceConfig),
-		flows:   make(map[string]flows.FlowConfig),
+		flows:   make(map[string]yaml.Node),
+		core:    make(map[string]yaml.Node),
 	}
 }
 
@@ -63,6 +67,9 @@ func (r *Registry) LoadFS(fsys fs.FS, dir string) error {
 		for k, v := range parsed.Flows {
 			r.flows[k] = v
 		}
+		for k, v := range parsed.Core {
+			r.core[k] = v
+		}
 	}
 	return nil
 }
@@ -81,11 +88,24 @@ func (r *Registry) GetConfig(id string) (spaces.ThinkSpaceConfig, bool) {
 	return cfg, ok
 }
 
-func (r *Registry) GetFlow(id string) (flows.FlowConfig, bool) {
+func (r *Registry) DecodeFlowConfig(id string, dest any) error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	flow, ok := r.flows[id]
-	return flow, ok
+	node, ok := r.flows[id]
+	if !ok {
+		return fmt.Errorf("flow configuration not found: %s", id)
+	}
+	return node.Decode(dest)
+}
+
+func (r *Registry) DecodeCoreConfig(id string, dest any) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	node, ok := r.core[id]
+	if !ok {
+		return fmt.Errorf("core configuration not found: %s", id)
+	}
+	return node.Decode(dest)
 }
 
 func (r *Registry) GetAllConfigs() map[string]spaces.ThinkSpaceConfig {

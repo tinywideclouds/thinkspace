@@ -5,7 +5,7 @@ import (
 	"iter"
 	"log/slog"
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,14 +20,14 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// --- Mocks ---
+// --- Shared Mocks ---
 
-type mockModelClient struct {
+type coordMockModelClient struct {
 	responses []llm.StreamChunk
 	callIndex int
 }
 
-func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
+func (m *coordMockModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
 		if m.callIndex < len(m.responses) {
 			resp := m.responses[m.callIndex]
@@ -37,31 +37,31 @@ func (m *mockModelClient) GenerateContentStream(ctx context.Context, model strin
 	}
 }
 
-type mockChatEngine struct{}
+type coordMockChatEngine struct{}
 
-func (m *mockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
-func (m *mockChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+func (m *coordMockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
+func (m *coordMockChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
 	return "mock-sha", nil
 }
-func (m *mockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+func (m *coordMockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
 	return nil, nil
 }
-func (m *mockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
+func (m *coordMockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
 	return nil
 }
-func (m *mockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
+func (m *coordMockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
-func (m *mockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
+func (m *coordMockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
 	return nil
 }
-func (m *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
+func (m *coordMockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
 	return "+ mock diff", nil
 }
 
-type mockThinkSpace struct{}
+type coordMockThinkSpace struct{}
 
-func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
+func (m *coordMockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	cfg := spaces.ThinkSpaceConfig{
 		Roles: spaces.RolesConfig{
 			Manager: spaces.ManagerConfig{Model: "test-manager"},
@@ -72,72 +72,69 @@ func (m *mockThinkSpace) Config() spaces.ThinkSpaceConfig {
 	cfg.ApplyDefaults()
 	return cfg
 }
-func (m *mockThinkSpace) Tools() []llm.ToolDef       { return nil }
-func (m *mockThinkSpace) Verifier() spaces.Verifier  { return &mockVerifier{} }
-func (m *mockThinkSpace) Mapbook() assembler.Mapbook { return nil }
-func (m *mockThinkSpace) Patcher() workspace.Patcher { return nil }
+func (m *coordMockThinkSpace) Tools() []llm.ToolDef                                   { return nil }
+func (m *coordMockThinkSpace) Verifier() spaces.Verifier                              { return nil }
+func (m *coordMockThinkSpace) Mapbook() assembler.Mapbook                             { return nil }
+func (m *coordMockThinkSpace) Patcher() workspace.Patcher                             { return nil }
+func (m *coordMockThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
 
-type mockVerifier struct{}
-
-func (m *mockVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
-	return nil
-}
-
-type mockFlow struct {
+type coordMockFlow struct {
 	executeCalled bool
 }
 
-func (m *mockFlow) Name() string { return "MockFlow" }
-func (m *mockFlow) Execute(ctx context.Context, workspaceService *workspace.Service, thread *chat.Thread, space spaces.ThinkSpace, arguments map[string]any, flowConfiguration flows.FlowConfig, flowContext flows.FlowContext, emitter telemetry.Emitter, executor workspace.SubAgentExecutor, verifier spaces.Verifier) (*flows.FlowResult, error) {
+func (m *coordMockFlow) Name() string  { return "MockFlow" }
+func (m *coordMockFlow) MaxSteps() int { return 10 }
+func (m *coordMockFlow) Next(state flows.FlowState) flows.FlowDirective {
 	m.executeCalled = true
-	return &flows.FlowResult{
-		Branches: []flows.BranchResult{{CandidateID: "candidate/mock-123", Passed: true}},
-		Summary:  "Mock delegation complete",
-	}, nil
+	return flows.FlowDirective{Action: flows.ActionFinish}
 }
 
-type mockUserInterface struct {
-	strategyToReturn session.DelegationStrategy
-	reviewToReturn   bool
-	reviewedBranch   string
+type coordMockUI struct {
+	strategyToReturn   flows.FlowStrategy
+	reviewToReturn     bool
+	reviewedBranch     string
+	transitionToReturn bool
 }
 
-func (u *mockUserInterface) OnTextChunk(text string)                        {}
-func (u *mockUserInterface) ReviewContext(ctxData session.TurnContext) bool { return true }
-func (u *mockUserInterface) ChooseNextStep() session.DelegationStrategy     { return u.strategyToReturn }
-func (u *mockUserInterface) ReviewCandidate(branch string) bool {
+func (u *coordMockUI) OnTextChunk(text string)                        {}
+func (u *coordMockUI) ReviewContext(ctxData session.TurnContext) bool { return true }
+func (u *coordMockUI) ChooseNextStep() flows.FlowStrategy             { return u.strategyToReturn }
+func (u *coordMockUI) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
 }
+func (u *coordMockUI) ConfirmTransition(targetDomain string) bool {
+	return u.transitionToReturn
+}
 
-type emittedEvent struct {
+type coordEmittedEvent struct {
 	channel string
 	event   telemetry.Event
 }
 
-type mockEmitter struct {
-	events []emittedEvent
+type coordMockEmitter struct {
+	events []coordEmittedEvent
 }
 
-func (m *mockEmitter) Emit(channel string, event telemetry.Event) {
-	m.events = append(m.events, emittedEvent{channel: channel, event: event})
+func (m *coordMockEmitter) Emit(channel string, event telemetry.Event) {
+	m.events = append(m.events, coordEmittedEvent{channel: channel, event: event})
 }
 
 // --- Tests ---
 
-func TestCoordinator_ExecuteTurn_RoutesToDelegator(t *testing.T) {
+func TestCoordinator_RunAgentLoop_RoutesToEngine(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 	bus := chat.NewEventBus()
+	bus.Subscribe(chat.NewLedgerSubscriber())
 
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
 	thread, _ := workspaceService.StartThread(ctx, "test-thread")
-	os.MkdirAll(filepath.Join(workspaceRoot, "chats", "test-thread"), 0755)
 
-	client := &mockModelClient{
+	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{
 			{
 				ToolCalls: []llm.ToolCall{{
@@ -148,26 +145,23 @@ func TestCoordinator_ExecuteTurn_RoutesToDelegator(t *testing.T) {
 		},
 	}
 
-	flow := &mockFlow{}
-	digestFlow := &mockFlow{}
-	executor := func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChannel chan<- workspace.AgentToken) error {
-		return nil
-	}
-	emitter := &mockEmitter{}
+	flow := &coordMockFlow{}
+	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{})
 
-	delegator := session.NewDelegator(logger, workspaceService, client, executor, flow, digestFlow, emitter, "golang", "", flows.FlowConfig{})
-	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, delegator)
+	emitter := &coordMockEmitter{}
+	flowEngine := session.NewFlowEngine(logger, workspaceService, nil, emitter)
+	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, flow, digestManager, "golang", "")
 
-	userInterface := &mockUserInterface{strategyToReturn: session.StrategyManual, reviewToReturn: true}
+	ui := &coordMockUI{strategyToReturn: flows.StrategyManual, reviewToReturn: true}
 	manifest := chat.NewThreadManifest(thread.ID)
 
-	err := coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, cognition.ThinkBundle{}, userInterface)
+	err := coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, ui, nil)
 	if err != nil {
-		t.Fatalf("ExecuteTurn failed: %v", err)
+		t.Fatalf("RunAgentLoop failed: %v", err)
 	}
 
 	if !flow.executeCalled {
-		t.Errorf("Expected Flow to be executed upon intercepting tool call via Delegator")
+		t.Errorf("Expected Flow to be evaluated by the Engine upon intercepting tool call")
 	}
 }
 
@@ -178,10 +172,10 @@ func TestCoordinator_QueryLens(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 	bus := chat.NewEventBus()
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
 	thread, _ := workspaceService.StartThread(ctx, "test-thread-lens")
 
-	client := &mockModelClient{
+	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{
 			{
 				ToolCalls: []llm.ToolCall{{
@@ -195,12 +189,13 @@ func TestCoordinator_QueryLens(t *testing.T) {
 		},
 	}
 
-	emitter := &mockEmitter{}
-	delegator := session.NewDelegator(logger, workspaceService, client, nil, &mockFlow{}, &mockFlow{}, emitter, "golang", "", flows.FlowConfig{})
-	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, delegator)
+	emitter := &coordMockEmitter{}
+	flowEngine := session.NewFlowEngine(logger, workspaceService, nil, emitter)
+	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{})
+	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "golang", "")
 
 	manifest := chat.NewThreadManifest(thread.ID)
-	_ = coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, cognition.ThinkBundle{}, &mockUserInterface{})
+	_ = coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{}, nil)
 
 	foundLensLog := false
 	for _, ev := range emitter.events {
@@ -220,10 +215,12 @@ func TestCoordinator_CreateDigest(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 	bus := chat.NewEventBus()
-	workspaceService := workspace.NewService(logger, &mockChatEngine{}, workspaceRoot, bus)
+	bus.Subscribe(chat.NewLedgerSubscriber())
+
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
 	thread, _ := workspaceService.StartThread(ctx, "test-thread-digest")
 
-	client := &mockModelClient{
+	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{
 			{
 				ToolCalls: []llm.ToolCall{{
@@ -235,18 +232,84 @@ func TestCoordinator_CreateDigest(t *testing.T) {
 					},
 				}},
 			},
+			{
+				// This is the response returned by the mock client when DigestManager calls it
+				Text: "Generated Manual Summary",
+			},
 		},
 	}
 
-	emitter := &mockEmitter{}
-	digestFlow := &mockFlow{}
-	delegator := session.NewDelegator(logger, workspaceService, client, nil, &mockFlow{}, digestFlow, emitter, "golang", "", flows.FlowConfig{})
-	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, delegator)
+	emitter := &coordMockEmitter{}
+	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{
+		ManualPrompt: "Instruction: {{.Instruction}}\nContext: {{.Context}}",
+	})
+	flowEngine := session.NewFlowEngine(logger, workspaceService, nil, emitter)
+	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "golang", "")
 
 	manifest := chat.NewThreadManifest(thread.ID)
-	_ = coordinator.ExecuteTurn(ctx, thread, manifest, &mockThinkSpace{}, cognition.ThinkBundle{}, &mockUserInterface{})
+	_ = coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{}, nil)
 
-	if !digestFlow.executeCalled {
-		t.Errorf("Expected create_digest tool to route execution to the injected DigestFlow")
+	events, _ := workspaceService.LoadEvents(ctx, thread)
+	foundDigest := false
+	for _, e := range events {
+		if e.Type == chat.EventDigest && strings.Contains(e.Content, "Generated Manual Summary") {
+			foundDigest = true
+			if len(e.Tags) != 1 || e.Tags[0] != "auth" {
+				t.Errorf("Expected tags to be passed into ledger correctly")
+			}
+			break
+		}
+	}
+
+	if !foundDigest {
+		t.Errorf("Expected create_digest tool to route execution to the DigestManager and write to ledger")
+	}
+}
+
+func TestCoordinator_TransitionWorkspace_Approved(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	workspaceRoot := t.TempDir()
+	bus := chat.NewEventBus()
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
+	thread, _ := workspaceService.StartThread(ctx, "test-thread-trans")
+
+	client := &coordMockModelClient{
+		responses: []llm.StreamChunk{
+			{
+				ToolCalls: []llm.ToolCall{{
+					Name: "transition_workspace",
+					Args: map[string]any{
+						"target_domain": "golang-space",
+						"reasoning":     "Needs compilation",
+					},
+				}},
+			},
+		},
+	}
+
+	emitter := &coordMockEmitter{}
+	flowEngine := session.NewFlowEngine(logger, workspaceService, nil, emitter)
+	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{})
+	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "concept", "")
+
+	ui := &coordMockUI{transitionToReturn: true}
+	manifest := chat.NewThreadManifest(thread.ID)
+
+	err := coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, ui, nil)
+
+	if err == nil {
+		t.Fatalf("Expected TransitionRequest error, got nil")
+	}
+
+	transReq, ok := err.(*session.TransitionRequest)
+	if !ok {
+		t.Fatalf("Expected error of type *TransitionRequest, got %T: %v", err, err)
+	}
+
+	if transReq.TargetDomain != "golang-space" {
+		t.Errorf("Expected transition to 'golang-space', got '%s'", transReq.TargetDomain)
 	}
 }

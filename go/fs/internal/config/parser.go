@@ -5,23 +5,19 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 )
 
-// ConfigHeader allows us to peek at the YAML type before full unmarshaling.
 type ConfigHeader struct {
-	Type string `yaml:"type"` // "space" or "flow"
+	Type string `yaml:"type"` // "space", "flow", or "core"
 }
 
-// ParsedConfig holds the raw extracted configurations from a YAML file.
 type ParsedConfig struct {
 	Spaces map[string]spaces.ThinkSpaceConfig
-	Flows  map[string]flows.FlowConfig
+	Flows  map[string]yaml.Node
+	Core   map[string]yaml.Node
 }
 
-// ParseConfigBytes reads a YAML byte slice and decodes it into Spaces and Flows.
-// It returns an error if the YAML is invalid, making it ideal for CLI validation tools.
 func ParseConfigBytes(data []byte) (*ParsedConfig, error) {
 	var rawMap map[string]yaml.Node
 	if err := yaml.Unmarshal(data, &rawMap); err != nil {
@@ -30,7 +26,8 @@ func ParseConfigBytes(data []byte) (*ParsedConfig, error) {
 
 	result := &ParsedConfig{
 		Spaces: make(map[string]spaces.ThinkSpaceConfig),
-		Flows:  make(map[string]flows.FlowConfig),
+		Flows:  make(map[string]yaml.Node),
+		Core:   make(map[string]yaml.Node),
 	}
 
 	for id, node := range rawMap {
@@ -41,11 +38,10 @@ func ParseConfigBytes(data []byte) (*ParsedConfig, error) {
 
 		switch header.Type {
 		case "flow":
-			var cfg flows.FlowConfig
-			if err := node.Decode(&cfg); err != nil {
-				return nil, fmt.Errorf("failed to parse flow '%s': %w", id, err)
-			}
-			result.Flows[id] = cfg
+			result.Flows[id] = node
+
+		case "core":
+			result.Core[id] = node
 
 		case "space", "": // Default to space for backward compatibility
 			var cfg spaces.ThinkSpaceConfig

@@ -28,13 +28,14 @@ func NewServer(
 	registry *config.Registry,
 	manager *workspace.ServiceManager,
 	fanOutFlow flows.Flow,
+	digestManager *session.DigestManager,
 	modelClient llm.ModelClient,
 ) *Server {
 	return &Server{
 		logger:      logger,
 		registry:    registry,
 		manager:     manager,
-		turnManager: session.NewTurnManager(logger, registry, manager, modelClient, fanOutFlow),
+		turnManager: session.NewTurnManager(logger, registry, manager, modelClient, fanOutFlow, digestManager),
 	}
 }
 
@@ -180,7 +181,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			emitter := NewWebSocketEmitter(ctx, connection, facade)
 			go func() {
-				if err := s.turnManager.ExecuteTurn(ctx, payload.SpaceID, payload.ChatID, payload.Text, ui, emitter); err != nil {
+				if err := s.turnManager.RunTurn(ctx, payload.SpaceID, payload.ChatID, payload.Text, ui, emitter); err != nil {
 					s.logger.Error("turn failed", "error", err)
 					ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ System Error: %v\n", err))
 				}

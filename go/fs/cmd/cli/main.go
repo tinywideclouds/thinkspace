@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -13,12 +14,9 @@ import (
 	"github.com/joho/godotenv"
 	"google.golang.org/genai"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cli"
-	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
-	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
@@ -43,7 +41,6 @@ func main() {
 		logger.Error("Failed to initialize GenAI client", "error", err)
 		os.Exit(1)
 	}
-	// Use the gemini adapter which implements the llm.ModelClient interface
 	modelClient := gemini.NewAdapter(client)
 
 	homeDirectory, err := os.UserHomeDir()
@@ -52,14 +49,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	repositoryRoot := filepath.Join(homeDirectory, "Documents", "thinkspace", *spaceName)
-	configurationsDirectory := filepath.Join(homeDirectory, "Documents", "thinkspace", "configs")
+	baseRoot := filepath.Join(homeDirectory, "Documents", "thinkspace")
+	repositoryRoot := filepath.Join(baseRoot, *spaceName)
+	configurationsDirectory := filepath.Join(baseRoot, "configs")
 
 	if err := os.MkdirAll(repositoryRoot, 0755); err != nil {
 		logger.Error("Failed to create workspace directory", "error", err)
 		os.Exit(1)
 	}
-
 	if err := os.MkdirAll(configurationsDirectory, 0755); err != nil {
 		logger.Error("Failed to create configurations directory", "error", err)
 		os.Exit(1)
@@ -67,17 +64,14 @@ func main() {
 
 	config.ScaffoldDefaults(logger, configurationsDirectory)
 
-	var stateEngine workspace.ChatEngine
-	switch *engineType {
-	case "exec":
-		fmt.Println("⚙️  Engine: Git CLI (ExecEngine with Worktrees)")
-		stateEngine = gitfs.NewGoExecEngine(repositoryRoot, true)
-	case "gogit":
-		fallthrough
-	default:
-		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
-		stateEngine = gitfs.NewGoGitEngine(repositoryRoot, true)
+	engineFactory := func(repoRoot string) workspace.ChatEngine {
+		if *engineType == "exec" {
+			return gitfs.NewGoExecEngine(repoRoot, true)
+		}
+		return gitfs.NewGoGitEngine(repoRoot, true)
 	}
+
+	serviceManager := workspace.NewServiceManager(logger, baseRoot, engineFactory)
 
 	registry := config.NewRegistry()
 	if err := registry.LoadDirectory(configurationsDirectory); err != nil {
@@ -85,152 +79,74 @@ func main() {
 		os.Exit(1)
 	}
 
-	activeThinkSpace, ok := registry.GetDomain(*domainName)
-	if !ok {
-		fmt.Printf("⚠️ Domain config '%s.yaml' not found in %s\n", *domainName, configurationsDirectory)
-		os.Exit(1)
-	}
-
-	spaceConfiguration, _ := registry.GetConfig(*domainName)
-	flowConfiguration, flowOk := registry.GetFlow("fanout")
-	if !flowOk {
-		logger.Error("FanOut configuration missing from registry")
-		os.Exit(1)
-	}
-
-	bus := chat.NewEventBus()
-	bus.Subscribe(chat.NewLedgerSubscriber())
-
-	workerModel := activeThinkSpace.Config().Roles.Worker.Model
-
-	subAgentExecutor := llm.NewSubAgentExecutor(
-		logger,
-		modelClient,
-		workerModel,
-		activeThinkSpace.Patcher(),
-	)
-
-	fanOutFlow := flows.NewFanOutFlow(logger)
-	digestFlow := flows.NewDigestFlow(logger) // NEW
-	workspaceService := workspace.NewService(logger, stateEngine, repositoryRoot, bus)
-
-	playbackEngine := chat.NewPlaybackEngine()
-	contextAssembler := chat.NewAssembler()
-	userInterface := cli.NewTerminalUI()
-
-	emitter := telemetry.MultiTelemetryEmitter{flows.NewSlogEmitter(logger)}
-
-	delegator := session.NewDelegator(
-		logger,
-		workspaceService,
-		modelClient,
-		subAgentExecutor,
-		fanOutFlow,
-		digestFlow, // NEW
-		emitter,
-		*domainName,
-		spaceConfiguration.WorkerSystemPrompt(),
-		flowConfiguration,
-	)
-
-	coordinator := session.NewCoordinator(
-		logger,
-		workspaceService,
-		modelClient,
-		emitter,
-		delegator,
-	)
+	_ = serviceManager.UpdateSpaceState(*spaceName, func(s *workspace.SpaceState) {
+		s.Domain = *domainName
+	})
 
 	fmt.Printf("📂 Workspace root: %s\n", repositoryRoot)
-	fmt.Printf("📄 Active Domain: %s\n", *domainName)
+	if *engineType == "exec" {
+		fmt.Println("⚙️  Engine: Git CLI (ExecEngine with Worktrees)")
+	} else {
+		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
+	}
 
 	threadDirectory := filepath.Join(repositoryRoot, "chats", *chatName)
 	isNewThread := false
+
 	if _, err := os.Stat(threadDirectory); os.IsNotExist(err) {
 		isNewThread = true
-	}
-
-	thread, err := workspaceService.StartThread(ctx, *chatName)
-	if err != nil {
-		logger.Error("Failed to start thread", "error", err)
-		os.Exit(1)
-	}
-
-	if isNewThread {
-		fmt.Printf("🌱 Creating new exploration thread: %s\n", *chatName)
-		initialPrompt := "Hello! Let's explore some concepts."
-		fmt.Printf("💬 Initial Prompt: %s\n", initialPrompt)
-
-		_ = workspaceService.LogUserPrompt(ctx, thread, initialPrompt)
-	} else {
-		fmt.Printf("📖 Resuming exploration thread: %s\n", *chatName)
-
-		graph, _, err := playbackEngine.LoadState(ctx, thread)
-		if err == nil {
-			fmt.Printf("Loaded %d historical turns.\n", len(graph.RecentEvents))
+		_ = os.MkdirAll(threadDirectory, 0755)
+		meta := workspace.ChatMeta{
+			ID:           *chatName,
+			Name:         *chatName,
+			ActiveDomain: *domainName,
 		}
+		b, _ := json.MarshalIndent(meta, "", "  ")
+		_ = os.WriteFile(filepath.Join(threadDirectory, "meta.json"), b, 0644)
+	}
+
+	var promptText string
+	if isNewThread {
+		fmt.Printf("🌱 Creating new exploration thread: %s (Domain: %s)\n", *chatName, *domainName)
+		promptText = "Hello! Let's explore some concepts."
+		fmt.Printf("💬 Initial Prompt: %s\n", promptText)
+	} else {
+		meta, _ := serviceManager.GetChatMeta(*spaceName, *chatName)
+		fmt.Printf("📖 Resuming exploration thread: %s (Active Domain: %s)\n", *chatName, meta.ActiveDomain)
 
 		fmt.Print("\n> ")
 		reader := bufio.NewReader(os.Stdin)
 		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(input)
+		promptText = strings.TrimSpace(input)
 
-		if input == "" {
+		if promptText == "" {
 			fmt.Println("No input provided. Exiting.")
 			return
 		}
-
-		_ = workspaceService.LogUserPrompt(ctx, thread, input)
 	}
 
-	graph, manifest, err := playbackEngine.LoadState(ctx, thread)
-	if err != nil {
-		logger.Error("Failed to load playback state", "error", err)
-		os.Exit(1)
+	// FLOW FACTORY INJECTION
+	var fanOutCfg flows.FanOutConfig
+	if err := registry.DecodeFlowConfig("fanout", &fanOutCfg); err != nil {
+		logger.Warn("Failed to decode fanout config, using defaults", "error", err)
 	}
+	fanOutFlow := flows.NewFanOutFlow(logger, fanOutCfg)
 
-	var catalystEvent *chat.Event
-	if len(graph.RecentEvents) > 0 {
-		last := graph.RecentEvents[len(graph.RecentEvents)-1]
-		catalystEvent = &last
-		graph.RecentEvents = graph.RecentEvents[:len(graph.RecentEvents)-1]
+	// CORE SYSTEM INJECTION
+	var digestCfg session.DigestConfig
+	if err := registry.DecodeCoreConfig("digest", &digestCfg); err != nil {
+		logger.Warn("Failed to decode digest config, using defaults", "error", err)
 	}
+	digestManager := session.NewDigestManager(logger, modelClient, digestCfg)
 
-	assemblyReq := chat.AssemblyRequest{
-		Manifest:     manifest,
-		RecentEvents: graph.RecentEvents,
-		Catalyst:     catalystEvent,
-	}
+	turnManager := session.NewTurnManager(logger, registry, serviceManager, modelClient, fanOutFlow, digestManager)
 
-	trajectory, err := contextAssembler.Build(ctx, assemblyReq)
-	if err != nil {
-		logger.Error("Failed to assemble context", "error", err)
-		os.Exit(1)
-	}
-
-	rawMapbook, err := activeThinkSpace.Mapbook().GenerateLayers(ctx, workspaceService.WorkspaceRoot())
-	if err != nil {
-		logger.Error("Failed to generate mapbook", "error", err)
-		os.Exit(1)
-	}
-
-	stringMaps := make(map[string]string)
-	for k, v := range rawMapbook {
-		stringMaps[string(k)] = v
-	}
-
-	managerBundle := cognition.ThinkBundle{
-		Rules: cognition.SystemRules{
-			Persona: activeThinkSpace.Config().ManagerSystemPrompt(),
-		},
-		Mapbook:    cognition.Mapbook{Maps: stringMaps},
-		Trajectory: trajectory,
-		Workbench:  []cognition.WorkbenchItem{},
-	}
+	userInterface := cli.NewTerminalUI()
+	emitter := telemetry.MultiEmitter{telemetry.NewSlogEmitter(logger)}
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	if err := coordinator.ExecuteTurn(ctx, thread, manifest, activeThinkSpace, managerBundle, userInterface); err != nil {
+	if err := turnManager.RunTurn(ctx, *spaceName, *chatName, promptText, userInterface, emitter); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)
 	}

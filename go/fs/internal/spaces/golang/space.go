@@ -1,6 +1,12 @@
 package golang
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
@@ -87,4 +93,22 @@ func (s *GoThinkSpace) Mapbook() assembler.Mapbook {
 
 func (s *GoThinkSpace) Patcher() workspace.Patcher {
 	return NewGoASTPatcher(s.config.Roles.Worker.PatcherInstructions)
+}
+
+func (s *GoThinkSpace) Initialize(ctx context.Context, directory string) error {
+	srcDir := filepath.Join(directory, "src")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		return fmt.Errorf("scaffolding src directory: %w", err)
+	}
+
+	// If a go.mod doesn't exist, generate a default one
+	goModPath := filepath.Join(srcDir, "go.mod")
+	if _, err := os.Stat(goModPath); os.IsNotExist(err) {
+		cmd := exec.CommandContext(ctx, "go", "mod", "init", "thinkspace/app")
+		cmd.Dir = srcDir
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("initializing go module: %w", err)
+		}
+	}
+	return nil
 }

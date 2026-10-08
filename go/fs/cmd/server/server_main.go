@@ -16,6 +16,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
+	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -40,7 +41,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Instantiate the model client interface using the gemini adapter
 	modelClient := gemini.NewAdapter(client)
 
 	homeDirectory, err := os.UserHomeDir()
@@ -52,7 +52,6 @@ func main() {
 	baseRoot := filepath.Join(homeDirectory, "Documents", *rootName)
 	configurationsDirectory := filepath.Join(baseRoot, "configs")
 
-	// Ensure base directories exist physically
 	_ = os.MkdirAll(configurationsDirectory, 0755)
 
 	config.ScaffoldDefaults(logger, configurationsDirectory)
@@ -83,15 +82,26 @@ func main() {
 		SupportedDomains: supportedDomains,
 	}
 
-	fanOutFlow := flows.NewFanOutFlow(logger)
+	// FLOW FACTORY INJECTION
+	var fanOutCfg flows.FanOutConfig
+	if err := registry.DecodeFlowConfig("fanout", &fanOutCfg); err != nil {
+		logger.Warn("Failed to decode fanout config, using defaults", "error", err)
+	}
+	fanOutFlow := flows.NewFanOutFlow(logger, fanOutCfg)
+
+	// CORE SYSTEM INJECTION
+	var digestCfg session.DigestConfig
+	if err := registry.DecodeCoreConfig("digest", &digestCfg); err != nil {
+		logger.Warn("Failed to decode digest config, using defaults", "error", err)
+	}
+	digestManager := session.NewDigestManager(logger, modelClient, digestCfg)
 
 	mux := http.NewServeMux()
 
 	managementAPI := api.NewManagementAPI(registry, serviceManager, appConfig)
 	managementAPI.RegisterHandlers(mux)
 
-	// Updated signature: removed the dead llmAdapter parameter
-	webSocketServer := api.NewServer(logger, registry, serviceManager, fanOutFlow, modelClient)
+	webSocketServer := api.NewServer(logger, registry, serviceManager, fanOutFlow, digestManager, modelClient)
 	webSocketServer.RegisterHandlers(mux)
 
 	serverAddress := fmt.Sprintf(":%d", *port)

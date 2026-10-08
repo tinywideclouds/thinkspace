@@ -11,6 +11,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
@@ -20,14 +21,14 @@ func TestEventFacade_UnmarshalInbound_SelectStrategy(t *testing.T) {
 	tests := []struct {
 		name         string
 		protoEnumVal int
-		expected     session.DelegationStrategy
+		expected     flows.FlowStrategy
 	}{
-		{"UNSPECIFIED fallback", 0, session.StrategyManual},
-		{"SKIP mapping", 1, session.StrategySkip},
-		{"MANUAL mapping", 2, session.StrategyManual},
-		{"REVIEW mapping", 3, session.StrategyReview},
-		{"REFINE mapping", 4, session.StrategyRefine},
-		{"UNKNOWN fallback", 99, session.StrategyManual},
+		{"UNSPECIFIED fallback", 0, flows.StrategyManual},
+		{"SKIP mapping", 1, flows.StrategySkip},
+		{"MANUAL mapping", 2, flows.StrategyManual},
+		{"REVIEW mapping", 3, flows.StrategyReview},
+		{"REFINE mapping", 4, flows.StrategyRefine},
+		{"UNKNOWN fallback", 99, flows.StrategyManual},
 	}
 
 	for _, tt := range tests {

@@ -12,7 +12,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
-	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -73,7 +73,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	}
 
 	// Test 2: ChooseNextStep Blocking and Channel Push
-	strategyChosen := make(chan session.DelegationStrategy)
+	strategyChosen := make(chan flows.FlowStrategy)
 	go func() {
 		strategyChosen <- ui.ChooseNextStep()
 	}()
@@ -96,11 +96,11 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Errorf("expected active true, got false")
 	}
 
-	ui.PushStrategy(session.StrategyRefine)
+	ui.PushStrategy(flows.StrategyRefine)
 
 	select {
 	case strategy := <-strategyChosen:
-		if strategy != session.StrategyRefine {
+		if strategy != flows.StrategyRefine {
 			t.Errorf("expected StrategyRefine, got %v", strategy)
 		}
 	case <-time.After(1 * time.Second):

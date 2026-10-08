@@ -98,13 +98,19 @@ files:
   - ../../go/fs/internal/llm/testdata/healers/gemini/03_bad_escapes_raw.txt
   - ../../go/fs/docs/think_bundles.md
   - ../../go/fs/internal/llm/gemini/adapter.go
-  - ../../go/fs/internal/session/delegator_test.go
-  - ../../go/fs/internal/session/delegator.go
   - ../../go/fs/internal/telemetry/emitter.go
   - ../../go/fs/internal/llm/client_test.go
   - ../../go/fs/internal/config/defaults/concept.yaml
-  - ../../go/fs/internal/session/flows/digest_flow.go
   - ../../go/fs/internal/spaces/generic/verifier.go
   - ../../go/fs/internal/spaces/concept/mapbook.go
   - ../../go/fs/internal/spaces/concept/space.go
+  - ../../go/fs/internal/cognition/bundle.go
+  - ../../go/fs/internal/spaces/concept/space_test.go
+  - ../../go/fs/internal/spaces/generic/verifier_test.go
+  - ../../go/fs/internal/config/defaults/digest.yaml
+  - ../../go/fs/internal/session/flows/research_flow_unit_test.go
+  - ../../go/fs/internal/session/flows/research_flow.go
+  - ../../go/fs/internal/session/flow_engine_test.go
+  - ../../go/fs/internal/session/flow_engine.go
+  - ../../go/fs/internal/session/memory_synthesizer.go
 last_context: llm_golang_42.md

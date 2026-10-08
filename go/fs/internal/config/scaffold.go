@@ -21,7 +21,8 @@ type DevSkeleton struct {
 
 // ScaffoldDefaults writes default configuration files to the disk if they do not already exist.
 func ScaffoldDefaults(logger *slog.Logger, configurationsDirectory string) {
-	filesToScaffold := []string{"golang.yaml", "fanout.yaml"}
+
+	filesToScaffold := []string{"golang.yaml", "fanout.yaml", "digest.yaml"}
 
 	for _, filename := range filesToScaffold {
 		targetPath := filepath.Join(configurationsDirectory, filename)

@@ -206,3 +206,39 @@ func (m *ServiceManager) CreateChat(ctx context.Context, spaceID string, request
 
 	return meta, nil
 }
+
+func (m *ServiceManager) GetChatMeta(spaceID, chatID string) (ChatMeta, error) {
+	chatsDir := filepath.Join(m.baseRoot, spaceID, "chats")
+	metaPath := filepath.Join(chatsDir, chatID, "meta.json")
+
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return ChatMeta{}, err
+	}
+
+	var meta ChatMeta
+	err = json.Unmarshal(data, &meta)
+	return meta, err
+}
+
+func (m *ServiceManager) UpdateChatMeta(spaceID, chatID string, updateFn func(*ChatMeta)) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	meta, err := m.GetChatMeta(spaceID, chatID)
+	if err != nil {
+		return err
+	}
+
+	updateFn(&meta)
+
+	chatsDir := filepath.Join(m.baseRoot, spaceID, "chats")
+	metaPath := filepath.Join(chatsDir, chatID, "meta.json")
+
+	metaBytes, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(metaPath, metaBytes, 0644)
+}

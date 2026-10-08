@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -51,7 +52,7 @@ func (ui *TerminalUI) ReviewContext(ctxData session.TurnContext) bool {
 	return input != "n"
 }
 
-func (ui *TerminalUI) ChooseNextStep() session.DelegationStrategy {
+func (ui *TerminalUI) ChooseNextStep() flows.FlowStrategy {
 	fmt.Println("\nSelect Next Step:")
 	fmt.Println("[1] Manual Review (I will read the generated code)")
 	fmt.Println("[2] Assisted Review (Manager evaluates diffs, I decide)")
@@ -64,13 +65,13 @@ func (ui *TerminalUI) ChooseNextStep() session.DelegationStrategy {
 
 	switch input {
 	case "0":
-		return session.StrategySkip
+		return flows.StrategySkip
 	case "2":
-		return session.StrategyReview
+		return flows.StrategyReview
 	case "3":
-		return session.StrategyRefine
+		return flows.StrategyRefine
 	default:
-		return session.StrategyManual
+		return flows.StrategyManual
 	}
 }
 
@@ -88,4 +89,15 @@ func (ui *TerminalUI) ReviewCandidate(branch string) bool {
 
 func (ui *TerminalUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
 	return nil
+}
+
+func (ui *TerminalUI) ConfirmTransition(targetDomain string) bool {
+	fmt.Printf("\n⚠️  The AI wants to transition the workspace to the '%s' domain.\n", targetDomain)
+	fmt.Print("Allow this transition and scaffold the environment? (Y/n): ")
+
+	input, _ := ui.reader.ReadString('\n')
+	input = strings.ToLower(strings.TrimSpace(input))
+
+	// Default to yes unless explicitly rejected
+	return input != "n"
 }

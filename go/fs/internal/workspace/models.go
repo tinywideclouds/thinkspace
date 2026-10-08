@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 )
 
@@ -37,9 +39,15 @@ const (
 
 // ChatMeta separates the stable directory ID from the mutable display name.
 type ChatMeta struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                 string    `json:"id"`
+	Name               string    `json:"name"`
+	CreatedAt          time.Time `json:"created_at"`
+	ActiveDomain       string    `json:"active_domain"`       // e.g., "concept" or "golang"
+	InitializedDomains []string  `json:"initialized_domains"` // e.g., ["concept", "golang"]
+
+	// Memory Sliding Window State
+	DigestionHorizon  uuid.UUID `json:"digestion_horizon,omitempty"`  // Last event successfully digested
+	EvaluationHorizon uuid.UUID `json:"evaluation_horizon,omitempty"` // Last event evaluated by the background worker
 }
 
 // AppConfig defines the server's global capabilities and supported domain environments.

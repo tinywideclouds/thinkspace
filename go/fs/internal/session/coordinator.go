@@ -6,23 +6,15 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"uuid"
-)
-
-type DelegationStrategy int
-
-const (
-	StrategySkip DelegationStrategy = iota
-	StrategyManual
-	StrategyReview
-	StrategyRefine
 )
 
 type ManagerPayload struct {
@@ -60,8 +52,17 @@ type FileContext struct {
 type UserInterface interface {
 	OnTextChunk(text string)
 	ReviewContext(ctxData TurnContext) bool
-	ChooseNextStep() DelegationStrategy
+	ChooseNextStep() flows.FlowStrategy
 	ReviewCandidate(branch string) (accepted bool)
+	ConfirmTransition(targetDomain string) bool
+}
+
+type TransitionRequest struct {
+	TargetDomain string
+}
+
+func (e *TransitionRequest) Error() string {
+	return "domain transition requested to: " + e.TargetDomain
 }
 
 type Coordinator struct {
@@ -69,7 +70,11 @@ type Coordinator struct {
 	workspaceService *workspace.Service
 	modelClient      llm.ModelClient
 	emitter          telemetry.Emitter
-	delegator        *Delegator
+	flowEngine       *FlowEngine
+	fanOutFlow       flows.Flow
+	digestManager    *DigestManager
+	spaceID          string
+	workerPrompt     string
 }
 
 func NewCoordinator(
@@ -77,31 +82,39 @@ func NewCoordinator(
 	workspaceService *workspace.Service,
 	modelClient llm.ModelClient,
 	emitter telemetry.Emitter,
-	delegator *Delegator,
+	flowEngine *FlowEngine,
+	fanOutFlow flows.Flow,
+	digestManager *DigestManager,
+	spaceID string,
+	workerPrompt string,
 ) *Coordinator {
 	return &Coordinator{
 		logger:           logger,
 		workspaceService: workspaceService,
 		modelClient:      modelClient,
 		emitter:          emitter,
-		delegator:        delegator,
+		flowEngine:       flowEngine,
+		fanOutFlow:       fanOutFlow,
+		digestManager:    digestManager,
+		spaceID:          spaceID,
+		workerPrompt:     workerPrompt,
 	}
 }
 
-func (c *Coordinator) ExecuteTurn(
+func (c *Coordinator) RunAgentLoop(
 	ctx context.Context,
 	thread *chat.Thread,
 	manifest *chat.ThreadManifest,
 	thinkSpace spaces.ThinkSpace,
 	bundle cognition.ThinkBundle,
 	userInterface UserInterface,
+	availableTools []llm.ToolDef,
 ) error {
 	turnContext, cancel := context.WithTimeout(ctx, thinkSpace.Config().TurnTimeout())
 	defer cancel()
 
 	managerModel := thinkSpace.Config().Roles.Manager.Model
 	maxIterations := 3
-	tools := thinkSpace.Tools()
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		c.emitter.Emit("manager", telemetry.Event{
@@ -115,7 +128,7 @@ func (c *Coordinator) ExecuteTurn(
 			turnContext,
 			managerModel,
 			bundle,
-			tools,
+			availableTools,
 		)
 
 		var fullModelResponse strings.Builder
@@ -155,6 +168,42 @@ func (c *Coordinator) ExecuteTurn(
 		}
 
 		call := interceptedTools[0]
+
+		if call.Name == "transition_workspace" {
+			targetDomain, _ := call.Args["target_domain"].(string)
+
+			c.logger.InfoContext(turnContext, "intercepted transition request", "target", targetDomain)
+			c.emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "log",
+				Timestamp: time.Now(),
+				Message:   fmt.Sprintf("Manager requested workspace transition to '%s'", targetDomain),
+			})
+
+			if userInterface.ConfirmTransition(targetDomain) {
+				c.emitter.Emit("manager", telemetry.Event{
+					ID:        uuid.NewV7(),
+					Type:      "log",
+					Timestamp: time.Now(),
+					Message:   "Transition approved. Rebooting workspace...",
+				})
+				return &TransitionRequest{TargetDomain: targetDomain}
+			}
+
+			c.emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "log",
+				Timestamp: time.Now(),
+				Message:   "Transition denied by user. Forcing manager to self-correct...",
+			})
+			userInterface.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** Transition to '%s' denied.\nAsking Manager to continue in current domain...\n", targetDomain))
+
+			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+				Role:    "user",
+				Content: fmt.Sprintf("[System: Transition to '%s' was denied by the user. You must continue your task within the current domain.]", targetDomain),
+			})
+			continue
+		}
 
 		if call.Name == "query_lens" {
 			tag, _ := call.Args["tag"].(string)
@@ -197,6 +246,48 @@ func (c *Coordinator) ExecuteTurn(
 			continue
 		}
 
+		if call.Name == "create_digest" {
+			instruction, _ := call.Args["instruction"].(string)
+			topicName, _ := call.Args["topic_name"].(string)
+
+			var tags []string
+			if rawTags, ok := call.Args["tags"].([]any); ok {
+				for _, rt := range rawTags {
+					if tStr, ok := rt.(string); ok {
+						tags = append(tags, tStr)
+					}
+				}
+			}
+
+			var sb strings.Builder
+			for _, ev := range bundle.Trajectory.WorkingMemory {
+				sb.WriteString(fmt.Sprintf("[%s]: %s\n", ev.Role, ev.Content))
+			}
+
+			err := c.digestManager.CreateManualDigest(
+				turnContext,
+				c.workspaceService,
+				thread,
+				topicName,
+				tags,
+				instruction,
+				sb.String(),
+				thinkSpace.Config().Roles.Worker.Model,
+				c.workerPrompt,
+			)
+
+			if err != nil {
+				c.logger.WarnContext(turnContext, "create_digest failed", "error", err)
+				c.emitter.Emit("manager", telemetry.Event{
+					ID:        uuid.NewV7(),
+					Type:      "error",
+					Timestamp: time.Now(),
+					Message:   fmt.Sprintf("Digest creation failed: %v", err),
+				})
+			}
+			break
+		}
+
 		if call.Name == "propose_change" {
 			c.emitter.Emit("manager", telemetry.Event{
 				ID:        uuid.NewV7(),
@@ -205,7 +296,14 @@ func (c *Coordinator) ExecuteTurn(
 				Message:   "Manager is proposing changes and delegating to sub-agents...",
 			})
 
-			err := c.delegator.ExecuteProposeChange(turnContext, thread, thinkSpace, bundle, userInterface, call, managerModel)
+			flowContext := flows.FlowContext{
+				FlowID:         fmt.Sprintf("flow-%d", time.Now().Unix()),
+				SpaceID:        c.spaceID,
+				BaseAgentRules: c.workerPrompt,
+				FlowSummary:    "Executing requested changes.",
+			}
+
+			err := c.flowEngine.Run(turnContext, thread, thinkSpace, c.fanOutFlow, call.Args, flowContext, userInterface)
 
 			if err != nil {
 				c.logger.WarnContext(turnContext, "tool execution failed, bouncing back to manager", "error", err)

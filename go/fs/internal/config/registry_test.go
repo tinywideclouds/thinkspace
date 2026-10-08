@@ -20,6 +20,9 @@ concept:
 fanout:
   type: "flow"
   name: "Parallel FanOut"
+digest:
+  type: "core"
+  name: "Digest Manager"
 `),
 		},
 	}
@@ -44,12 +47,24 @@ fanout:
 		t.Errorf("GetDomain: Expected to find 'concept' domain instantiated")
 	}
 
-	// Test Flow retrieval
-	flowCfg, ok := registry.GetFlow("fanout")
-	if !ok {
-		t.Errorf("GetFlow: Expected to find 'fanout'")
+	// Test Flow decoding
+	type mockConfig struct {
+		Name string `yaml:"name"`
+	}
+	var flowCfg mockConfig
+	if err := registry.DecodeFlowConfig("fanout", &flowCfg); err != nil {
+		t.Fatalf("DecodeFlowConfig failed: %v", err)
 	}
 	if flowCfg.Name != "Parallel FanOut" {
 		t.Errorf("Expected flow name 'Parallel FanOut', got %q", flowCfg.Name)
+	}
+
+	// Test Core decoding
+	var coreCfg mockConfig
+	if err := registry.DecodeCoreConfig("digest", &coreCfg); err != nil {
+		t.Fatalf("DecodeCoreConfig failed: %v", err)
+	}
+	if coreCfg.Name != "Digest Manager" {
+		t.Errorf("Expected core name 'Digest Manager', got %q", coreCfg.Name)
 	}
 }

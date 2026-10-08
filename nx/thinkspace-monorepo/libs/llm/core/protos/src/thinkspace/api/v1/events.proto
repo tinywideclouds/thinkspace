@@ -147,7 +147,7 @@ message WSEvent {
 
     // Inbound
     SubmitPromptPayload submit_prompt = 11;
-    SelectStrategyPayload select_strategy = 12;
+    SelectStrategyPayload select_xegy = 12;
     ReviewDecisionPayload review_decision = 13;
     ApproveContextPayload approve_context = 17;
   }

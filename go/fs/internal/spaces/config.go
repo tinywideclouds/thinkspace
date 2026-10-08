@@ -12,6 +12,7 @@ type ThinkSpaceConfig struct {
 	SystemPrompt string         `yaml:"system_prompt"`
 	Timeouts     TimeoutsConfig `yaml:"timeouts"`
 	Roles        RolesConfig    `yaml:"roles"`
+	Memory       MemoryConfig   `yaml:"memory"`
 }
 
 type TimeoutsConfig struct {
@@ -68,6 +69,13 @@ type ToolQueryLensConfig struct {
 	ReasoningDescription string `yaml:"reasoning_description"`
 }
 
+// Tuning parameters for the sliding window memory system
+type MemoryConfig struct {
+	TriggerThreshold int `yaml:"trigger_threshold"` // Soft check (e.g., 12)
+	MaxVolatile      int `yaml:"max_volatile"`      // Hard limit (e.g., 20)
+	ActiveBuffer     int `yaml:"active_buffer"`     // Turns to always keep verbatim (e.g., 6)
+}
+
 // ApplyDefaults sets reasonable timeouts if they are missing from the configuration.
 func (c *ThinkSpaceConfig) ApplyDefaults() {
 	if c.Timeouts.TurnSeconds == 0 {
@@ -78,6 +86,15 @@ func (c *ThinkSpaceConfig) ApplyDefaults() {
 	}
 	if c.Timeouts.VerifySeconds == 0 {
 		c.Timeouts.VerifySeconds = 15
+	}
+	if c.Memory.TriggerThreshold == 0 {
+		c.Memory.TriggerThreshold = 12
+	}
+	if c.Memory.MaxVolatile == 0 {
+		c.Memory.MaxVolatile = 20
+	}
+	if c.Memory.ActiveBuffer == 0 {
+		c.Memory.ActiveBuffer = 6
 	}
 }
 

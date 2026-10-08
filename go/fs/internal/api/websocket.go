@@ -7,6 +7,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -15,7 +16,7 @@ type WebSocketUI struct {
 	conn         *websocket.Conn
 	facade       *EventFacade
 	writeMu      sync.Mutex
-	strategyChan chan session.DelegationStrategy
+	strategyChan chan flows.FlowStrategy
 	reviewChan   chan bool
 	approveChan  chan bool
 	tokenChan    chan<- workspace.AgentToken
@@ -26,11 +27,17 @@ func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- 
 		ctx:          ctx,
 		conn:         conn,
 		facade:       NewEventFacade(),
-		strategyChan: make(chan session.DelegationStrategy),
+		strategyChan: make(chan flows.FlowStrategy),
 		reviewChan:   make(chan bool),
 		approveChan:  make(chan bool),
 		tokenChan:    tokenChan,
 	}
+}
+
+func (ui *WebSocketUI) ConfirmTransition(targetDomain string) bool {
+	// STUB: We will wire up the explicit Protobuf payloads for the frontend later.
+	// For now, auto-approve so the server compiles and can execute transitions.
+	return true
 }
 
 func (ui *WebSocketUI) sendBytes(data []byte) {
@@ -57,7 +64,7 @@ func (ui *WebSocketUI) ReviewContext(ctxData session.TurnContext) bool {
 	return <-ui.approveChan
 }
 
-func (ui *WebSocketUI) ChooseNextStep() session.DelegationStrategy {
+func (ui *WebSocketUI) ChooseNextStep() flows.FlowStrategy {
 	if data, err := ui.facade.MarshalRequestStrategy(); err == nil {
 		ui.sendBytes(data)
 	}
@@ -75,7 +82,7 @@ func (ui *WebSocketUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
 	return ui.tokenChan
 }
 
-func (ui *WebSocketUI) PushStrategy(strategy session.DelegationStrategy) {
+func (ui *WebSocketUI) PushStrategy(strategy flows.FlowStrategy) {
 	ui.strategyChan <- strategy
 }
 

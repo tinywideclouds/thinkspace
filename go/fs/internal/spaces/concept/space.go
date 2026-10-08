@@ -1,6 +1,11 @@
 package concept
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
@@ -86,4 +91,13 @@ func (s *ConceptSpace) Mapbook() assembler.Mapbook {
 
 func (s *ConceptSpace) Patcher() workspace.Patcher {
 	return generic.NewSearchReplacePatcher(s.config.Roles.Worker.PatcherInstructions)
+}
+
+func (s *ConceptSpace) Initialize(ctx context.Context, directory string) error {
+	// Prose spaces don't have compilers, but standardizing a docs/ folder is helpful
+	docsDir := filepath.Join(directory, "docs")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		return fmt.Errorf("scaffolding docs directory: %w", err)
+	}
+	return nil
 }
