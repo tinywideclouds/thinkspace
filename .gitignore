@@ -32,3 +32,4 @@ go.work.sum
 .vscode/
 
 nx/thinkspace-monorepo/apps/contexter/contexts
+nx/thinkspace-monorepo/apps/contexter/bundles

@@ -65,7 +65,6 @@ files:
   - ../../go/fs/internal/session/flows/config.go
   - ../../go/fs/internal/session/flows/emitter.go
   - ../../go/fs/internal/session/flows/events.go
-  - ../../go/fs/internal/session/flows/fanout_flow_test.go
   - ../../go/fs/internal/session/flows/fanout_flow_unit_test.go
   - ../../go/fs/internal/session/flows/fanout_flow.go
   - ../../go/fs/internal/session/flows/flow.go
@@ -75,7 +74,6 @@ files:
   - ../../go/fs/internal/spaces/golang/mapbook.go
   - ../../go/fs/internal/spaces/golang/space_test.go
   - ../../go/fs/internal/spaces/golang/space.go
-  - ../../go/fs/internal/spaces/golang/verifier.go
   - ../../go/fs/internal/assembler/mapbook.go
   - ../../go/fs/internal/assembler/workbench.go
   - ../../go/fs/internal/assembler/workbench_test.go
@@ -112,5 +110,7 @@ files:
   - ../../go/fs/internal/session/flows/research_flow.go
   - ../../go/fs/internal/session/flow_engine_test.go
   - ../../go/fs/internal/session/flow_engine.go
-  - ../../go/fs/internal/session/memory_synthesizer.go
+  - ../../go/fs/internal/session/digest_manager_test.go
+  - ../../go/fs/internal/session/digest_manager.go
+  - ../../go/fs/internal/spaces/generic/ci_verifier.go
 last_context: llm_golang_42.md

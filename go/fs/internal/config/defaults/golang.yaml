@@ -8,6 +8,15 @@ golang:
     - Structure: Place main files in a cmd structure and logic files in separate packages
     - Constraints: Use the native `uuid` package, never `github.com/google/uuid`.
 
+  toolchain:
+    pre_verify:
+      - "goimports -w src/"
+      - "go fmt ./src/..."
+    verify:
+      - "go build -C src ./..."
+      - "go test -C src -race ./..."
+      - "go clean -C src"
+
   timeouts:
     turn_seconds: 300
     agent_seconds: 60
@@ -88,13 +97,13 @@ golang:
       
       retry_prompt: |
         CRITICAL VERIFICATION FAILURE. 
-        Your previous Go implementation failed to compile or pass unit tests.
+        Your previous implementation failed verification.
         
         Error Trace:
         {{.ErrorTrace}}
         
         Rules for this retry:
-        1. Read the Go compiler or test error trace carefully to identify missing structs (like undefined types), syntax errors, or failing test assertions.
+        1. Read the trace carefully to identify missing dependencies, syntax errors, or failing test assertions.
         2. You MUST output the ENTIRE corrected JSON payload again. 
         3. Do NOT just output a diff or an explanation. I need the full, compiling file contents.
         

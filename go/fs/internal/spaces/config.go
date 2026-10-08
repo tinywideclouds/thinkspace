@@ -7,12 +7,18 @@ import (
 
 // ThinkSpaceConfig represents the root YAML configuration for a domain space.
 type ThinkSpaceConfig struct {
-	Type         string         `yaml:"type"`
-	Name         string         `yaml:"name"`
-	SystemPrompt string         `yaml:"system_prompt"`
-	Timeouts     TimeoutsConfig `yaml:"timeouts"`
-	Roles        RolesConfig    `yaml:"roles"`
-	Memory       MemoryConfig   `yaml:"memory"`
+	Type         string          `yaml:"type"`
+	Name         string          `yaml:"name"`
+	SystemPrompt string          `yaml:"system_prompt"`
+	Toolchain    ToolchainConfig `yaml:"toolchain"`
+	Timeouts     TimeoutsConfig  `yaml:"timeouts"`
+	Roles        RolesConfig     `yaml:"roles"`
+	Memory       MemoryConfig    `yaml:"memory"`
+}
+
+type ToolchainConfig struct {
+	PreVerify []string `yaml:"pre_verify"`
+	Verify    []string `yaml:"verify"`
 }
 
 type TimeoutsConfig struct {
@@ -69,14 +75,12 @@ type ToolQueryLensConfig struct {
 	ReasoningDescription string `yaml:"reasoning_description"`
 }
 
-// Tuning parameters for the sliding window memory system
 type MemoryConfig struct {
-	TriggerThreshold int `yaml:"trigger_threshold"` // Soft check (e.g., 12)
-	MaxVolatile      int `yaml:"max_volatile"`      // Hard limit (e.g., 20)
-	ActiveBuffer     int `yaml:"active_buffer"`     // Turns to always keep verbatim (e.g., 6)
+	TriggerThreshold int `yaml:"trigger_threshold"`
+	MaxVolatile      int `yaml:"max_volatile"`
+	ActiveBuffer     int `yaml:"active_buffer"`
 }
 
-// ApplyDefaults sets reasonable timeouts if they are missing from the configuration.
 func (c *ThinkSpaceConfig) ApplyDefaults() {
 	if c.Timeouts.TurnSeconds == 0 {
 		c.Timeouts.TurnSeconds = 300
@@ -98,7 +102,6 @@ func (c *ThinkSpaceConfig) ApplyDefaults() {
 	}
 }
 
-// Helper methods to compose the root domain rules with the specific role instructions.
 func (c ThinkSpaceConfig) ManagerSystemPrompt() string {
 	var parts []string
 	if c.SystemPrompt != "" {

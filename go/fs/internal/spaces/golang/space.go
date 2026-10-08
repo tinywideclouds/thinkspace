@@ -10,6 +10,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces/generic"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -84,7 +85,7 @@ func (s *GoThinkSpace) Tools() []llm.ToolDef {
 }
 
 func (s *GoThinkSpace) Verifier() spaces.Verifier {
-	return NewGoVerifier(s.config.TurnTimeout())
+	return generic.NewCIVerifier(s.config.Toolchain, s.config.VerifyTimeout())
 }
 
 func (s *GoThinkSpace) Mapbook() assembler.Mapbook {
@@ -101,7 +102,6 @@ func (s *GoThinkSpace) Initialize(ctx context.Context, directory string) error {
 		return fmt.Errorf("scaffolding src directory: %w", err)
 	}
 
-	// If a go.mod doesn't exist, generate a default one
 	goModPath := filepath.Join(srcDir, "go.mod")
 	if _, err := os.Stat(goModPath); os.IsNotExist(err) {
 		cmd := exec.CommandContext(ctx, "go", "mod", "init", "thinkspace/app")

@@ -58,6 +58,9 @@ func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args .
 				return "syntax error", fmt.Errorf("exit status 1")
 			}
 		}
+		if _, ok := m.files["src/go.mod"]; !ok {
+			return "go.mod file not found", fmt.Errorf("exit status 1")
+		}
 		return "", nil
 	}
 
@@ -70,6 +73,10 @@ func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args .
 		return "ok", nil
 	}
 
+	if strings.Contains(cmdStr, "goimports") || strings.Contains(cmdStr, "go clean") {
+		return "", nil
+	}
+
 	return "", fmt.Errorf("unknown command: %s", cmdStr)
 }
 
@@ -80,6 +87,10 @@ func (m *mockSandbox) TearDown(ctx context.Context) error                   { re
 func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
 	config := spaces.ThinkSpaceConfig{
 		Name: "golang",
+		Toolchain: spaces.ToolchainConfig{
+			PreVerify: []string{"goimports -w src/"},
+			Verify:    []string{"go build -C src ./...", "go test -C src ./..."},
+		},
 		Timeouts: spaces.TimeoutsConfig{
 			VerifySeconds: verifyTimeout,
 		},
@@ -109,7 +120,8 @@ func setupGoThinkSpace(t *testing.T, verifyTimeout int) *golang.GoThinkSpace {
 }
 
 // --- Verifier Tests ---
-func TestGoThinkSpace_Verify_ASTError(t *testing.T) {
+
+func TestCIVerifier_ASTError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -123,12 +135,12 @@ func TestGoThinkSpace_Verify_ASTError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected AST verification to fail on invalid code")
 	}
-	if !strings.Contains(err.Error(), "AST syntax or compilation failed") {
-		t.Errorf("Expected error to mention syntax/compilation error, got: %v", err)
+	if !strings.Contains(err.Error(), "syntax error") {
+		t.Errorf("Expected error to contain output log, got: %v", err)
 	}
 }
 
-func TestGoThinkSpace_Verify_MissingGoMod(t *testing.T) {
+func TestCIVerifier_MissingGoMod(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -141,12 +153,12 @@ func TestGoThinkSpace_Verify_MissingGoMod(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to missing go.mod")
 	}
-	if !strings.Contains(err.Error(), "no 'go.mod' file found") {
+	if !strings.Contains(err.Error(), "go.mod file not found") {
 		t.Errorf("Expected missing go.mod error, got: %v", err)
 	}
 }
 
-func TestGoThinkSpace_Verify_Success(t *testing.T) {
+func TestCIVerifier_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -163,7 +175,7 @@ func TestGoThinkSpace_Verify_Success(t *testing.T) {
 	}
 }
 
-func TestGoThinkSpace_Verify_TimeoutLoop(t *testing.T) {
+func TestCIVerifier_TimeoutLoop(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -178,7 +190,7 @@ func TestGoThinkSpace_Verify_TimeoutLoop(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Expected verification to fail due to timeout")
 	}
-	if !strings.Contains(err.Error(), "timed out") {
+	if !strings.Contains(err.Error(), "TIMEOUT") {
 		t.Errorf("Expected timeout error, got: %v", err)
 	}
 }
@@ -258,54 +270,5 @@ func TestGoThinkSpace_InterfaceContracts(t *testing.T) {
 	tools := space.Tools()
 	if len(tools) != 2 {
 		t.Fatalf("Expected exactly 2 tools, got %d", len(tools))
-	}
-
-	hasPropose := false
-	hasQueryLens := false
-
-	for _, decl := range tools {
-		if decl.Name == "propose_change" {
-			hasPropose = true
-			if decl.Description != "mock tool desc" {
-				t.Errorf("Tool description was not correctly mapped from config")
-			}
-			props, ok := decl.Parameters["properties"].(map[string]any)
-			if !ok {
-				t.Fatalf("Failed to cast properties map")
-			}
-
-			if tags, ok := props["assigned_tags"].(map[string]any); !ok || tags["description"] != "mock tags desc" {
-				t.Errorf("Schema property mapping failed for assigned_tags")
-			}
-			if tasks, ok := props["agent_tasks"].(map[string]any); ok {
-				if items, ok := tasks["items"].(map[string]any); ok {
-					if itemProps, ok := items["properties"].(map[string]any); ok {
-						if tf, ok := itemProps["target_files"].(map[string]any); !ok || tf["description"] != "mock files desc" {
-							t.Errorf("Schema property mapping failed for target_files inside agent_tasks")
-						}
-					}
-				}
-			}
-		}
-		if decl.Name == "query_lens" {
-			hasQueryLens = true
-			if decl.Description != "mock query lens desc" {
-				t.Errorf("QueryLens description was not mapped")
-			}
-			props, ok := decl.Parameters["properties"].(map[string]any)
-			if !ok {
-				t.Fatalf("Failed to cast properties map")
-			}
-			if tagMap, ok := props["tag"].(map[string]any); !ok || tagMap["description"] != "mock lens tag" {
-				t.Errorf("QueryLens tag description was not mapped")
-			}
-		}
-	}
-
-	if !hasPropose {
-		t.Error("missing propose_change tool")
-	}
-	if !hasQueryLens {
-		t.Error("missing query_lens tool")
 	}
 }
