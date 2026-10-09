@@ -23,7 +23,7 @@ describe('ContextInspectorComponent', () => {
       previewId: 'prev-123',
       managerSystemPrompt: 'Test Manager Rules',
       stickyDigests: ['Sticky rule 1'],
-      recentHistory: ['[prompt] user message'],
+      recentHistory: ['[prompt] user message', '[model] reply'],
       fileContexts: [
         { path: 'src/main.go', level: 'skeleton', tokenCount: 150 },
         { path: 'src/utils.go', level: 'structural', tokenCount: 20 }
@@ -36,11 +36,26 @@ describe('ContextInspectorComponent', () => {
     expect(component.totalFileTokens()).toBe(170);
   });
 
-  it('should emit approve when Approve button is clicked', () => {
+  it('should dynamically update tokens when a file is toggled off', () => {
+    component.toggleFile('src/utils.go');
+    fixture.detectChanges();
+    expect(component.totalFileTokens()).toBe(150);
+  });
+
+  it('should emit approve with the exact structural indices arrays', () => {
     const emitSpy = vi.spyOn(component.approve, 'emit');
+    
+    // Toggle off the second history item (index 1)
+    component.toggleHistory(1);
+    fixture.detectChanges();
+
     const buttons = fixture.nativeElement.querySelectorAll('button');
     buttons[2].click(); // Approve & Send button
-    expect(emitSpy).toHaveBeenCalled();
+    
+    expect(emitSpy).toHaveBeenCalledWith({
+      retainedFilePaths: ['src/main.go', 'src/utils.go'],
+      retainedHistoryIndices: [0] // Index 1 was toggled off
+    });
   });
 
   it('should emit copyFull with the previewId when Copy button is clicked', () => {

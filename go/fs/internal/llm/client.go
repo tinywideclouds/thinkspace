@@ -7,9 +7,16 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 )
 
+type UsageMetadata struct {
+	PromptTokens    int
+	CandidateTokens int
+	TotalTokens     int
+}
+
 type StreamChunk struct {
 	Text      string
 	ToolCalls []ToolCall
+	Usage     *UsageMetadata
 }
 
 type ToolCall struct {

@@ -25,9 +25,7 @@ func (ui *TerminalUI) OnTextChunk(text string) {
 	fmt.Print(text)
 }
 
-// ReviewContext fulfills the updated session.UserInterface contract, allowing the CLI
-// to optionally block and display the JIT context before invoking the Manager LLM.
-func (ui *TerminalUI) ReviewContext(ctxData session.TurnContext) bool {
+func (ui *TerminalUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	fmt.Printf("\n🧠 --- CONTEXT PREVIEW ---\n")
 	fmt.Printf("Space: %s | Chat: %s\n", ctxData.SpaceID, ctxData.ChatID)
 
@@ -49,7 +47,10 @@ func (ui *TerminalUI) ReviewContext(ctxData session.TurnContext) bool {
 	input = strings.ToLower(strings.TrimSpace(input))
 
 	// Default to yes unless explicitly aborted
-	return input != "n"
+	// The CLI does not yet support interactive pruning, so arrays remain nil
+	return session.ContextApprovalDecision{
+		Approved: input != "n",
+	}
 }
 
 func (ui *TerminalUI) ChooseNextStep() flows.FlowStrategy {
@@ -91,8 +92,9 @@ func (ui *TerminalUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
 	return nil
 }
 
-func (ui *TerminalUI) ConfirmTransition(targetDomain string) bool {
+func (ui *TerminalUI) ConfirmTransition(targetDomain string, reasoning string) bool {
 	fmt.Printf("\n⚠️  The AI wants to transition the workspace to the '%s' domain.\n", targetDomain)
+	fmt.Printf("Reasoning: %s\n", reasoning)
 	fmt.Print("Allow this transition and scaffold the environment? (Y/n): ")
 
 	input, _ := ui.reader.ReadString('\n')

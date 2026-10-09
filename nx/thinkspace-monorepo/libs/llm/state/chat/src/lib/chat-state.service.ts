@@ -142,7 +142,7 @@ export class ChatStateService {
     this.transportService.send(protocolBufferEvent);
   }
 
-  public submitContextApproval(approved: boolean): void {
+  public submitContextApproval(approved: boolean, retainedFilePaths: string[] = [], retainedHistoryIndices: number[] = []): void {
     this.executeTurnAction();
     this.pendingContextReview.set(null);
     
@@ -151,7 +151,7 @@ export class ChatStateService {
       this.coreChat.update(chatHistory => chatHistory.filter(c => !(c.source === 'system' && c.content.includes('Thinking'))));
     }
     
-    const protocolBufferEvent = LlmFacade.createApproveContext(approved);
+    const protocolBufferEvent = LlmFacade.createApproveContext(approved, retainedFilePaths, retainedHistoryIndices);
     this.transportService.send(protocolBufferEvent);
   }
 
@@ -226,7 +226,9 @@ export class ChatStateService {
     switch (event.type) {
       case 'preview_context':
         if (this.autoApproveContext()) {
-          this.submitContextApproval(true);
+          const filePaths = event.context.fileContexts.map(f => f.path);
+          const historyIndices = event.context.recentHistory.map((_, i) => i);
+          this.submitContextApproval(true, filePaths, historyIndices);
         } else {
           this.pendingContextReview.set(event.context);
         }

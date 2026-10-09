@@ -102,9 +102,9 @@ export class LlmFacade {
     });
   }
 
-  static createApproveContext(approved: boolean): WSEvent {
+  static createApproveContext(approved: boolean, retainedFilePaths: string[] = [], retainedHistoryIndices: number[] = []): WSEvent {
     return create(WSEventSchema, {
-      payload: { case: 'approveContext', value: { approved } }
+      payload: { case: 'approveContext', value: { approved, retainedFilePaths, retainedHistoryIndices } }
     });
   }
 

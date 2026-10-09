@@ -14,11 +14,10 @@ import (
 type WebSocketUI struct {
 	ctx            context.Context
 	conn           *websocket.Conn
-	facade         *EventFacade
 	writeMu        sync.Mutex
 	strategyChan   chan flows.FlowStrategy
 	reviewChan     chan bool
-	approveChan    chan bool
+	approveChan    chan session.ContextApprovalDecision
 	transitionChan chan bool
 	tokenChan      chan<- workspace.AgentToken
 }
@@ -27,17 +26,16 @@ func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- 
 	return &WebSocketUI{
 		ctx:            ctx,
 		conn:           conn,
-		facade:         NewEventFacade(),
 		strategyChan:   make(chan flows.FlowStrategy),
 		reviewChan:     make(chan bool),
-		approveChan:    make(chan bool),
+		approveChan:    make(chan session.ContextApprovalDecision),
 		transitionChan: make(chan bool),
 		tokenChan:      tokenChan,
 	}
 }
 
 func (ui *WebSocketUI) ConfirmTransition(targetDomain string, reasoning string) bool {
-	if data, err := ui.facade.MarshalRequestTransition(targetDomain, reasoning); err == nil {
+	if data, err := MarshalRequestTransition(targetDomain, reasoning); err == nil {
 		ui.sendBytes(data)
 	}
 	return <-ui.transitionChan
@@ -54,27 +52,27 @@ func (ui *WebSocketUI) SendSyncHistory(data []byte) {
 }
 
 func (ui *WebSocketUI) OnTextChunk(text string) {
-	if data, err := ui.facade.MarshalChatStream(text); err == nil {
+	if data, err := MarshalChatStream(text); err == nil {
 		ui.sendBytes(data)
 	}
 }
 
-func (ui *WebSocketUI) ReviewContext(ctxData session.TurnContext) bool {
-	if data, err := ui.facade.MarshalPreviewContext(ctxData); err == nil {
+func (ui *WebSocketUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
+	if data, err := MarshalPreviewContext(ctxData); err == nil {
 		ui.sendBytes(data)
 	}
 	return <-ui.approveChan
 }
 
 func (ui *WebSocketUI) ChooseNextStep() flows.FlowStrategy {
-	if data, err := ui.facade.MarshalRequestStrategy(); err == nil {
+	if data, err := MarshalRequestStrategy(); err == nil {
 		ui.sendBytes(data)
 	}
 	return <-ui.strategyChan
 }
 
 func (ui *WebSocketUI) ReviewCandidate(branch string) bool {
-	if data, err := ui.facade.MarshalRequestReview(branch); err == nil {
+	if data, err := MarshalRequestReview(branch); err == nil {
 		ui.sendBytes(data)
 	}
 	return <-ui.reviewChan
@@ -92,8 +90,8 @@ func (ui *WebSocketUI) PushReviewDecision(accepted bool) {
 	ui.reviewChan <- accepted
 }
 
-func (ui *WebSocketUI) PushContextApproval(approved bool) {
-	ui.approveChan <- approved
+func (ui *WebSocketUI) PushContextApproval(decision session.ContextApprovalDecision) {
+	ui.approveChan <- decision
 }
 
 func (ui *WebSocketUI) PushTransitionDecision(approved bool) {

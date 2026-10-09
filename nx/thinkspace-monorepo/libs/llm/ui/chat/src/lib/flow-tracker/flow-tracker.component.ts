@@ -1,6 +1,7 @@
 import { Component, input, computed, signal, effect, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FlowState, LogItem } from '@org/llm-state-chat';
+import { parseVerificationTrace, hasStructuredTrace, extractAttemptPrefix } from '@org/llm-core-facade';
 
 @Component({
   selector: 'llm-flow-tracker',
@@ -45,4 +46,17 @@ export class FlowTrackerComponent {
     }
     return null;
   });
+
+  // Expose parser utilities to the template
+  hasStructuredTrace(message: string): boolean {
+    return hasStructuredTrace(message);
+  }
+
+  extractAttemptPrefix(message: string): string {
+    return extractAttemptPrefix(message);
+  }
+
+  parseTrace(message: string) {
+    return parseVerificationTrace(message);
+  }
 }

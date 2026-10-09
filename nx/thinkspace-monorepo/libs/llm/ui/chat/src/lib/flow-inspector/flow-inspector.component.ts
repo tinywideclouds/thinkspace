@@ -1,5 +1,6 @@
 import { Component, input, output, computed, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { parseVerificationTrace, TraceStep } from '@org/llm-core-facade';
 
 interface ParsedAgent {
   agentId: string;
@@ -26,7 +27,7 @@ interface ParsedReceipt {
 })
 export class FlowInspectorComponent {
   receiptXml = input.required<string>();
-  close = output<void>();
+  inspectorClosed = output<void>();
 
   parsedReceipt = signal<ParsedReceipt | null>(null);
   selectedAgentId = signal<string | null>(null);
@@ -75,5 +76,11 @@ export class FlowInspectorComponent {
     const id = this.selectedAgentId();
     if (!receipt || !id) return null;
     return receipt.agents.find(a => a.agentId === id) || null;
+  });
+
+  parsedTraceSteps = computed<TraceStep[]>(() => {
+    const agent = this.activeAgent();
+    if (!agent || !agent.verificationTrace) return [];
+    return parseVerificationTrace(agent.verificationTrace);
   });
 }

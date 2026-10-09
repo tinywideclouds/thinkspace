@@ -58,7 +58,6 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 	configsDir := filepath.Join(t.TempDir(), "configs")
 	_ = os.MkdirAll(configsDir, 0755)
 
-	// 1. Setup the Template Registry
 	yamlContent := `golang:
   type: space
   name: "Golang Domain"
@@ -74,12 +73,10 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 	mux := http.NewServeMux()
 	mgmtAPI.RegisterHandlers(mux)
 
-	// 2. Setup Operational Space (Valid state)
 	opSpace := "sandbox-operational"
 	_ = os.MkdirAll(filepath.Join(baseRoot, opSpace), 0755)
 	_ = manager.UpdateSpaceState(opSpace, func(s *workspace.SpaceState) { s.Domain = "golang" })
 
-	// 3. Setup Unconfigured Space (Missing state)
 	unconfigSpace := "sandbox-unconfigured"
 	_ = os.MkdirAll(filepath.Join(baseRoot, unconfigSpace), 0755)
 
@@ -91,9 +88,7 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 
-	// Rely entirely on the Facade to decode the wire format into pure Go domain structs
-	facade := api.NewEventFacade()
-	spaces, err := facade.UnmarshalRESTSpaces(rr.Body.Bytes())
+	spaces, err := api.UnmarshalRESTSpaces(rr.Body.Bytes())
 	if err != nil {
 		t.Fatalf("failed to unmarshal response via facade: %v", err)
 	}
@@ -111,7 +106,6 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 		}
 	}
 }
-
 func TestManagementAPI_CreateAndListChats(t *testing.T) {
 	mux, _ := setupManagementAPI(t)
 	spaceID := "sandbox"

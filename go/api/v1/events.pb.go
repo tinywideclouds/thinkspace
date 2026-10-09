@@ -1216,10 +1216,12 @@ func (x *ReviewDecisionPayload) GetAccepted() bool {
 }
 
 type ApproveContextPayload struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Approved      bool                   `protobuf:"varint,1,opt,name=approved,proto3" json:"approved,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Approved               bool                   `protobuf:"varint,1,opt,name=approved,proto3" json:"approved,omitempty"`
+	RetainedFilePaths      []string               `protobuf:"bytes,2,rep,name=retained_file_paths,json=retainedFilePaths,proto3" json:"retained_file_paths,omitempty"`
+	RetainedHistoryIndices []int32                `protobuf:"varint,3,rep,packed,name=retained_history_indices,json=retainedHistoryIndices,proto3" json:"retained_history_indices,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ApproveContextPayload) Reset() {
@@ -1257,6 +1259,20 @@ func (x *ApproveContextPayload) GetApproved() bool {
 		return x.Approved
 	}
 	return false
+}
+
+func (x *ApproveContextPayload) GetRetainedFilePaths() []string {
+	if x != nil {
+		return x.RetainedFilePaths
+	}
+	return nil
+}
+
+func (x *ApproveContextPayload) GetRetainedHistoryIndices() []int32 {
+	if x != nil {
+		return x.RetainedHistoryIndices
+	}
+	return nil
 }
 
 type TransitionDecisionPayload struct {
@@ -2047,9 +2063,11 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"strategyId\"K\n" +
 	"\x15ReviewDecisionPayload\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x1a\n" +
-	"\baccepted\x18\x02 \x01(\bR\baccepted\"3\n" +
+	"\baccepted\x18\x02 \x01(\bR\baccepted\"\x9d\x01\n" +
 	"\x15ApproveContextPayload\x12\x1a\n" +
-	"\bapproved\x18\x01 \x01(\bR\bapproved\"7\n" +
+	"\bapproved\x18\x01 \x01(\bR\bapproved\x12.\n" +
+	"\x13retained_file_paths\x18\x02 \x03(\tR\x11retainedFilePaths\x128\n" +
+	"\x18retained_history_indices\x18\x03 \x03(\x05R\x16retainedHistoryIndices\"7\n" +
 	"\x19TransitionDecisionPayload\x12\x1a\n" +
 	"\bapproved\x18\x01 \x01(\bR\bapproved\"\xfa\t\n" +
 	"\aWSEvent\x12G\n" +

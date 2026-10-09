@@ -133,6 +133,8 @@ message ReviewDecisionPayload {
 
 message ApproveContextPayload {
   bool approved = 1;
+  repeated string retained_file_paths = 2;
+  repeated int32 retained_history_indices = 3;
 }
 
 message TransitionDecisionPayload {

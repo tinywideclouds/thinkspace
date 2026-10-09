@@ -52,9 +52,43 @@
         </div>
         
         @for (entry of data.timeline; track entry.id) {
-          <div [style.color]="entry.isError ? '#ff8787' : '#b2f2bb'" style="margin-bottom: 4px; word-break: break-all;">
-            <span style="color: #868e96; margin-right: 8px;">[{{ entry.timestamp | date:'HH:mm:ss' }}]</span>
-            <span [style.font-weight]="entry.isError ? 'bold' : 'normal'">{{ entry.message }}</span>
+          <div style="margin-bottom: 12px;">
+            <div [style.color]="entry.isError ? '#ff8787' : '#b2f2bb'" style="margin-bottom: 4px; word-break: break-all;">
+              <span style="color: #868e96; margin-right: 8px;">[{{ entry.timestamp | date:'HH:mm:ss' }}]</span>
+              <span [style.font-weight]="entry.isError ? 'bold' : 'normal'">
+                @if (entry.isError && hasStructuredTrace(entry.message)) {
+                  {{ extractAttemptPrefix(entry.message) }} System Verification Failed (See details below)
+                } @else {
+                  {{ entry.message }}
+                }
+              </span>
+            </div>
+            
+            @if (entry.isError && hasStructuredTrace(entry.message)) {
+              <div style="margin-left: 24px; display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                @for (step of parseTrace(entry.message); track $index) {
+                  @if (step.type !== 'SYSTEM') {
+                    <div style="border: 1px solid #495057; border-radius: 6px; overflow: hidden;">
+                      <div style="background: #343a40; padding: 6px 10px; border-bottom: 1px solid #495057; display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                          <span [style.background]="step.isBestEffort ? '#fcc419' : '#339af0'"
+                                style="color: #212529; font-size: 9px; font-weight: bold; padding: 2px 4px; border-radius: 4px;">
+                            {{ step.type }}
+                          </span>
+                          <code style="font-size: 11px; color: #f8f9fa;">{{ step.command }}</code>
+                        </div>
+                        <span [style.color]="step.status === 'SUCCESS' ? '#51cf66' : '#ff8787'" style="font-weight: bold; font-size: 10px;">
+                          {{ step.status }}
+                        </span>
+                      </div>
+                      @if (step.output) {
+                        <pre style="margin: 0; padding: 8px; background: #212529; color: #adb5bd; font-size: 10px; overflow-x: auto; white-space: pre-wrap;">{{ step.output }}</pre>
+                      }
+                    </div>
+                  }
+                }
+              </div>
+            }
           </div>
         }
       }

@@ -44,9 +44,15 @@ func (e *TransitionRequest) Error() string {
 	return "domain transition requested to: " + e.TargetDomain
 }
 
+type ContextApprovalDecision struct {
+	Approved               bool
+	RetainedFilePaths      []string
+	RetainedHistoryIndices []int
+}
+
 type UserInterface interface {
 	OnTextChunk(text string)
-	ReviewContext(ctxData TurnContext) bool
+	ReviewContext(ctxData TurnContext) ContextApprovalDecision
 	ChooseNextStep() flows.FlowStrategy
 	ReviewCandidate(branch string) (accepted bool)
 	ConfirmTransition(targetDomain string, reasoning string) bool

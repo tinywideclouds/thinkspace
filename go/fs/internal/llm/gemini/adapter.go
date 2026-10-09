@@ -58,6 +58,15 @@ func (a *Adapter) GenerateContentStream(
 					}
 				}
 			}
+
+			if chunk.UsageMetadata != nil {
+				parsedChunk.Usage = &llm.UsageMetadata{
+					PromptTokens:    int(chunk.UsageMetadata.PromptTokenCount),
+					CandidateTokens: int(chunk.UsageMetadata.CandidatesTokenCount),
+					TotalTokens:     int(chunk.UsageMetadata.TotalTokenCount),
+				}
+			}
+
 			if !yield(parsedChunk, nil) {
 				return
 			}

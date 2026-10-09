@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/chat"
@@ -85,6 +86,7 @@ func (c *Coordinator) RunAgentLoop(
 
 		var fullModelResponse strings.Builder
 		var interceptedTools []llm.ToolCall
+		var finalUsage *llm.UsageMetadata
 
 		for chunk, err := range stream {
 			if err != nil {
@@ -99,10 +101,23 @@ func (c *Coordinator) RunAgentLoop(
 			if len(chunk.ToolCalls) > 0 {
 				interceptedTools = append(interceptedTools, chunk.ToolCalls...)
 			}
+
+			if chunk.Usage != nil {
+				finalUsage = chunk.Usage
+			}
 		}
 
 		if fullModelResponse.Len() > 0 {
-			_ = c.workspaceService.LogModelResponse(turnContext, thread, fullModelResponse.String())
+			var usage *telemetry.TokenUsage
+			if finalUsage != nil {
+				usage = &telemetry.TokenUsage{
+					PromptTokens:    finalUsage.PromptTokens,
+					CandidateTokens: finalUsage.CandidateTokens,
+					TotalTokens:     finalUsage.TotalTokens,
+				}
+			}
+
+			_ = c.workspaceService.LogModelResponse(turnContext, thread, fullModelResponse.String(), usage)
 			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 				Role:    "model",
 				Content: fullModelResponse.String(),
@@ -120,164 +135,187 @@ func (c *Coordinator) RunAgentLoop(
 		}
 
 		call := interceptedTools[0]
-
-		if call.Name == "transition_workspace" {
-			targetDomain, _ := call.Args["target_domain"].(string)
-			reasoning, _ := call.Args["reasoning"].(string)
-
-			c.logger.InfoContext(turnContext, "intercepted transition request", "target", targetDomain, "reasoning", reasoning)
-			c.emitter.Emit("manager", telemetry.Event{
-				ID:        uuid.NewV7(),
-				Type:      "log",
-				Timestamp: time.Now(),
-				Message:   fmt.Sprintf("Manager requested workspace transition to '%s'", targetDomain),
-			})
-
-			if userInterface.ConfirmTransition(targetDomain, reasoning) {
-				c.emitter.Emit("manager", telemetry.Event{
-					ID:        uuid.NewV7(),
-					Type:      "log",
-					Timestamp: time.Now(),
-					Message:   "Transition approved. Rebooting workspace...",
-				})
-				return &TransitionRequest{TargetDomain: targetDomain}
-			}
-
-			c.emitter.Emit("manager", telemetry.Event{
-				ID:        uuid.NewV7(),
-				Type:      "log",
-				Timestamp: time.Now(),
-				Message:   "Transition denied by user. Forcing manager to self-correct...",
-			})
-			userInterface.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** Transition to '%s' denied.\nAsking Manager to continue in current domain...\n", targetDomain))
-
-			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
-				Role:    "user",
-				Content: fmt.Sprintf("[System: Transition to '%s' was denied by the user. You must continue your task within the current domain.]", targetDomain),
-			})
-			continue
+		shouldBreak, err := c.handleToolCall(turnContext, thread, manifest, thinkSpace, &bundle, userInterface, call)
+		if err != nil {
+			return err
 		}
-
-		if call.Name == "query_lens" {
-			tag, _ := call.Args["tag"].(string)
-			c.logger.InfoContext(turnContext, "executing query_lens", "tag", tag)
-			c.emitter.Emit("manager", telemetry.Event{
-				ID:        uuid.NewV7(),
-				Type:      "log",
-				Timestamp: time.Now(),
-				Message:   fmt.Sprintf("Manager invoked query_lens for tag: %s", tag),
-			})
-			userInterface.OnTextChunk(fmt.Sprintf("\n\n🔍 **Searching memory for #%s...**\n", tag))
-
-			var toolResponse strings.Builder
-			toolResponse.WriteString(fmt.Sprintf("[System Tool Response: query_lens(%s)]\n", tag))
-
-			var idsToFetch []string
-			if mappedUUIDs, exists := manifest.Lenses[tag]; exists {
-				for _, u := range mappedUUIDs {
-					idsToFetch = append(idsToFetch, u.String())
-				}
-			}
-
-			if len(idsToFetch) == 0 {
-				toolResponse.WriteString("No historical events found for this tag.\n")
-			} else {
-				events, err := c.workspaceService.FetchEvents(turnContext, thread, idsToFetch)
-				if err != nil {
-					toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", err))
-				} else {
-					for _, ev := range events {
-						toolResponse.WriteString(fmt.Sprintf("- [%s] %s: %s\n", ev.Timestamp.Format("15:04:05"), ev.Type, ev.Content))
-					}
-				}
-			}
-
-			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
-				Role:    "user",
-				Content: toolResponse.String(),
-			})
-			continue
-		}
-
-		if call.Name == "create_digest" {
-			instruction, _ := call.Args["instruction"].(string)
-			topicName, _ := call.Args["topic_name"].(string)
-
-			var tags []string
-			if rawTags, ok := call.Args["tags"].([]any); ok {
-				for _, rt := range rawTags {
-					if tStr, ok := rt.(string); ok {
-						tags = append(tags, tStr)
-					}
-				}
-			}
-
-			var sb strings.Builder
-			for _, ev := range bundle.Trajectory.WorkingMemory {
-				sb.WriteString(fmt.Sprintf("[%s]: %s\n", ev.Role, ev.Content))
-			}
-
-			err := c.digestManager.CreateManualDigest(
-				turnContext,
-				c.workspaceService,
-				thread,
-				topicName,
-				tags,
-				instruction,
-				sb.String(),
-				thinkSpace.Config().Roles.Worker.Model,
-				c.workerPrompt,
-			)
-
-			if err != nil {
-				c.logger.WarnContext(turnContext, "create_digest failed", "error", err)
-				c.emitter.Emit("manager", telemetry.Event{
-					ID:        uuid.NewV7(),
-					Type:      "error",
-					Timestamp: time.Now(),
-					Message:   fmt.Sprintf("Digest creation failed: %v", err),
-				})
-			}
-			break
-		}
-
-		if call.Name == "propose_change" {
-			c.emitter.Emit("manager", telemetry.Event{
-				ID:        uuid.NewV7(),
-				Type:      "log",
-				Timestamp: time.Now(),
-				Message:   "Manager is proposing changes and delegating to sub-agents...",
-			})
-
-			flowContext := flows.FlowContext{
-				FlowID:         fmt.Sprintf("flow-%d", time.Now().Unix()),
-				SpaceID:        c.spaceID,
-				BaseAgentRules: c.workerPrompt,
-				FlowSummary:    "Executing requested changes.",
-			}
-
-			err := c.flowEngine.Run(turnContext, thread, thinkSpace, c.fanOutFlow, call.Args, flowContext, userInterface)
-
-			if err != nil {
-				c.logger.WarnContext(turnContext, "tool execution failed, bouncing back to manager", "error", err)
-				c.emitter.Emit("manager", telemetry.Event{
-					ID:        uuid.NewV7(),
-					Type:      "error",
-					Timestamp: time.Now(),
-					Message:   fmt.Sprintf("Delegation failed: %v", err),
-				})
-				userInterface.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** %v\nAsking Manager to self-correct...\n", err))
-
-				bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
-					Role:    "user",
-					Content: fmt.Sprintf("[System Tool Error: propose_change failed with: %v. Please review your requested target_files and parameters, and retry.]", err),
-				})
-				continue
-			}
+		if shouldBreak {
 			break
 		}
 	}
 
 	_, err := c.workspaceService.Checkpoint(turnContext, thread, "End of session turn")
 	return err
+}
+
+func (c *Coordinator) handleToolCall(ctx context.Context, thread *chat.Thread, manifest *chat.ThreadManifest, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+	switch call.Name {
+	case "transition_workspace":
+		return c.handleTransitionWorkspace(ctx, bundle, ui, call)
+	case "query_lens":
+		return c.handleQueryLens(ctx, thread, manifest, bundle, ui, call)
+	case "create_digest":
+		return c.handleCreateDigest(ctx, thread, thinkSpace, bundle, call)
+	case "propose_change":
+		return c.handleProposeChange(ctx, thread, thinkSpace, bundle, ui, call)
+	default:
+		c.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
+		return true, nil
+	}
+}
+
+func (c *Coordinator) handleTransitionWorkspace(ctx context.Context, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+	targetDomain, _ := call.Args["target_domain"].(string)
+	reasoning, _ := call.Args["reasoning"].(string)
+
+	c.logger.InfoContext(ctx, "intercepted transition request", "target", targetDomain, "reasoning", reasoning)
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   fmt.Sprintf("Manager requested workspace transition to '%s'", targetDomain),
+	})
+
+	if ui.ConfirmTransition(targetDomain, reasoning) {
+		c.emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "log",
+			Timestamp: time.Now(),
+			Message:   "Transition approved. Rebooting workspace...",
+		})
+		return true, &TransitionRequest{TargetDomain: targetDomain}
+	}
+
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Transition denied by user. Forcing manager to self-correct...",
+	})
+	ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** Transition to '%s' denied.\nAsking Manager to continue in current domain...\n", targetDomain))
+
+	bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+		Role:    "user",
+		Content: fmt.Sprintf("[System: Transition to '%s' was denied by the user. You must continue your task within the current domain.]", targetDomain),
+	})
+	return false, nil
+}
+
+func (c *Coordinator) handleQueryLens(ctx context.Context, thread *chat.Thread, manifest *chat.ThreadManifest, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+	tag, _ := call.Args["tag"].(string)
+	c.logger.InfoContext(ctx, "executing query_lens", "tag", tag)
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   fmt.Sprintf("Manager invoked query_lens for tag: %s", tag),
+	})
+	ui.OnTextChunk(fmt.Sprintf("\n\n🔍 **Searching memory for #%s...**\n", tag))
+
+	var toolResponse strings.Builder
+	toolResponse.WriteString(fmt.Sprintf("[System Tool Response: query_lens(%s)]\n", tag))
+
+	var idsToFetch []string
+	if mappedUUIDs, exists := manifest.Lenses[tag]; exists {
+		for _, u := range mappedUUIDs {
+			idsToFetch = append(idsToFetch, u.String())
+		}
+	}
+
+	if len(idsToFetch) == 0 {
+		toolResponse.WriteString("No historical events found for this tag.\n")
+	} else {
+		events, err := c.workspaceService.FetchEvents(ctx, thread, idsToFetch)
+		if err != nil {
+			toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", err))
+		} else {
+			for _, ev := range events {
+				toolResponse.WriteString(fmt.Sprintf("- [%s] %s: %s\n", ev.Timestamp.Format("15:04:05"), ev.Type, ev.Content))
+			}
+		}
+	}
+
+	bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+		Role:    "user",
+		Content: toolResponse.String(),
+	})
+	return false, nil
+}
+
+func (c *Coordinator) handleCreateDigest(ctx context.Context, thread *chat.Thread, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, call llm.ToolCall) (bool, error) {
+	instruction, _ := call.Args["instruction"].(string)
+	topicName, _ := call.Args["topic_name"].(string)
+
+	var tags []string
+	if rawTags, ok := call.Args["tags"].([]any); ok {
+		for _, rt := range rawTags {
+			if tStr, ok := rt.(string); ok {
+				tags = append(tags, tStr)
+			}
+		}
+	}
+
+	var sb strings.Builder
+	for _, ev := range bundle.Trajectory.WorkingMemory {
+		sb.WriteString(fmt.Sprintf("[%s]: %s\n", ev.Role, ev.Content))
+	}
+
+	err := c.digestManager.CreateManualDigest(
+		ctx,
+		c.workspaceService,
+		thread,
+		topicName,
+		tags,
+		instruction,
+		sb.String(),
+		thinkSpace.Config().Roles.Worker.Model,
+		c.workerPrompt,
+	)
+
+	if err != nil {
+		c.logger.WarnContext(ctx, "create_digest failed", "error", err)
+		c.emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "error",
+			Timestamp: time.Now(),
+			Message:   fmt.Sprintf("Digest creation failed: %v", err),
+		})
+	}
+	return true, nil
+}
+
+func (c *Coordinator) handleProposeChange(ctx context.Context, thread *chat.Thread, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+	c.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Manager is proposing changes and delegating to sub-agents...",
+	})
+
+	flowContext := flows.FlowContext{
+		FlowID:         fmt.Sprintf("flow-%d", time.Now().Unix()),
+		SpaceID:        c.spaceID,
+		BaseAgentRules: c.workerPrompt,
+		FlowSummary:    "Executing requested changes.",
+	}
+
+	err := c.flowEngine.Run(ctx, thread, thinkSpace, c.fanOutFlow, call.Args, flowContext, ui)
+
+	if err != nil {
+		c.logger.WarnContext(ctx, "tool execution failed, bouncing back to manager", "error", err)
+		c.emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "error",
+			Timestamp: time.Now(),
+			Message:   fmt.Sprintf("Delegation failed: %v", err),
+		})
+		ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** %v\nAsking Manager to self-correct...\n", err))
+
+		bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+			Role:    "user",
+			Content: fmt.Sprintf("[System Tool Error: propose_change failed with: %v. Please review your requested target_files and parameters, and retry.]", err),
+		})
+		return false, nil
+	}
+	return true, nil
 }

@@ -106,16 +106,33 @@ func (m *feMockEmitter) Emit(channel string, event telemetry.Event) {
 }
 
 type feMockUI struct {
-	strategyToReturn flows.FlowStrategy
-	reviewToReturn   bool
+	strategyToReturn   flows.FlowStrategy
+	reviewToReturn     bool
+	reviewedBranch     string
+	transitionToReturn bool
+	capturedReasoning  string
 }
 
-func (u *feMockUI) OnTextChunk(text string)                        {}
-func (u *feMockUI) ReviewContext(ctxData session.TurnContext) bool { return true }
-func (u *feMockUI) ChooseNextStep() flows.FlowStrategy             { return u.strategyToReturn }
-func (u *feMockUI) ReviewCandidate(branch string) bool             { return u.reviewToReturn }
+func (u *feMockUI) OnTextChunk(text string) {}
+
+func (u *feMockUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
+	return session.ContextApprovalDecision{
+		Approved: u.reviewToReturn, // Evaluates to true if not explicitly set to false
+	}
+}
+
+func (u *feMockUI) ChooseNextStep() flows.FlowStrategy {
+	return u.strategyToReturn
+}
+
+func (u *feMockUI) ReviewCandidate(branch string) bool {
+	u.reviewedBranch = branch
+	return u.reviewToReturn
+}
+
 func (u *feMockUI) ConfirmTransition(targetDomain string, reasoning string) bool {
-	return true
+	u.capturedReasoning = reasoning
+	return u.transitionToReturn
 }
 
 // --- Tests ---

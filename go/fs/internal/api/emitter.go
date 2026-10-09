@@ -8,24 +8,21 @@ import (
 )
 
 type WebSocketEmitter struct {
-	ctx    context.Context
-	conn   *websocket.Conn
-	facade *EventFacade
+	ctx  context.Context
+	conn *websocket.Conn
 }
 
-func NewWebSocketEmitter(ctx context.Context, conn *websocket.Conn, facade *EventFacade) *WebSocketEmitter {
+func NewWebSocketEmitter(ctx context.Context, conn *websocket.Conn) *WebSocketEmitter {
 	return &WebSocketEmitter{
-		ctx:    ctx,
-		conn:   conn,
-		facade: facade,
+		ctx:  ctx,
+		conn: conn,
 	}
 }
 
 func (w *WebSocketEmitter) Emit(channel string, event telemetry.Event) {
-	bytes, err := w.facade.MarshalTelemetryEvent(channel, event)
+	bytes, err := MarshalTelemetryEvent(channel, event)
 	if err == nil {
 		if writeErr := w.conn.Write(w.ctx, websocket.MessageText, bytes); writeErr != nil {
-			// Client disconnected, swallow and return cleanly
 			return
 		}
 	}

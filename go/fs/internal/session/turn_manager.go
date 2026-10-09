@@ -107,9 +107,39 @@ func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText 
 			StickyDigests:       bundle.Trajectory.LongTermMemory,
 		}
 
-		if !ui.ReviewContext(turnCtx) {
+		decision := ui.ReviewContext(turnCtx)
+		if !decision.Approved {
 			tm.logger.Info("Turn cancelled by user during context review")
 			return nil
+		}
+
+		// --- PHASE 2: CONTEXT PRUNING ---
+		if decision.RetainedFilePaths != nil {
+			retainedPaths := make(map[string]bool)
+			for _, p := range decision.RetainedFilePaths {
+				retainedPaths[p] = true
+			}
+			var prunedWorkbench []cognition.WorkbenchItem
+			for _, item := range bundle.Workbench {
+				if retainedPaths[item.Path] {
+					prunedWorkbench = append(prunedWorkbench, item)
+				}
+			}
+			bundle.Workbench = prunedWorkbench
+		}
+
+		if decision.RetainedHistoryIndices != nil {
+			retainedIndices := make(map[int]bool)
+			for _, idx := range decision.RetainedHistoryIndices {
+				retainedIndices[idx] = true
+			}
+			var prunedMemory []cognition.TrajectoryEvent
+			for i, item := range bundle.Trajectory.WorkingMemory {
+				if retainedIndices[i] {
+					prunedMemory = append(prunedMemory, item)
+				}
+			}
+			bundle.Trajectory.WorkingMemory = prunedMemory
 		}
 
 		availableTools := tm.buildToolRegistry(thinkSpace)

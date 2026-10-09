@@ -1,4 +1,4 @@
-import { Component, input, output, signal, computed } from '@angular/core';
+import { Component, input, output, signal, computed, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { DomainPreviewContext } from '@org/llm-core-facade';
 
@@ -29,7 +29,7 @@ import { DomainPreviewContext } from '@org/llm-core-facade';
             Abort
           </button>
           <button 
-            (click)="approve.emit()"
+            (click)="onApprove()"
             style="background: #339af0; border: 1px solid #228be6; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #fff;">
             Approve & Send 🚀
           </button>
@@ -62,10 +62,22 @@ import { DomainPreviewContext } from '@org/llm-core-facade';
           }
 
           @if (context().recentHistory.length > 0) {
-            <div style="font-size: 12px; font-weight: bold; color: #1971c2; margin-top: 4px;">Recent Trajectory (Sliding Window):</div>
+            <div style="font-size: 12px; font-weight: bold; color: #1971c2; margin-top: 4px;">
+              Recent Trajectory (Sliding Window):
+              <span style="font-weight: normal; font-size: 11px; color: #868e96; margin-left: 4px;">
+                (Uncheck to omit from working memory)
+              </span>
+            </div>
             <div style="background: #f1f3f5; border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 4px;">
               @for (msg of context().recentHistory; track $index) {
-                <div style="font-family: monospace; font-size: 11px; color: #495057; white-space: pre-wrap;">{{ msg }}</div>
+                <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer; transition: opacity 0.2s;" 
+                       [style.opacity]="retainedHistory().has($index) ? '1' : '0.4'">
+                  <input type="checkbox" 
+                         [checked]="retainedHistory().has($index)" 
+                         (change)="toggleHistory($index)" 
+                         style="margin-top: 4px;" />
+                  <div style="font-family: monospace; font-size: 11px; color: #495057; white-space: pre-wrap;">{{ msg }}</div>
+                </label>
               }
             </div>
           } @else {
@@ -84,8 +96,14 @@ import { DomainPreviewContext } from '@org/llm-core-facade';
           } @else {
             <div style="display: flex; flex-direction: column; gap: 4px;">
               @for (file of context().fileContexts; track file.path) {
-                <div style="display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid #dee2e6; padding: 6px 12px; border-radius: 4px;">
-                  <code style="font-size: 12px; color: #212529;">{{ file.path }}</code>
+                <label style="display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid #dee2e6; padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;" 
+                       [style.opacity]="retainedFiles().has(file.path) ? '1' : '0.4'">
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="checkbox" 
+                           [checked]="retainedFiles().has(file.path)" 
+                           (change)="toggleFile(file.path)" />
+                    <code style="font-size: 12px; color: #212529;">{{ file.path }}</code>
+                  </div>
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <span 
                       [style.background]="file.level === 'structural' ? '#e7f5ff' : (file.level === 'skeleton' ? '#fff3cd' : '#ebfbee')"
@@ -97,7 +115,7 @@ import { DomainPreviewContext } from '@org/llm-core-facade';
                       ~{{ file.tokenCount }} t
                     </span>
                   </div>
-                </div>
+                </label>
               }
             </div>
           }
@@ -110,11 +128,60 @@ import { DomainPreviewContext } from '@org/llm-core-facade';
 export class ContextInspectorComponent {
   context = input.required<DomainPreviewContext & { previewId?: string }>();
   
-  approve = output<void>();
+  approve = output<{retainedFilePaths: string[], retainedHistoryIndices: number[]}>();
   reviewCancelled = output<void>();
   copyFull = output<string>();
 
+  // We track history items by array index rather than UUID.
+  // Because the context window is assembled Just-In-Time (JIT), the frontend and backend 
+  // don't need to cross-reference permanent database IDs to prune the active prompt. 
+  // When approved, the backend simply slices its working memory array using these structural indices.
+  retainedFiles = signal<Set<string>>(new Set());
+  retainedHistory = signal<Set<number>>(new Set());
+
+  constructor() {
+    effect(() => {
+      const ctx = this.context();
+      if (ctx) {
+        // Default to everything fully selected when the component opens
+        this.retainedFiles.set(new Set(ctx.fileContexts?.map(f => f.path) || []));
+        this.retainedHistory.set(new Set(ctx.recentHistory?.map((_, i) => i) || []));
+      }
+    }, { allowSignalWrites: true });
+  }
+
+  toggleFile(path: string): void {
+    const current = new Set(this.retainedFiles());
+    if (current.has(path)) {
+      current.delete(path);
+    } else {
+      current.add(path);
+    }
+    this.retainedFiles.set(current);
+  }
+
+  toggleHistory(index: number): void {
+    const current = new Set(this.retainedHistory());
+    if (current.has(index)) {
+      current.delete(index);
+    } else {
+      current.add(index);
+    }
+    this.retainedHistory.set(current);
+  }
+
+  // Recalculates dynamically as checkboxes are toggled
   totalFileTokens = computed(() => {
-    return this.context().fileContexts.reduce((sum, file) => sum + file.tokenCount, 0);
+    const retained = this.retainedFiles();
+    return this.context().fileContexts.reduce((sum, file) => {
+      return retained.has(file.path) ? sum + file.tokenCount : sum;
+    }, 0);
   });
+
+  onApprove() {
+    this.approve.emit({
+      retainedFilePaths: Array.from(this.retainedFiles()),
+      retainedHistoryIndices: Array.from(this.retainedHistory())
+    });
+  }
 }

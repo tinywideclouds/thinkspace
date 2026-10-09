@@ -29,4 +29,6 @@ files:
   - libs/llm/ui/chat/src/lib/pipes/markdown.pipe.ts
   - libs/llm/ui/chat/src/lib/context-inspector/context-inspector.component.spec.ts
   - libs/llm/ui/chat/src/lib/context-inspector/context-inspector.component.ts
+  - libs/llm/ui/chat/src/lib/chat-transition-prompt/chat-transition-prompt.component.spec.ts
+  - libs/llm/ui/chat/src/lib/chat-transition-prompt/chat-transition-prompt.component.ts
 last_context: llm_ui_04.md

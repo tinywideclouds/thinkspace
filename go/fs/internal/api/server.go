@@ -113,7 +113,6 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	tokenChan := make(chan workspace.AgentToken, 100)
-	facade := NewEventFacade()
 	ui := NewWebSocketUI(ctx, connection, tokenChan)
 
 	spaceIDs, _ := s.manager.ListSpaces(ctx)
@@ -140,13 +139,13 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if handshakeBytes, err := facade.MarshalAvailableSpaces(availableSpaces); err == nil {
+	if handshakeBytes, err := MarshalAvailableSpaces(availableSpaces); err == nil {
 		_ = connection.Write(ctx, websocket.MessageText, handshakeBytes)
 	}
 
 	go func() {
 		for token := range tokenChan {
-			if streamBytes, err := facade.MarshalAgentStream(token.AgentID, token.Text); err == nil {
+			if streamBytes, err := MarshalAgentStream(token.AgentID, token.Text); err == nil {
 				_ = connection.Write(ctx, websocket.MessageText, streamBytes)
 			}
 		}
@@ -158,7 +157,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		inbound, err := facade.UnmarshalInbound(msgBytes)
+		inbound, err := UnmarshalInbound(msgBytes)
 		if err != nil {
 			s.logger.Warn("invalid websocket message", "error", err)
 			continue
@@ -170,7 +169,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			_, graph, manifest, err := s.turnManager.LoadThreadState(ctx, payload.SpaceID, payload.ChatID)
 			if err == nil {
-				if syncData, err := facade.MarshalSyncHistory(graph.RecentEvents, manifest.Digests); err == nil {
+				if syncData, err := MarshalSyncHistory(graph.RecentEvents, manifest.Digests); err == nil {
 					ui.SendSyncHistory(syncData)
 				}
 			}
@@ -179,7 +178,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			emitter := NewWebSocketEmitter(ctx, connection, facade)
+			emitter := NewWebSocketEmitter(ctx, connection)
 			go func() {
 				if err := s.turnManager.RunTurn(ctx, payload.SpaceID, payload.ChatID, payload.Text, ui, emitter); err != nil {
 					s.logger.Error("turn failed", "error", err)
@@ -194,7 +193,12 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			ui.PushReviewDecision(inbound.ReviewDecision.Accepted)
 
 		case "approve_context":
-			ui.PushContextApproval(inbound.ApproveContext.Approved)
+			decision := session.ContextApprovalDecision{
+				Approved:               inbound.ApproveContext.Approved,
+				RetainedFilePaths:      inbound.ApproveContext.RetainedFilePaths,
+				RetainedHistoryIndices: inbound.ApproveContext.RetainedHistoryIndices,
+			}
+			ui.PushContextApproval(decision)
 
 		case "transition_decision":
 			ui.PushTransitionDecision(inbound.TransitionDecision.Approved)

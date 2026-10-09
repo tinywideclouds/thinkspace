@@ -23,11 +23,13 @@ import (
 // --- Shared Mocks ---
 
 type coordMockModelClient struct {
-	responses []llm.StreamChunk
-	callIndex int
+	responses      []llm.StreamChunk
+	callIndex      int
+	capturedBundle cognition.ThinkBundle // Fixed undefined error here
 }
 
 func (m *coordMockModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
+	m.capturedBundle = bundle
 	return func(yield func(llm.StreamChunk, error) bool) {
 		if m.callIndex < len(m.responses) {
 			resp := m.responses[m.callIndex]
@@ -95,11 +97,22 @@ type coordMockUI struct {
 	reviewedBranch     string
 	transitionToReturn bool
 	capturedReasoning  string
+
+	// Phase 2 Pruning
+	retainedFiles   []string
+	retainedHistory []int
 }
 
-func (u *coordMockUI) OnTextChunk(text string)                        {}
-func (u *coordMockUI) ReviewContext(ctxData session.TurnContext) bool { return true }
-func (u *coordMockUI) ChooseNextStep() flows.FlowStrategy             { return u.strategyToReturn }
+func (u *coordMockUI) OnTextChunk(text string) {}
+
+func (u *coordMockUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
+	return session.ContextApprovalDecision{
+		Approved:               u.reviewToReturn,
+		RetainedFilePaths:      u.retainedFiles,
+		RetainedHistoryIndices: u.retainedHistory,
+	}
+}
+func (u *coordMockUI) ChooseNextStep() flows.FlowStrategy { return u.strategyToReturn }
 func (u *coordMockUI) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
@@ -197,7 +210,7 @@ func TestCoordinator_QueryLens(t *testing.T) {
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "golang", "")
 
 	manifest := chat.NewThreadManifest(thread.ID)
-	_ = coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{}, nil)
+	_ = coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{reviewToReturn: true}, nil)
 
 	foundLensLog := false
 	for _, ev := range emitter.events {
@@ -249,7 +262,7 @@ func TestCoordinator_CreateDigest(t *testing.T) {
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "golang", "")
 
 	manifest := chat.NewThreadManifest(thread.ID)
-	_ = coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{}, nil)
+	_ = coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{reviewToReturn: true}, nil)
 
 	events, _ := workspaceService.LoadEvents(ctx, thread)
 	foundDigest := false
@@ -297,7 +310,7 @@ func TestCoordinator_TransitionWorkspace_Approved(t *testing.T) {
 	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{})
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "concept", "")
 
-	ui := &coordMockUI{transitionToReturn: true}
+	ui := &coordMockUI{transitionToReturn: true, reviewToReturn: true}
 	manifest := chat.NewThreadManifest(thread.ID)
 
 	err := coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, ui, nil)

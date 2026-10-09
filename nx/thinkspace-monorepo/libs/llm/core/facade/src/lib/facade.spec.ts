@@ -143,12 +143,14 @@ describe('LlmFacade', () => {
       }
     });
 
-    it('should create a valid ApproveContext WSEvent', () => {
-      const protocolBufferEvent = LlmFacade.createApproveContext(true);
+    it('should create a valid ApproveContext WSEvent with pruning arrays', () => {
+      const protocolBufferEvent = LlmFacade.createApproveContext(true, ['src/main.go'], [0, 2]);
       
       expect(protocolBufferEvent.payload.case).toBe('approveContext');
       if (protocolBufferEvent.payload.case === 'approveContext') {
         expect(protocolBufferEvent.payload.value.approved).toBe(true);
+        expect(protocolBufferEvent.payload.value.retainedFilePaths).toEqual(['src/main.go']);
+        expect(protocolBufferEvent.payload.value.retainedHistoryIndices).toEqual([0, 2]);
       }
     });
 

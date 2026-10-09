@@ -1,19 +1,15 @@
 files:
   - ../../go/go.work
-  - ../../go/go.work.sum
   - ../../go/api/go.mod
   - ../../go/api/go.sum
   - ../../go/api/v1/events.pb.go
   - ../../go/fs/go.mod
-  - ../../go/fs/go.sum
   - ../../go/fs/cmd/readme.md
   - ../../go/fs/cmd/bootstrap/clone_main.go
   - ../../go/fs/cmd/cli/main.go
   - ../../go/fs/cmd/server/server_main.go
   - ../../go/fs/internal/api/api.md
   - ../../go/fs/internal/api/emitter.go
-  - ../../go/fs/internal/api/facade_test.go
-  - ../../go/fs/internal/api/facade.go
   - ../../go/fs/internal/api/server_test.go
   - ../../go/fs/internal/api/server.go
   - ../../go/fs/internal/api/websocket_test.go
@@ -113,4 +109,12 @@ files:
   - ../../go/fs/internal/session/digest_manager_test.go
   - ../../go/fs/internal/session/digest_manager.go
   - ../../go/fs/internal/spaces/generic/ci_verifier.go
-last_context: llm_golang_42.md
+  - ../../go/fs/internal/api/messages_inbound_facade.go
+  - ../../go/fs/internal/api/messages_outbound_facade.go
+  - ../../go/fs/internal/api/models.go
+  - ../../go/fs/internal/api/proto_config.go
+  - ../../go/fs/internal/session/models.go
+  - ../../go/fs/internal/api/messages_inbound_facade_test.go
+  - ../../go/fs/internal/api/messages_outbound_facade_test.go
+  - ../../go/fs/internal/telemetry/usage.go
+last_context: llm_golang_49.md

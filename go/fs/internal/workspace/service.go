@@ -10,11 +10,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"uuid"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
 // Service orchestrates the workspace lifecycle using the ChatEngine.
@@ -229,8 +232,17 @@ func (s *Service) LogUserMessage(ctx context.Context, thread *chat.Thread, conte
 	return s.bus.Publish(ctx, thread, event)
 }
 
-func (s *Service) LogModelResponse(ctx context.Context, thread *chat.Thread, content string) error {
+func (s *Service) LogModelResponse(ctx context.Context, thread *chat.Thread, content string, usage *telemetry.TokenUsage) error {
 	event := chat.NewEvent(chat.EventModel, content)
+
+	if usage != nil && usage.TotalTokens > 0 {
+		event.Metadata = map[string]string{
+			"prompt_tokens":    strconv.Itoa(usage.PromptTokens),
+			"candidate_tokens": strconv.Itoa(usage.CandidateTokens),
+			"total_tokens":     strconv.Itoa(usage.TotalTokens),
+		}
+	}
+
 	return s.bus.Publish(ctx, thread, event)
 }
 
@@ -320,10 +332,8 @@ func (s *Service) SaveContextPreview(ctx context.Context, thread *chat.Thread, c
 			}
 		}
 
-		// UUIDv7 is inherently time-sortable chronologically
 		sort.Strings(files)
 
-		// Delete the oldest files
 		for i := 0; i < len(files)-15; i++ {
 			_ = os.Remove(filepath.Join(previewsDir, files[i]))
 		}

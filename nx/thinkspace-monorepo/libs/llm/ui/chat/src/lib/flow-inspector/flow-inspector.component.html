@@ -1,6 +1,6 @@
 <!-- Backdrop -->
 <div 
-  (click)="close.emit()"
+  (click)="inspectorClosed.emit()"
   style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000;">
 </div>
 
@@ -16,7 +16,7 @@
       <div style="font-size: 14px; color: #495057;">{{ parsedReceipt()?.summary }}</div>
     </div>
     <button 
-      (click)="close.emit()" 
+      (click)="inspectorClosed.emit()" 
       style="background: none; border: none; font-size: 24px; color: #adb5bd; cursor: pointer; padding: 0; line-height: 1;">
       &times;
     </button>
@@ -56,8 +56,34 @@
       <div style="flex: 1; display: flex; flex-direction: column; background: #fff; overflow-y: auto;">
         <div style="padding: 16px;">
           <h4 style="margin: 0 0 12px 0; font-size: 12px; text-transform: uppercase; color: #868e96; letter-spacing: 0.5px;">Verification Trace</h4>
-          @if (activeAgent()?.verificationTrace) {
-            <pre style="background: #fff5f5; color: #e03131; border: 1px solid #ffa8a8; padding: 12px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 0; white-space: pre-wrap;">{{ activeAgent()?.verificationTrace }}</pre>
+          
+          @if (parsedTraceSteps().length > 0) {
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              @for (step of parsedTraceSteps(); track $index) {
+                @if (step.type === 'SYSTEM') {
+                  <pre style="background: #fff5f5; color: #e03131; border: 1px solid #ffa8a8; padding: 12px; border-radius: 6px; font-size: 12px; overflow-x: auto; margin: 0; white-space: pre-wrap;">{{ step.output }}</pre>
+                } @else {
+                  <div style="border: 1px solid #dee2e6; border-radius: 6px; overflow: hidden;">
+                    <div style="background: #f8f9fa; padding: 8px 12px; border-bottom: 1px solid #dee2e6; display: flex; justify-content: space-between; align-items: center;">
+                      <div style="display: flex; gap: 8px; align-items: center;">
+                        <span [style.background]="step.isBestEffort ? '#fff3cd' : '#e7f5ff'"
+                              [style.color]="step.isBestEffort ? '#856404' : '#004085'"
+                              style="font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px;">
+                          {{ step.type }}
+                        </span>
+                        <code style="font-size: 12px; color: #495057;">{{ step.command }}</code>
+                      </div>
+                      <span [style.color]="step.status === 'SUCCESS' ? '#2b8a3e' : '#e03131'" style="font-weight: bold; font-size: 11px;">
+                        {{ step.status }}
+                      </span>
+                    </div>
+                    @if (step.output) {
+                      <pre style="margin: 0; padding: 8px; background: #212529; color: #adb5bd; font-size: 10px; overflow-x: auto; white-space: pre-wrap;">{{ step.output }}</pre>
+                    }
+                  </div>
+                }
+              }
+            </div>
           } @else {
             <div style="color: #adb5bd; font-size: 13px; font-style: italic;">No trace output.</div>
           }

@@ -12,7 +12,6 @@ type ManagementAPI struct {
 	registry *config.Registry
 	manager  *workspace.ServiceManager
 	appCfg   workspace.AppConfig
-	facade   *EventFacade
 }
 
 func NewManagementAPI(registry *config.Registry, manager *workspace.ServiceManager, appCfg workspace.AppConfig) *ManagementAPI {
@@ -20,7 +19,6 @@ func NewManagementAPI(registry *config.Registry, manager *workspace.ServiceManag
 		registry: registry,
 		manager:  manager,
 		appCfg:   appCfg,
-		facade:   NewEventFacade(),
 	}
 }
 
@@ -54,7 +52,6 @@ func (api *ManagementAPI) handleGetSpaces(w http.ResponseWriter, r *http.Request
 		isConfigured := false
 		state, err := api.manager.GetSpaceState(id)
 
-		// A space is operational if its requested domain exists in the loaded registry
 		if err == nil && state.Domain != "" {
 			if _, ok := api.registry.GetDomain(state.Domain); ok {
 				isConfigured = true
@@ -68,7 +65,7 @@ func (api *ManagementAPI) handleGetSpaces(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	responseBytes, err := api.facade.MarshalRESTSpaces(states)
+	responseBytes, err := MarshalRESTSpaces(states)
 	if err != nil {
 		http.Error(w, "Failed to marshal spaces", http.StatusInternalServerError)
 		return
