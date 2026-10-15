@@ -9,11 +9,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/joho/godotenv"
 	"google.golang.org/genai"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
+	"github.com/tinywideclouds.com/thinkspace/internal/db"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
@@ -51,10 +53,23 @@ func main() {
 
 	baseRoot := filepath.Join(homeDirectory, "Documents", *rootName)
 	configurationsDirectory := filepath.Join(baseRoot, "configs")
+	dbPath := filepath.Join(baseRoot, ".graphdb")
 
 	_ = os.MkdirAll(configurationsDirectory, 0755)
+	if err := os.MkdirAll(dbPath, 0755); err != nil {
+		logger.Error("Failed to create database directory", "error", err)
+		os.Exit(1)
+	}
 
 	config.ScaffoldDefaults(logger, configurationsDirectory)
+
+	opts := badger.DefaultOptions(dbPath).WithLoggingLevel(badger.WARNING)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		logger.Error("Failed to initialize BadgerDB", "error", err)
+		os.Exit(1)
+	}
+	defer graphDB.Close()
 
 	factory := func(repoRoot string) workspace.ChatEngine {
 		if *engineType == "exec" {
@@ -63,7 +78,7 @@ func main() {
 		return gitfs.NewGoGitEngine(repoRoot, rootMode)
 	}
 
-	serviceManager := workspace.NewServiceManager(logger, baseRoot, factory)
+	serviceManager := workspace.NewServiceManager(logger, baseRoot, factory, graphDB)
 
 	registry := config.NewRegistry()
 	if err := registry.LoadDirectory(configurationsDirectory); err != nil {
@@ -82,14 +97,12 @@ func main() {
 		SupportedDomains: supportedDomains,
 	}
 
-	// FLOW FACTORY INJECTION
 	var fanOutCfg flows.FanOutConfig
 	if err := registry.DecodeFlowConfig("fanout", &fanOutCfg); err != nil {
 		logger.Warn("Failed to decode fanout config, using defaults", "error", err)
 	}
 	fanOutFlow := flows.NewFanOutFlow(logger, fanOutCfg)
 
-	// CORE SYSTEM INJECTION
 	var digestCfg session.DigestConfig
 	if err := registry.DecodeCoreConfig("digest", &digestCfg); err != nil {
 		logger.Warn("Failed to decode digest config, using defaults", "error", err)

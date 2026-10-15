@@ -9,13 +9,13 @@ import (
 	"testing"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -117,7 +117,7 @@ func (u *feMockUI) OnTextChunk(text string) {}
 
 func (u *feMockUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{
-		Approved: u.reviewToReturn, // Evaluates to true if not explicitly set to false
+		Approved: u.reviewToReturn,
 	}
 }
 
@@ -141,9 +141,9 @@ func TestFlowEngine_FanOutIntegration(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &feMockChatEngine{}
 	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-	service := workspace.NewService(logger, engine, workspaceRoot, bus)
-	thread, _ := service.StartThread(context.Background(), "chat-1")
+	bus := thinkgraph.NewEventBus()
+	service := workspace.NewService(logger, engine, workspaceRoot, bus, nil)
+	chatSession, _ := service.InitializeChat(context.Background(), "golang", "chat-1")
 
 	emitter := &feMockEmitter{}
 	var bundlesReceived []cognition.ThinkBundle
@@ -170,7 +170,7 @@ func TestFlowEngine_FanOutIntegration(t *testing.T) {
 	}
 	flowContext := flows.FlowContext{FlowID: "flow-123", SpaceID: "golang", BaseAgentRules: "Worker Persona"}
 
-	err := flowEngine.Run(context.Background(), thread, space, fanOutFlow, args, flowContext, ui)
+	err := flowEngine.Run(context.Background(), chatSession, space, fanOutFlow, args, flowContext, ui)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -199,9 +199,9 @@ func TestFlowEngine_FailFast_HallucinatedFile(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &feMockChatEngine{}
 	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-	service := workspace.NewService(logger, engine, workspaceRoot, bus)
-	thread, _ := service.StartThread(context.Background(), "chat-1")
+	bus := thinkgraph.NewEventBus()
+	service := workspace.NewService(logger, engine, workspaceRoot, bus, nil)
+	chatSession, _ := service.InitializeChat(context.Background(), "golang", "chat-1")
 
 	flowEngine := session.NewFlowEngine(logger, service, nil, &feMockEmitter{})
 	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
@@ -215,7 +215,7 @@ func TestFlowEngine_FailFast_HallucinatedFile(t *testing.T) {
 		},
 	}
 
-	err := flowEngine.Run(context.Background(), thread, &feMockThinkSpace{}, fanOutFlow, args, flows.FlowContext{}, nil)
+	err := flowEngine.Run(context.Background(), chatSession, &feMockThinkSpace{}, fanOutFlow, args, flows.FlowContext{}, nil)
 
 	if err == nil {
 		t.Fatalf("expected flow to fail-fast on missing file, but it succeeded")

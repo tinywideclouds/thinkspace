@@ -5,18 +5,19 @@ import (
 	"iter"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -25,7 +26,7 @@ import (
 type coordMockModelClient struct {
 	responses      []llm.StreamChunk
 	callIndex      int
-	capturedBundle cognition.ThinkBundle // Fixed undefined error here
+	capturedBundle cognition.ThinkBundle
 }
 
 func (m *coordMockModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
@@ -98,7 +99,6 @@ type coordMockUI struct {
 	transitionToReturn bool
 	capturedReasoning  string
 
-	// Phase 2 Pruning
 	retainedFiles   []string
 	retainedHistory []int
 }
@@ -143,11 +143,11 @@ func TestCoordinator_RunAgentLoop_RoutesToEngine(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-	bus.Subscribe(chat.NewLedgerSubscriber())
+	bus := thinkgraph.NewEventBus()
+	bus.Subscribe(thinkgraph.NewLedgerSubscriber(1000, workspaceRoot))
 
-	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread")
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+	chatSession, _ := workspaceService.InitializeChat(ctx, "golang", "test-thread")
 
 	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{
@@ -168,9 +168,9 @@ func TestCoordinator_RunAgentLoop_RoutesToEngine(t *testing.T) {
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, flow, digestManager, "golang", "")
 
 	ui := &coordMockUI{strategyToReturn: flows.StrategyManual, reviewToReturn: true}
-	manifest := chat.NewThreadManifest(thread.ID)
+	manifest := thinkgraph.NewChatManifest(chatSession.ID)
 
-	err := coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, ui, nil)
+	err := coordinator.RunAgentLoop(ctx, chatSession, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, ui, nil)
 	if err != nil {
 		t.Fatalf("RunAgentLoop failed: %v", err)
 	}
@@ -186,9 +186,9 @@ func TestCoordinator_QueryLens(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-lens")
+	bus := thinkgraph.NewEventBus()
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+	chatSession, _ := workspaceService.InitializeChat(ctx, "golang", "test-thread-lens")
 
 	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{
@@ -209,8 +209,8 @@ func TestCoordinator_QueryLens(t *testing.T) {
 	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{})
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "golang", "")
 
-	manifest := chat.NewThreadManifest(thread.ID)
-	_ = coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{reviewToReturn: true}, nil)
+	manifest := thinkgraph.NewChatManifest(chatSession.ID)
+	_ = coordinator.RunAgentLoop(ctx, chatSession, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{reviewToReturn: true}, nil)
 
 	foundLensLog := false
 	for _, ev := range emitter.events {
@@ -229,11 +229,12 @@ func TestCoordinator_CreateDigest(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-	bus.Subscribe(chat.NewLedgerSubscriber())
+	bus := thinkgraph.NewEventBus()
+	bus.Subscribe(thinkgraph.NewLedgerSubscriber(1000, workspaceRoot))
+	bus.Subscribe(thinkgraph.NewDigestSubscriber(workspaceRoot))
 
-	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-digest")
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+	chatSession, _ := workspaceService.InitializeChat(ctx, "golang", "test-thread-digest")
 
 	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{
@@ -248,7 +249,6 @@ func TestCoordinator_CreateDigest(t *testing.T) {
 				}},
 			},
 			{
-				// This is the response returned by the mock client when DigestManager calls it
 				Text: "Generated Manual Summary",
 			},
 		},
@@ -261,23 +261,27 @@ func TestCoordinator_CreateDigest(t *testing.T) {
 	flowEngine := session.NewFlowEngine(logger, workspaceService, nil, emitter)
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "golang", "")
 
-	manifest := chat.NewThreadManifest(thread.ID)
-	_ = coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{reviewToReturn: true}, nil)
+	manifest := thinkgraph.NewChatManifest(chatSession.ID)
+	_ = coordinator.RunAgentLoop(ctx, chatSession, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{reviewToReturn: true}, nil)
 
-	events, _ := workspaceService.LoadEvents(ctx, thread)
-	foundDigest := false
-	for _, e := range events {
-		if e.Type == chat.EventDigest && strings.Contains(e.Content, "Generated Manual Summary") {
-			foundDigest = true
-			if len(e.Tags) != 1 || e.Tags[0] != "auth" {
-				t.Errorf("Expected tags to be passed into ledger correctly")
-			}
-			break
-		}
+	// In the new architecture, discrete digests are written to the `digests` directory.
+	digestsDir := filepath.Join(workspaceRoot, "golang", "chats", chatSession.ID, "ledger", "digests")
+	entries, err := os.ReadDir(digestsDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("Expected create_digest tool to route execution to the DigestManager and write to ledger digests dir")
 	}
 
-	if !foundDigest {
-		t.Errorf("Expected create_digest tool to route execution to the DigestManager and write to ledger")
+	content, err := os.ReadFile(filepath.Join(digestsDir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("Failed to read digest file")
+	}
+
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "Generated Manual Summary") {
+		t.Errorf("Expected digest body in markdown, got: %s", contentStr)
+	}
+	if !strings.Contains(contentStr, "auth") {
+		t.Errorf("Expected 'auth' tag in markdown frontmatter, got: %s", contentStr)
 	}
 }
 
@@ -287,9 +291,9 @@ func TestCoordinator_TransitionWorkspace_Approved(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
-	thread, _ := workspaceService.StartThread(ctx, "test-thread-trans")
+	bus := thinkgraph.NewEventBus()
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+	chatSession, _ := workspaceService.InitializeChat(ctx, "concept", "test-thread-trans")
 
 	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{
@@ -311,9 +315,9 @@ func TestCoordinator_TransitionWorkspace_Approved(t *testing.T) {
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "concept", "")
 
 	ui := &coordMockUI{transitionToReturn: true, reviewToReturn: true}
-	manifest := chat.NewThreadManifest(thread.ID)
+	manifest := thinkgraph.NewChatManifest(chatSession.ID)
 
-	err := coordinator.RunAgentLoop(ctx, thread, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, ui, nil)
+	err := coordinator.RunAgentLoop(ctx, chatSession, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, ui, nil)
 
 	if err == nil {
 		t.Fatalf("Expected TransitionRequest error, got nil")

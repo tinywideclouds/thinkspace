@@ -13,7 +13,7 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
 type EngineFactory func(repoRoot string) ChatEngine
@@ -22,21 +22,27 @@ type ServiceManager struct {
 	logger        *slog.Logger
 	baseRoot      string
 	engineFactory EngineFactory
+	graphStore    thinkgraph.GraphRepository
 	services      map[string]*Service
 	mu            sync.Mutex
 }
 
-func NewServiceManager(logger *slog.Logger, baseRoot string, factory EngineFactory) *ServiceManager {
+func NewServiceManager(logger *slog.Logger, baseRoot string, factory EngineFactory, graphStore thinkgraph.GraphRepository) *ServiceManager {
 	return &ServiceManager{
 		logger:        logger,
 		baseRoot:      baseRoot,
 		engineFactory: factory,
+		graphStore:    graphStore,
 		services:      make(map[string]*Service),
 	}
 }
 
 func (m *ServiceManager) WorkspaceRoot() string {
 	return m.baseRoot
+}
+
+func (m *ServiceManager) GraphStore() thinkgraph.GraphRepository {
+	return m.graphStore
 }
 
 func (m *ServiceManager) GetService(spaceID string) *Service {
@@ -50,17 +56,20 @@ func (m *ServiceManager) GetService(spaceID string) *Service {
 	spaceRoot := filepath.Join(m.baseRoot, spaceID)
 	engine := m.engineFactory(spaceRoot)
 
-	// Instantiate the Event Bus and attach the immutable disk ledger subscriber
-	bus := chat.NewEventBus()
-	bus.Subscribe(chat.NewLedgerSubscriber())
+	bus := thinkgraph.NewEventBus()
+	bus.Subscribe(thinkgraph.NewLedgerSubscriber(1000, m.baseRoot))
+	bus.Subscribe(thinkgraph.NewDigestSubscriber(m.baseRoot))
 
-	service := NewService(m.logger, engine, spaceRoot, bus)
+	if m.graphStore != nil {
+		bus.Subscribe(thinkgraph.NewGraphSubscriber(m.graphStore))
+	}
+
+	service := NewService(m.logger, engine, m.baseRoot, bus, m.graphStore)
 
 	m.services[spaceID] = service
 	return service
 }
 
-// ... (ListSpaces, GetSpaceState, UpdateSpaceState, ListChats, and CreateChat remain identical)
 func (m *ServiceManager) ListSpaces(ctx context.Context) ([]string, error) {
 	entries, err := os.ReadDir(m.baseRoot)
 	if err != nil {
@@ -72,7 +81,7 @@ func (m *ServiceManager) ListSpaces(ctx context.Context) ([]string, error) {
 
 	var spaces []string
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 			spaces = append(spaces, entry.Name())
 		}
 	}

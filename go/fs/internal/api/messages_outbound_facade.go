@@ -5,13 +5,13 @@ import (
 	"time"
 
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"uuid"
 )
 
-func MarshalSyncHistory(recentEvents []chat.Event, digests map[uuid.UUID]chat.DigestMeta) ([]byte, error) {
+func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests map[uuid.UUID]thinkgraph.DigestMeta) ([]byte, error) {
 	var pbEvents []*pb.LedgerEvent
 	for _, e := range recentEvents {
 		pbEvents = append(pbEvents, &pb.LedgerEvent{

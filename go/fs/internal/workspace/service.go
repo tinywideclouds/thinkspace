@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,87 +14,113 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
 	"uuid"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
-// Service orchestrates the workspace lifecycle using the ChatEngine.
+var ErrGraphMismatch = errors.New("physical ledger mismatch detected (Git history was altered). The fast-graph index must be rebuilt")
+
 type Service struct {
 	logger        *slog.Logger
 	engine        ChatEngine
 	workspaceRoot string
-	bus           *chat.EventBus
+	bus           *thinkgraph.EventBus
+	graph         thinkgraph.GraphRepository
 }
 
-func NewService(logger *slog.Logger, engine ChatEngine, workspaceRoot string, bus *chat.EventBus) *Service {
+func NewService(logger *slog.Logger, engine ChatEngine, workspaceRoot string, bus *thinkgraph.EventBus, graph thinkgraph.GraphRepository) *Service {
 	return &Service{
 		logger:        logger,
 		engine:        engine,
 		workspaceRoot: workspaceRoot,
 		bus:           bus,
+		graph:         graph,
 	}
 }
 
-func (s *Service) PreviewCandidate(ctx context.Context, thread *chat.Thread, candidateID string) error {
-	return s.engine.PreviewCandidate(ctx, thread.ID, candidateID)
+func (s *Service) WorkspaceRoot() string {
+	return s.workspaceRoot
 }
 
-func (s *Service) ResolveCandidate(ctx context.Context, thread *chat.Thread, candidateID string, accept bool, reason string) error {
+func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*thinkgraph.Chat, error) {
+	chat := &thinkgraph.Chat{
+		ID:      chatID,
+		SpaceID: spaceID,
+	}
+
+	chatDir := filepath.Join(s.workspaceRoot, spaceID, "chats", chatID)
+	ledgerPath := filepath.Join(chatDir, "ledger")
+
+	s.logger.InfoContext(ctx, "initializing chat", slog.String("id", chatID))
+
+	if err := s.engine.InitChat(ctx, chatID); err != nil {
+		return nil, fmt.Errorf("initializing chat state: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(chatDir, "docs"), 0755); err != nil {
+		return nil, fmt.Errorf("creating chat directories: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(ledgerPath, "logs"), 0755); err != nil {
+		return nil, fmt.Errorf("creating ledger logs dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(ledgerPath, "digests"), 0755); err != nil {
+		return nil, fmt.Errorf("creating ledger digests dir: %w", err)
+	}
+
+	if s.graph != nil {
+		rehydrator := thinkgraph.NewRehydrator(s.graph, s.workspaceRoot)
+		status, diskManifest, graphManifest, err := rehydrator.CheckSync(ctx, chat)
+		if err != nil {
+			return nil, fmt.Errorf("sync check failed: %w", err)
+		}
+
+		if status == thinkgraph.SyncStatusBehind {
+			s.logger.InfoContext(ctx, "Fast-forwarding graph index", "target_events", diskManifest.TotalEvents)
+			if err := rehydrator.FastForward(ctx, chat, graphManifest, diskManifest); err != nil {
+				return nil, fmt.Errorf("fast-forward failed: %w", err)
+			}
+		} else if status == thinkgraph.SyncStatusMismatch {
+			s.logger.WarnContext(ctx, "Hard mismatch detected between BadgerDB and Git disk", "chat_id", chatID)
+			return nil, ErrGraphMismatch
+		}
+	} else {
+		_, _ = thinkgraph.LoadOrRebuildManifest(ledgerPath)
+	}
+
+	return chat, nil
+}
+
+func (s *Service) PreviewCandidate(ctx context.Context, c *thinkgraph.Chat, candidateID string) error {
+	return s.engine.PreviewCandidate(ctx, c.ID, candidateID)
+}
+
+func (s *Service) ResolveCandidate(ctx context.Context, c *thinkgraph.Chat, candidateID string, accept bool, reason string) error {
 	if accept {
-		if err := s.engine.Accept(ctx, thread.ID, candidateID, reason); err != nil {
+		if err := s.engine.Accept(ctx, c.ID, candidateID, reason); err != nil {
 			return fmt.Errorf("accepting candidate: %w", err)
 		}
 	} else {
-		if err := s.engine.Reject(ctx, thread.ID, candidateID, reason); err != nil {
+		if err := s.engine.Reject(ctx, c.ID, candidateID, reason); err != nil {
 			return fmt.Errorf("rejecting candidate: %w", err)
 		}
 	}
 
-	if err := s.LogResolution(ctx, thread, candidateID, accept, reason); err != nil {
+	if err := s.LogResolution(ctx, c, candidateID, accept, reason); err != nil {
 		s.logger.ErrorContext(ctx, "failed to log resolution to ledger", "error", err)
 	}
 
 	return nil
 }
 
-func (s *Service) StartThread(ctx context.Context, id string) (*chat.Thread, error) {
-	threadDir := filepath.Join(s.workspaceRoot, "chats", id)
-	ledgerPath := filepath.Join(threadDir, "conversation.jsonl")
-
-	s.logger.InfoContext(ctx, "starting thread", slog.String("id", id))
-
-	if err := s.engine.InitChat(ctx, id); err != nil {
-		return nil, fmt.Errorf("initializing chat state: %w", err)
-	}
-
-	if err := os.MkdirAll(filepath.Join(threadDir, "docs"), 0755); err != nil {
-		return nil, fmt.Errorf("creating thread directories: %w", err)
-	}
-
-	f, err := os.OpenFile(ledgerPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err == nil {
-		f.Close()
-	}
-
-	return &chat.Thread{
-		ID:         id,
-		SpaceID:    filepath.Base(s.workspaceRoot),
-		Branch:     "chat/" + id,
-		LedgerPath: ledgerPath,
-		Dir:        threadDir,
-	}, nil
-}
-
-func (s *Service) ProposeCandidate(ctx context.Context, thread *chat.Thread, toolName string, files map[string][]byte) (*Candidate, error) {
+func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.Chat, toolName string, files map[string][]byte) (*Candidate, error) {
 	now := time.Now().UTC()
 	candidateID := fmt.Sprintf("%s-%d", toolName, now.Unix())
 
 	s.logger.InfoContext(ctx, "proposing candidate", slog.String("candidate_id", candidateID))
 
-	sandbox, err := s.engine.SpawnCandidateSandbox(ctx, thread.ID, candidateID)
+	sandbox, err := s.engine.SpawnCandidateSandbox(ctx, c.ID, candidateID)
 	if err != nil {
 		return nil, fmt.Errorf("spawning sandbox: %w", err)
 	}
@@ -102,7 +129,7 @@ func (s *Service) ProposeCandidate(ctx context.Context, thread *chat.Thread, too
 	var fileList []string
 	for relativePath, content := range files {
 		cleanPath := filepath.Clean(relativePath)
-		if err := sandbox.WriteFile(ctx, filepath.Join("chats", thread.ID, "docs", cleanPath), content); err != nil {
+		if err := sandbox.WriteFile(ctx, filepath.Join("chats", c.ID, "docs", cleanPath), content); err != nil {
 			return nil, fmt.Errorf("writing file %s to sandbox: %w", cleanPath, err)
 		}
 		fileList = append(fileList, cleanPath)
@@ -117,18 +144,18 @@ func (s *Service) ProposeCandidate(ctx context.Context, thread *chat.Thread, too
 		return nil, fmt.Errorf("delivering sandbox for review: %w", err)
 	}
 
-	if err := s.engine.PreviewCandidate(ctx, thread.ID, candidateID); err != nil {
+	if err := s.engine.PreviewCandidate(ctx, c.ID, candidateID); err != nil {
 		return nil, fmt.Errorf("previewing candidate: %w", err)
 	}
 
 	description := fmt.Sprintf("Proposed files: %s", strings.Join(fileList, ", "))
-	if err := s.LogProposal(ctx, thread, candidateID, description, nil); err != nil {
+	if err := s.LogProposal(ctx, c, candidateID, description, nil); err != nil {
 		s.logger.ErrorContext(ctx, "failed to log proposal", "error", err)
 	}
 
 	return &Candidate{
 		ID:        candidateID,
-		ThreadID:  thread.ID,
+		ThreadID:  c.ID,
 		Branch:    "candidate/" + candidateID,
 		CommitSHA: "head",
 		Status:    StatusPending,
@@ -136,11 +163,11 @@ func (s *Service) ProposeCandidate(ctx context.Context, thread *chat.Thread, too
 	}, nil
 }
 
-func (s *Service) Checkpoint(ctx context.Context, thread *chat.Thread, reason string) (string, error) {
-	s.logger.DebugContext(ctx, "checkpointing thread state", slog.String("thread_id", thread.ID))
+func (s *Service) Checkpoint(ctx context.Context, c *thinkgraph.Chat, reason string) (string, error) {
+	s.logger.DebugContext(ctx, "checkpointing chat state", slog.String("chat_id", c.ID))
 
 	msg := fmt.Sprintf("chore(ledger): %s", reason)
-	sha, err := s.engine.Snapshot(ctx, thread.ID, msg)
+	sha, err := s.engine.Snapshot(ctx, c.ID, msg)
 	if err != nil {
 		return "", fmt.Errorf("snapshotting checkpoint: %w", err)
 	}
@@ -148,92 +175,123 @@ func (s *Service) Checkpoint(ctx context.Context, thread *chat.Thread, reason st
 	return sha, nil
 }
 
-func (s *Service) LoadEvents(ctx context.Context, thread *chat.Thread) ([]chat.Event, error) {
-	var events []chat.Event
+func (s *Service) LoadEvents(ctx context.Context, c *thinkgraph.Chat) ([]thinkgraph.Event, error) {
+	var events []thinkgraph.Event
 
-	file, err := os.Open(thread.LedgerPath)
+	logsDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "logs")
+	entries, err := os.ReadDir(logsDir)
 	if err != nil {
-		return nil, fmt.Errorf("opening ledger: %w", err)
+		if os.IsNotExist(err) {
+			return events, nil
+		}
+		return nil, fmt.Errorf("reading logs dir: %w", err)
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
+	var shards []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			shards = append(shards, e.Name())
+		}
+	}
+	sort.Strings(shards)
+
+	for _, shard := range shards {
+		file, err := os.Open(filepath.Join(logsDir, shard))
+		if err != nil {
 			continue
 		}
 
-		var ev chat.Event
-		if err := json.Unmarshal(line, &ev); err != nil {
-			s.logger.WarnContext(ctx, "skipping malformed ledger entry", slog.String("error", err.Error()))
-			continue
-		}
-		events = append(events, ev)
-	}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanning ledger: %w", err)
+			var ev thinkgraph.Event
+			if err := json.Unmarshal(line, &ev); err != nil {
+				s.logger.WarnContext(ctx, "skipping malformed ledger entry", slog.String("error", err.Error()))
+				continue
+			}
+			events = append(events, ev)
+		}
+		file.Close()
 	}
 
 	return events, nil
 }
 
-func (s *Service) FetchEvents(ctx context.Context, thread *chat.Thread, ids []string) ([]chat.Event, error) {
+func (s *Service) FetchEvents(ctx context.Context, c *thinkgraph.Chat, ids []string) ([]thinkgraph.Event, error) {
 	idMap := make(map[string]bool)
 	for _, id := range ids {
 		idMap[id] = true
 	}
 
-	var matchedEvents []chat.Event
+	var matchedEvents []thinkgraph.Event
 
-	file, err := os.Open(thread.LedgerPath)
+	logsDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "logs")
+	entries, err := os.ReadDir(logsDir)
 	if err != nil {
-		return nil, fmt.Errorf("opening ledger for targeted fetch: %w", err)
+		return nil, fmt.Errorf("reading logs dir: %w", err)
 	}
-	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
+	var shards []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			shards = append(shards, e.Name())
+		}
+	}
+	sort.Strings(shards)
+
+	for _, shard := range shards {
+		file, err := os.Open(filepath.Join(logsDir, shard))
+		if err != nil {
 			continue
 		}
 
-		matchFound := false
-		for id := range idMap {
-			if strings.Contains(string(line), id) {
-				matchFound = true
-				break
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+
+			matchFound := false
+			for id := range idMap {
+				if strings.Contains(string(line), id) {
+					matchFound = true
+					break
+				}
+			}
+
+			if !matchFound {
+				continue
+			}
+
+			var ev thinkgraph.Event
+			if err := json.Unmarshal(line, &ev); err == nil && idMap[ev.ID.String()] {
+				matchedEvents = append(matchedEvents, ev)
+				delete(idMap, ev.ID.String())
 			}
 		}
-
-		if !matchFound {
-			continue
-		}
-
-		var ev chat.Event
-		if err := json.Unmarshal(line, &ev); err == nil && idMap[ev.ID.String()] {
-			matchedEvents = append(matchedEvents, ev)
-			delete(idMap, ev.ID.String())
-		}
+		file.Close()
 	}
 
 	return matchedEvents, nil
 }
 
-func (s *Service) LogUserPrompt(ctx context.Context, thread *chat.Thread, content string) error {
-	event := chat.NewEvent(chat.EventPrompt, content)
-	return s.bus.Publish(ctx, thread, event)
+func (s *Service) LogUserPrompt(ctx context.Context, c *thinkgraph.Chat, content string) error {
+	event := thinkgraph.NewEvent(thinkgraph.EventPrompt, content)
+	return s.bus.Publish(ctx, c, event)
 }
 
-func (s *Service) LogUserMessage(ctx context.Context, thread *chat.Thread, content string) error {
-	event := chat.NewEvent(chat.EventPrompt, content)
-	return s.bus.Publish(ctx, thread, event)
+func (s *Service) LogUserMessage(ctx context.Context, c *thinkgraph.Chat, content string) error {
+	event := thinkgraph.NewEvent(thinkgraph.EventPrompt, content)
+	return s.bus.Publish(ctx, c, event)
 }
 
-func (s *Service) LogModelResponse(ctx context.Context, thread *chat.Thread, content string, usage *telemetry.TokenUsage) error {
-	event := chat.NewEvent(chat.EventModel, content)
+func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.Chat, content string, usage *telemetry.TokenUsage) error {
+	event := thinkgraph.NewEvent(thinkgraph.EventModel, content)
 
 	if usage != nil && usage.TotalTokens > 0 {
 		event.Metadata = map[string]string{
@@ -243,36 +301,36 @@ func (s *Service) LogModelResponse(ctx context.Context, thread *chat.Thread, con
 		}
 	}
 
-	return s.bus.Publish(ctx, thread, event)
+	return s.bus.Publish(ctx, c, event)
 }
 
-func (s *Service) LogProposal(ctx context.Context, thread *chat.Thread, candidateID string, description string, tags []string) error {
-	event := chat.NewEvent(chat.EventCandidate, description)
+func (s *Service) LogProposal(ctx context.Context, c *thinkgraph.Chat, candidateID string, description string, tags []string) error {
+	event := thinkgraph.NewEvent(thinkgraph.EventCandidate, description)
 	event.Tags = tags
 	event.Metadata = map[string]string{
 		"proposal_uid": candidateID,
 	}
-	return s.bus.Publish(ctx, thread, event)
+	return s.bus.Publish(ctx, c, event)
 }
 
-func (s *Service) LogResolution(ctx context.Context, thread *chat.Thread, candidateID string, accepted bool, reason string) error {
+func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.Chat, candidateID string, accepted bool, reason string) error {
 	status := "REJECTED"
 	if accepted {
 		status = "ACCEPTED"
 	}
-	event := chat.NewEvent(chat.EventResolution, fmt.Sprintf("Proposal %s %s. Reason: %s", candidateID, status, reason))
+	event := thinkgraph.NewEvent(thinkgraph.EventResolution, fmt.Sprintf("Proposal %s %s. Reason: %s", candidateID, status, reason))
 	event.Metadata = map[string]string{
 		"proposal_uid": candidateID,
 		"status":       status,
 		"reason":       reason,
 	}
-	return s.bus.Publish(ctx, thread, event)
+	return s.bus.Publish(ctx, c, event)
 }
 
-func (s *Service) ReadCandidate(ctx context.Context, thread *chat.Thread, candidateID string) (string, error) {
+func (s *Service) ReadCandidate(ctx context.Context, c *thinkgraph.Chat, candidateID string) (string, error) {
 	s.logger.DebugContext(ctx, "reading candidate contents", slog.String("candidate_id", candidateID))
 
-	diff, err := s.engine.ReadCandidateDiff(ctx, thread.ID, candidateID)
+	diff, err := s.engine.ReadCandidateDiff(ctx, c.ID, candidateID)
 	if err != nil {
 		return "", fmt.Errorf("reading candidate diff: %w", err)
 	}
@@ -280,16 +338,12 @@ func (s *Service) ReadCandidate(ctx context.Context, thread *chat.Thread, candid
 	return diff, nil
 }
 
-func (s *Service) SpawnSandbox(ctx context.Context, threadID, candidateID string) (CandidateSandbox, error) {
-	return s.engine.SpawnCandidateSandbox(ctx, threadID, candidateID)
+func (s *Service) SpawnSandbox(ctx context.Context, chatID, candidateID string) (CandidateSandbox, error) {
+	return s.engine.SpawnCandidateSandbox(ctx, chatID, candidateID)
 }
 
-func (s *Service) WorkspaceRoot() string {
-	return s.workspaceRoot
-}
-
-func (s *Service) SaveReceipt(ctx context.Context, thread *chat.Thread, receipt FlowReceipt) error {
-	receiptDir := filepath.Join(thread.Dir, "receipts")
+func (s *Service) SaveReceipt(ctx context.Context, c *thinkgraph.Chat, receipt FlowReceipt) error {
+	receiptDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "receipts")
 	if err := os.MkdirAll(receiptDir, 0755); err != nil {
 		return fmt.Errorf("creating receipts directory: %w", err)
 	}
@@ -303,16 +357,14 @@ func (s *Service) SaveReceipt(ctx context.Context, thread *chat.Thread, receipt 
 	return os.WriteFile(path, append([]byte(xml.Header), b...), 0644)
 }
 
-func (s *Service) GetReceipt(ctx context.Context, thread *chat.Thread, flowID string) ([]byte, error) {
-	path := filepath.Join(thread.Dir, "receipts", fmt.Sprintf("%s.xml", flowID))
+func (s *Service) GetReceipt(ctx context.Context, c *thinkgraph.Chat, flowID string) ([]byte, error) {
+	path := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "receipts", fmt.Sprintf("%s.xml", flowID))
 	return os.ReadFile(path)
 }
 
-// SaveContextPreview drops the raw LLM payload to disk, returning a UUIDv7 identifier.
-// It maintains a FIFO limit of 15 previews to prevent runaway disk usage.
-func (s *Service) SaveContextPreview(ctx context.Context, thread *chat.Thread, content string) (string, error) {
+func (s *Service) SaveContextPreview(ctx context.Context, c *thinkgraph.Chat, content string) (string, error) {
 	previewID := uuid.NewV7().String()
-	previewsDir := filepath.Join(thread.Dir, "previews")
+	previewsDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "previews")
 
 	if err := os.MkdirAll(previewsDir, 0755); err != nil {
 		return "", fmt.Errorf("creating previews directory: %w", err)
@@ -323,7 +375,6 @@ func (s *Service) SaveContextPreview(ctx context.Context, thread *chat.Thread, c
 		return "", fmt.Errorf("writing preview file: %w", err)
 	}
 
-	// Simple FIFO Cleanup
 	if entries, err := os.ReadDir(previewsDir); err == nil && len(entries) > 15 {
 		var files []string
 		for _, entry := range entries {
@@ -342,14 +393,13 @@ func (s *Service) SaveContextPreview(ctx context.Context, thread *chat.Thread, c
 	return previewID, nil
 }
 
-// GetContextPreview retrieves a previously saved context dump.
-func (s *Service) GetContextPreview(ctx context.Context, thread *chat.Thread, previewID string) ([]byte, error) {
-	path := filepath.Join(thread.Dir, "previews", fmt.Sprintf("%s.md", previewID))
+func (s *Service) GetContextPreview(ctx context.Context, c *thinkgraph.Chat, previewID string) ([]byte, error) {
+	path := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "previews", fmt.Sprintf("%s.md", previewID))
 	return os.ReadFile(path)
 }
 
-func (s *Service) LogDigest(ctx context.Context, thread *chat.Thread, summary string, tags []string, isSticky bool) error {
-	event := chat.NewEvent(chat.EventDigest, summary)
+func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.Chat, summary string, tags []string, isSticky bool) error {
+	event := thinkgraph.NewEvent(thinkgraph.EventDigest, summary)
 	event.Tags = tags
 	isStickyStr := "false"
 	if isSticky {
@@ -358,5 +408,5 @@ func (s *Service) LogDigest(ctx context.Context, thread *chat.Thread, summary st
 	event.Metadata = map[string]string{
 		"is_sticky": isStickyStr,
 	}
-	return s.bus.Publish(ctx, thread, event)
+	return s.bus.Publish(ctx, c, event)
 }

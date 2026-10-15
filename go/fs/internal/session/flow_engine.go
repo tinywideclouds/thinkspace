@@ -12,11 +12,11 @@ import (
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -70,7 +70,6 @@ type agentResult struct {
 	trace       string
 }
 
-// FlowEngine executes state machine directives emitted by domain-specific Flows.
 type FlowEngine struct {
 	logger    *slog.Logger
 	service   *workspace.Service
@@ -94,10 +93,9 @@ func NewFlowEngine(
 	}
 }
 
-// Run executes the state machine loop, strictly bounded by the flow's MaxSteps.
 func (e *FlowEngine) Run(
 	ctx context.Context,
-	thread *chat.Thread,
+	chatSession *thinkgraph.Chat,
 	space spaces.ThinkSpace,
 	flow flows.Flow,
 	args map[string]any,
@@ -115,7 +113,7 @@ func (e *FlowEngine) Run(
 
 		switch directive.Action {
 		case flows.ActionSpawnAgents:
-			candidates, err := e.spawnAgents(ctx, thread, space, flowContext, directive.Tasks)
+			candidates, err := e.spawnAgents(ctx, chatSession, space, flowContext, directive.Tasks)
 			if err != nil {
 				return err
 			}
@@ -133,13 +131,13 @@ func (e *FlowEngine) Run(
 					break
 				}
 				branchName := strings.TrimPrefix(cand.CandidateID, "candidate/")
-				_ = e.service.ResolveCandidate(ctx, thread, branchName, false, "Rejected via manual review")
+				_ = e.service.ResolveCandidate(ctx, chatSession, branchName, false, "Rejected via manual review")
 			}
 			state.TargetBranch = acceptedBranch
 
 		case flows.ActionCommit:
 			branchName := strings.TrimPrefix(directive.TargetBranch, "candidate/")
-			return e.service.ResolveCandidate(ctx, thread, branchName, true, "Accepted by user")
+			return e.service.ResolveCandidate(ctx, chatSession, branchName, true, "Accepted by user")
 
 		case flows.ActionFinish:
 			return nil
@@ -157,7 +155,7 @@ func (e *FlowEngine) Run(
 
 func (e *FlowEngine) spawnAgents(
 	ctx context.Context,
-	thread *chat.Thread,
+	chatSession *thinkgraph.Chat,
 	space spaces.ThinkSpace,
 	flowContext flows.FlowContext,
 	tasks []flows.SubAgentTask,
@@ -169,14 +167,14 @@ func (e *FlowEngine) spawnAgents(
 		Timestamp: time.Now(),
 		Message:   "Starting Flow Execution",
 		Summary:   flowContext.FlowSummary,
-		Payload:   EnginePayload{FlowID: flowContext.FlowID, TaskID: thread.ID, AgentCount: len(tasks)}.ToMap(),
+		Payload:   EnginePayload{FlowID: flowContext.FlowID, TaskID: chatSession.ID, AgentCount: len(tasks)}.ToMap(),
 	})
 
 	results := make(chan agentResult, len(tasks))
 
 	for i, task := range tasks {
 		go func(agentIndex int, t flows.SubAgentTask) {
-			results <- e.runSingleAgent(ctx, thread, space, flowContext, t, agentIndex)
+			results <- e.runSingleAgent(ctx, chatSession, space, flowContext, t, agentIndex)
 		}(i+1, task)
 	}
 
@@ -205,20 +203,20 @@ func (e *FlowEngine) spawnAgents(
 	summary := fmt.Sprintf("Generated %d candidate branches.", len(branches))
 	receipt := workspace.FlowReceipt{
 		FlowID:    flowContext.FlowID,
-		TaskID:    thread.ID,
+		TaskID:    chatSession.ID,
 		Timestamp: time.Now().UTC(),
 		Task:      "Task Execution",
 		Agents:    records,
 		Summary:   summary,
 	}
-	_ = e.service.SaveReceipt(ctx, thread, receipt)
+	_ = e.service.SaveReceipt(ctx, chatSession, receipt)
 
 	return branches, nil
 }
 
 func (e *FlowEngine) runSingleAgent(
 	ctx context.Context,
-	thread *chat.Thread,
+	chatSession *thinkgraph.Chat,
 	space spaces.ThinkSpace,
 	flowContext flows.FlowContext,
 	task flows.SubAgentTask,
@@ -233,8 +231,8 @@ func (e *FlowEngine) runSingleAgent(
 		Payload:   EnginePayload{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Instruction: task.Instruction}.ToMap(),
 	})
 
-	candidateID := fmt.Sprintf("%s-%s-%s", thread.ID, flowContext.FlowID, task.AgentID)
-	sandbox, err := e.service.SpawnSandbox(ctx, thread.ID, candidateID)
+	candidateID := fmt.Sprintf("%s-%s-%s", chatSession.ID, flowContext.FlowID, task.AgentID)
+	sandbox, err := e.service.SpawnSandbox(ctx, chatSession.ID, candidateID)
 	if err != nil {
 		return agentResult{err: err}
 	}
@@ -288,7 +286,7 @@ func (e *FlowEngine) runSingleAgent(
 		return agentResult{err: err}
 	}
 
-	diff, _ := e.service.ReadCandidate(ctx, thread, candidateID)
+	diff, _ := e.service.ReadCandidate(ctx, chatSession, candidateID)
 	record.StateDelta = diff
 
 	e.emitter.Emit("manager", telemetry.Event{

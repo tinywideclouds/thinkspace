@@ -43,7 +43,7 @@ concept-space:
 	registry.LoadDirectory(configsDir)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return &coordMockChatEngine{} })
+	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return &coordMockChatEngine{} }, nil)
 
 	return registry, manager, baseRoot
 }
@@ -138,10 +138,10 @@ func TestTurnManager_RunTurn_Pruning(t *testing.T) {
 	writeMetaJson(t, baseRoot, "golang-space", "chat-prune", "golang-space")
 
 	ws := manager.GetService("golang-space")
-	thread, _ := ws.StartThread(context.Background(), "chat-prune")
-	_ = ws.LogUserPrompt(context.Background(), thread, "Event 0")
-	_ = ws.LogModelResponse(context.Background(), thread, "Event 1", nil)
-	_ = ws.LogUserPrompt(context.Background(), thread, "Event 2")
+	chatSession, _ := ws.InitializeChat(context.Background(), "golang-space", "chat-prune")
+	_ = ws.LogUserPrompt(context.Background(), chatSession, "Event 0")
+	_ = ws.LogModelResponse(context.Background(), chatSession, "Event 1", nil)
+	_ = ws.LogUserPrompt(context.Background(), chatSession, "Event 2")
 
 	spyClient := &coordMockModelClient{}
 	dummyFlow := &coordMockFlow{}

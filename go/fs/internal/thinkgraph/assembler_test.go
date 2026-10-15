@@ -1,4 +1,4 @@
-package chat_test
+package thinkgraph_test
 
 import (
 	"context"
@@ -6,32 +6,32 @@ import (
 	"testing"
 	"uuid"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
 func TestAssembler_Build(t *testing.T) {
-	manifest := chat.NewThreadManifest("test-thread")
+	manifest := thinkgraph.NewChatManifest("test-thread")
 
 	stickyID := uuid.NewV7()
-	manifest.Digests[stickyID] = chat.DigestMeta{
+	manifest.Digests[stickyID] = thinkgraph.DigestMeta{
 		ID:       stickyID,
 		Summary:  "Always remember the user prefers idiomatic Go.",
 		IsSticky: true,
 	}
 
-	assemblyRequest := chat.AssemblyRequest{
+	assemblyRequest := thinkgraph.AssemblyRequest{
 		Manifest: manifest,
-		RecentEvents: []chat.Event{
-			chat.NewEvent(chat.EventModel, "Previous answer"),
+		RecentEvents: []thinkgraph.Event{
+			thinkgraph.NewEvent(thinkgraph.EventModel, "Previous answer"),
 		},
-		Catalyst: &chat.Event{
+		Catalyst: &thinkgraph.Event{
 			ID:      uuid.NewV7(),
-			Type:    chat.EventPrompt,
+			Type:    thinkgraph.EventPrompt,
 			Content: "Recent question",
 		},
 	}
 
-	assembler := chat.NewAssembler()
+	assembler := thinkgraph.NewAssembler()
 	trajectory, err := assembler.Build(context.Background(), assemblyRequest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

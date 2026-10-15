@@ -20,7 +20,9 @@ func setupManagementAPI(t *testing.T) (*http.ServeMux, *workspace.ServiceManager
 	baseRoot := t.TempDir()
 
 	factory := func(repoRoot string) workspace.ChatEngine { return nil }
-	manager := workspace.NewServiceManager(logger, baseRoot, factory)
+
+	// Passing nil for the GraphRepository
+	manager := workspace.NewServiceManager(logger, baseRoot, factory, nil)
 
 	registry := config.NewRegistry()
 	appCfg := workspace.AppConfig{SupportedDomains: []string{"golang"}}
@@ -66,7 +68,8 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 	registry := config.NewRegistry()
 	_ = registry.LoadDirectory(configsDir)
 
-	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return nil })
+	// Passing nil for the GraphRepository
+	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return nil }, nil)
 	appCfg := workspace.AppConfig{SupportedDomains: []string{"golang"}}
 
 	mgmtAPI := api.NewManagementAPI(registry, manager, appCfg)
@@ -106,6 +109,7 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 		}
 	}
 }
+
 func TestManagementAPI_CreateAndListChats(t *testing.T) {
 	mux, _ := setupManagementAPI(t)
 	spaceID := "sandbox"

@@ -1,5 +1,7 @@
 package cognition
 
+import "uuid"
+
 // SystemRules defines the immutable laws of the current cognitive state.
 type SystemRules struct {
 	Persona               string
@@ -13,6 +15,7 @@ type Mapbook struct {
 
 // TrajectoryEvent is a single beat in the working memory.
 type TrajectoryEvent struct {
+	ID      uuid.UUID
 	Role    string // "user", "model", "system"
 	Content string
 }

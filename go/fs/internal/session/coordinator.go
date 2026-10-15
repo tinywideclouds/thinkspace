@@ -9,12 +9,12 @@ import (
 
 	"uuid"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -56,8 +56,8 @@ func NewCoordinator(
 
 func (c *Coordinator) RunAgentLoop(
 	ctx context.Context,
-	thread *chat.Thread,
-	manifest *chat.ThreadManifest,
+	chatSession *thinkgraph.Chat,
+	manifest *thinkgraph.ChatManifest,
 	thinkSpace spaces.ThinkSpace,
 	bundle cognition.ThinkBundle,
 	userInterface UserInterface,
@@ -117,7 +117,7 @@ func (c *Coordinator) RunAgentLoop(
 				}
 			}
 
-			_ = c.workspaceService.LogModelResponse(turnContext, thread, fullModelResponse.String(), usage)
+			_ = c.workspaceService.LogModelResponse(turnContext, chatSession, fullModelResponse.String(), usage)
 			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 				Role:    "model",
 				Content: fullModelResponse.String(),
@@ -135,7 +135,7 @@ func (c *Coordinator) RunAgentLoop(
 		}
 
 		call := interceptedTools[0]
-		shouldBreak, err := c.handleToolCall(turnContext, thread, manifest, thinkSpace, &bundle, userInterface, call)
+		shouldBreak, err := c.handleToolCall(turnContext, chatSession, manifest, thinkSpace, &bundle, userInterface, call)
 		if err != nil {
 			return err
 		}
@@ -144,20 +144,20 @@ func (c *Coordinator) RunAgentLoop(
 		}
 	}
 
-	_, err := c.workspaceService.Checkpoint(turnContext, thread, "End of session turn")
+	_, err := c.workspaceService.Checkpoint(turnContext, chatSession, "End of session turn")
 	return err
 }
 
-func (c *Coordinator) handleToolCall(ctx context.Context, thread *chat.Thread, manifest *chat.ThreadManifest, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+func (c *Coordinator) handleToolCall(ctx context.Context, chatSession *thinkgraph.Chat, manifest *thinkgraph.ChatManifest, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
 	switch call.Name {
 	case "transition_workspace":
 		return c.handleTransitionWorkspace(ctx, bundle, ui, call)
 	case "query_lens":
-		return c.handleQueryLens(ctx, thread, manifest, bundle, ui, call)
+		return c.handleQueryLens(ctx, chatSession, manifest, bundle, ui, call)
 	case "create_digest":
-		return c.handleCreateDigest(ctx, thread, thinkSpace, bundle, call)
+		return c.handleCreateDigest(ctx, chatSession, thinkSpace, bundle, call)
 	case "propose_change":
-		return c.handleProposeChange(ctx, thread, thinkSpace, bundle, ui, call)
+		return c.handleProposeChange(ctx, chatSession, thinkSpace, bundle, ui, call)
 	default:
 		c.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
 		return true, nil
@@ -201,7 +201,7 @@ func (c *Coordinator) handleTransitionWorkspace(ctx context.Context, bundle *cog
 	return false, nil
 }
 
-func (c *Coordinator) handleQueryLens(ctx context.Context, thread *chat.Thread, manifest *chat.ThreadManifest, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+func (c *Coordinator) handleQueryLens(ctx context.Context, chatSession *thinkgraph.Chat, manifest *thinkgraph.ChatManifest, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
 	tag, _ := call.Args["tag"].(string)
 	c.logger.InfoContext(ctx, "executing query_lens", "tag", tag)
 	c.emitter.Emit("manager", telemetry.Event{
@@ -225,7 +225,7 @@ func (c *Coordinator) handleQueryLens(ctx context.Context, thread *chat.Thread, 
 	if len(idsToFetch) == 0 {
 		toolResponse.WriteString("No historical events found for this tag.\n")
 	} else {
-		events, err := c.workspaceService.FetchEvents(ctx, thread, idsToFetch)
+		events, err := c.workspaceService.FetchEvents(ctx, chatSession, idsToFetch)
 		if err != nil {
 			toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", err))
 		} else {
@@ -242,7 +242,7 @@ func (c *Coordinator) handleQueryLens(ctx context.Context, thread *chat.Thread, 
 	return false, nil
 }
 
-func (c *Coordinator) handleCreateDigest(ctx context.Context, thread *chat.Thread, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, call llm.ToolCall) (bool, error) {
+func (c *Coordinator) handleCreateDigest(ctx context.Context, chatSession *thinkgraph.Chat, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, call llm.ToolCall) (bool, error) {
 	instruction, _ := call.Args["instruction"].(string)
 	topicName, _ := call.Args["topic_name"].(string)
 
@@ -263,7 +263,7 @@ func (c *Coordinator) handleCreateDigest(ctx context.Context, thread *chat.Threa
 	err := c.digestManager.CreateManualDigest(
 		ctx,
 		c.workspaceService,
-		thread,
+		chatSession,
 		topicName,
 		tags,
 		instruction,
@@ -284,7 +284,7 @@ func (c *Coordinator) handleCreateDigest(ctx context.Context, thread *chat.Threa
 	return true, nil
 }
 
-func (c *Coordinator) handleProposeChange(ctx context.Context, thread *chat.Thread, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+func (c *Coordinator) handleProposeChange(ctx context.Context, chatSession *thinkgraph.Chat, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
 	c.emitter.Emit("manager", telemetry.Event{
 		ID:        uuid.NewV7(),
 		Type:      "log",
@@ -299,7 +299,7 @@ func (c *Coordinator) handleProposeChange(ctx context.Context, thread *chat.Thre
 		FlowSummary:    "Executing requested changes.",
 	}
 
-	err := c.flowEngine.Run(ctx, thread, thinkSpace, c.fanOutFlow, call.Args, flowContext, ui)
+	err := c.flowEngine.Run(ctx, chatSession, thinkSpace, c.fanOutFlow, call.Args, flowContext, ui)
 
 	if err != nil {
 		c.logger.WarnContext(ctx, "tool execution failed, bouncing back to manager", "error", err)

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -20,7 +20,6 @@ type DigestConfig struct {
 	BackgroundPrompt string `yaml:"background_prompt"`
 }
 
-// DigestManager handles the compression of historical chat events into semantic summaries.
 type DigestManager struct {
 	logger *slog.Logger
 	client llm.ModelClient
@@ -35,11 +34,10 @@ func NewDigestManager(logger *slog.Logger, client llm.ModelClient, config Digest
 	}
 }
 
-// CreateManualDigest handles explicit digest requests triggered by the LLM Manager.
 func (m *DigestManager) CreateManualDigest(
 	ctx context.Context,
 	svc *workspace.Service,
-	thread *chat.Thread,
+	chatSession *thinkgraph.Chat,
 	topicName string,
 	tags []string,
 	instruction string,
@@ -90,7 +88,7 @@ func (m *DigestManager) CreateManualDigest(
 		return fmt.Errorf("manual digest generation returned empty string")
 	}
 
-	return svc.LogDigest(ctx, thread, summary, tags, true)
+	return svc.LogDigest(ctx, chatSession, summary, tags, true)
 }
 
 type generatedDigest struct {
@@ -104,13 +102,12 @@ type backgroundDigestResponse struct {
 	Digests []generatedDigest `json:"digests"`
 }
 
-// CreateBackgroundDigest handles the automated sliding window compression.
 func (m *DigestManager) CreateBackgroundDigest(
 	ctx context.Context,
 	svc *workspace.Service,
-	thread *chat.Thread,
-	targetWindow []chat.Event,
-	activeBuffer []chat.Event,
+	chatSession *thinkgraph.Chat,
+	targetWindow []thinkgraph.Event,
+	activeBuffer []thinkgraph.Event,
 	force bool,
 	model string,
 	basePersona string,
@@ -121,13 +118,11 @@ func (m *DigestManager) CreateBackgroundDigest(
 
 	m.logger.InfoContext(ctx, "Creating background context digest", "events", len(targetWindow), "forced", force)
 
-	// Format the window we actually want to summarize
 	var targetSb strings.Builder
 	for _, ev := range targetWindow {
 		targetSb.WriteString(fmt.Sprintf("[%s]: %s\n", ev.Type, ev.Content))
 	}
 
-	// Format the recent buffer so the LLM knows what we already remember
 	var bufferSb strings.Builder
 	for _, ev := range activeBuffer {
 		bufferSb.WriteString(fmt.Sprintf("[%s]: %s\n", ev.Type, ev.Content))
@@ -172,7 +167,6 @@ func (m *DigestManager) CreateBackgroundDigest(
 
 	rawResponse := strings.TrimSpace(jsonBuilder.String())
 
-	// Apply Model-Specific Output Healers to extract JSON safely
 	healer := llm.GetHealerForModel(model)
 	if healer != nil {
 		healed, modified := healer.Heal(rawResponse)
@@ -191,8 +185,7 @@ func (m *DigestManager) CreateBackgroundDigest(
 		if d.Summary == "" {
 			continue
 		}
-		// Utilizing the tags provided by the LLM
-		if err := svc.LogDigest(ctx, thread, d.Summary, d.Tags, false); err != nil {
+		if err := svc.LogDigest(ctx, chatSession, d.Summary, d.Tags, false); err != nil {
 			return count, fmt.Errorf("failed to log background digest: %w", err)
 		}
 		count++

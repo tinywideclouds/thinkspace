@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 
 	"github.com/coder/websocket"
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -56,13 +55,12 @@ func (s *Server) handleGetReceipt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	service := s.manager.GetService(spaceID)
-	thread := &chat.Thread{
+	chatSession := &thinkgraph.Chat{
 		ID:      chatID,
 		SpaceID: spaceID,
-		Dir:     filepath.Join(service.WorkspaceRoot(), "chats", chatID),
 	}
 
-	data, err := service.GetReceipt(r.Context(), thread, flowID)
+	data, err := service.GetReceipt(r.Context(), chatSession, flowID)
 	if err != nil {
 		http.Error(w, "Receipt not found", http.StatusNotFound)
 		return
@@ -83,13 +81,12 @@ func (s *Server) handleGetPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	service := s.manager.GetService(spaceID)
-	thread := &chat.Thread{
+	chatSession := &thinkgraph.Chat{
 		ID:      chatID,
 		SpaceID: spaceID,
-		Dir:     filepath.Join(service.WorkspaceRoot(), "chats", chatID),
 	}
 
-	data, err := service.GetContextPreview(r.Context(), thread, previewID)
+	data, err := service.GetContextPreview(r.Context(), chatSession, previewID)
 	if err != nil {
 		http.Error(w, "Preview not found", http.StatusNotFound)
 		return
@@ -167,9 +164,9 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		case "submit_prompt":
 			payload := inbound.SubmitPrompt
 
-			_, graph, manifest, err := s.turnManager.LoadThreadState(ctx, payload.SpaceID, payload.ChatID)
+			_, graphData, manifest, err := s.turnManager.LoadChatState(ctx, payload.SpaceID, payload.ChatID)
 			if err == nil {
-				if syncData, err := MarshalSyncHistory(graph.RecentEvents, manifest.Digests); err == nil {
+				if syncData, err := MarshalSyncHistory(graphData.Timeline, manifest.Digests); err == nil {
 					ui.SendSyncHistory(syncData)
 				}
 			}

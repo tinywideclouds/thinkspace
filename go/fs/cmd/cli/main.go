@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -11,11 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/joho/godotenv"
 	"google.golang.org/genai"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cli"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
+	"github.com/tinywideclouds.com/thinkspace/internal/db"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
@@ -52,6 +53,7 @@ func main() {
 	baseRoot := filepath.Join(homeDirectory, "Documents", "thinkspace")
 	repositoryRoot := filepath.Join(baseRoot, *spaceName)
 	configurationsDirectory := filepath.Join(baseRoot, "configs")
+	dbPath := filepath.Join(baseRoot, ".graphdb")
 
 	if err := os.MkdirAll(repositoryRoot, 0755); err != nil {
 		logger.Error("Failed to create workspace directory", "error", err)
@@ -61,8 +63,20 @@ func main() {
 		logger.Error("Failed to create configurations directory", "error", err)
 		os.Exit(1)
 	}
+	if err := os.MkdirAll(dbPath, 0755); err != nil {
+		logger.Error("Failed to create database directory", "error", err)
+		os.Exit(1)
+	}
 
 	config.ScaffoldDefaults(logger, configurationsDirectory)
+
+	opts := badger.DefaultOptions(dbPath).WithLoggingLevel(badger.WARNING)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		logger.Error("Failed to initialize BadgerDB", "error", err)
+		os.Exit(1)
+	}
+	defer graphDB.Close()
 
 	engineFactory := func(repoRoot string) workspace.ChatEngine {
 		if *engineType == "exec" {
@@ -71,7 +85,7 @@ func main() {
 		return gitfs.NewGoGitEngine(repoRoot, true)
 	}
 
-	serviceManager := workspace.NewServiceManager(logger, baseRoot, engineFactory)
+	serviceManager := workspace.NewServiceManager(logger, baseRoot, engineFactory, graphDB)
 
 	registry := config.NewRegistry()
 	if err := registry.LoadDirectory(configurationsDirectory); err != nil {
@@ -90,29 +104,29 @@ func main() {
 		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
 	}
 
-	threadDirectory := filepath.Join(repositoryRoot, "chats", *chatName)
 	isNewThread := false
-
-	if _, err := os.Stat(threadDirectory); os.IsNotExist(err) {
+	meta, err := serviceManager.GetChatMeta(*spaceName, *chatName)
+	if err != nil {
 		isNewThread = true
-		_ = os.MkdirAll(threadDirectory, 0755)
-		meta := workspace.ChatMeta{
-			ID:           *chatName,
-			Name:         *chatName,
-			ActiveDomain: *domainName,
+		meta, err = serviceManager.CreateChat(ctx, *spaceName, *chatName)
+		if err != nil {
+			logger.Error("Failed to create initial chat", "error", err)
+			os.Exit(1)
 		}
-		b, _ := json.MarshalIndent(meta, "", "  ")
-		_ = os.WriteFile(filepath.Join(threadDirectory, "meta.json"), b, 0644)
+
+		// Ensure the new chat inherits the CLI's requested domain
+		_ = serviceManager.UpdateChatMeta(*spaceName, meta.ID, func(m *workspace.ChatMeta) {
+			m.ActiveDomain = *domainName
+		})
 	}
 
 	var promptText string
 	if isNewThread {
-		fmt.Printf("🌱 Creating new exploration thread: %s (Domain: %s)\n", *chatName, *domainName)
+		fmt.Printf("🌱 Creating new exploration thread: %s (Domain: %s)\n", meta.ID, *domainName)
 		promptText = "Hello! Let's explore some concepts."
 		fmt.Printf("💬 Initial Prompt: %s\n", promptText)
 	} else {
-		meta, _ := serviceManager.GetChatMeta(*spaceName, *chatName)
-		fmt.Printf("📖 Resuming exploration thread: %s (Active Domain: %s)\n", *chatName, meta.ActiveDomain)
+		fmt.Printf("📖 Resuming exploration thread: %s (Active Domain: %s)\n", meta.ID, meta.ActiveDomain)
 
 		fmt.Print("\n> ")
 		reader := bufio.NewReader(os.Stdin)
@@ -125,14 +139,12 @@ func main() {
 		}
 	}
 
-	// FLOW FACTORY INJECTION
 	var fanOutCfg flows.FanOutConfig
 	if err := registry.DecodeFlowConfig("fanout", &fanOutCfg); err != nil {
 		logger.Warn("Failed to decode fanout config, using defaults", "error", err)
 	}
 	fanOutFlow := flows.NewFanOutFlow(logger, fanOutCfg)
 
-	// CORE SYSTEM INJECTION
 	var digestCfg session.DigestConfig
 	if err := registry.DecodeCoreConfig("digest", &digestCfg); err != nil {
 		logger.Warn("Failed to decode digest config, using defaults", "error", err)
@@ -146,7 +158,7 @@ func main() {
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	if err := turnManager.RunTurn(ctx, *spaceName, *chatName, promptText, userInterface, emitter); err != nil {
+	if err := turnManager.RunTurn(ctx, *spaceName, meta.ID, promptText, userInterface, emitter); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)
 	}

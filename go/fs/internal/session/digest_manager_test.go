@@ -4,22 +4,27 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
 func TestDigestManager_CreateManualDigest(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-	bus.Subscribe(chat.NewLedgerSubscriber())
+	spaceID := "test-space"
 
-	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
-	thread, _ := svc.StartThread(context.Background(), "test-digest-thread")
+	bus := thinkgraph.NewEventBus()
+	bus.Subscribe(thinkgraph.NewLedgerSubscriber(1000, workspaceRoot))
+	bus.Subscribe(thinkgraph.NewDigestSubscriber(workspaceRoot))
+
+	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+	chatSession, _ := svc.InitializeChat(context.Background(), spaceID, "test-digest-thread")
 
 	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{{Text: "Manual summary content"}},
@@ -28,36 +33,38 @@ func TestDigestManager_CreateManualDigest(t *testing.T) {
 	cfg := session.DigestConfig{ManualPrompt: "Instruction: {{.Instruction}}\nContext: {{.Context}}"}
 	manager := session.NewDigestManager(logger, client, cfg)
 
-	err := manager.CreateManualDigest(context.Background(), svc, thread, "Topic A", []string{"tag1"}, "Summarize this", "Context data", "test-model", "Persona")
+	err := manager.CreateManualDigest(context.Background(), svc, chatSession, "Topic A", []string{"tag1"}, "Summarize this", "Context data", "test-model", "Persona")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	events, _ := svc.LoadEvents(context.Background(), thread)
-	if len(events) == 0 {
-		t.Fatal("expected ledger event to be written")
+	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatSession.ID, "ledger", "digests")
+	entries, err := os.ReadDir(digestsDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("expected digest markdown file to be created in %s", digestsDir)
 	}
 
-	lastEvent := events[len(events)-1]
-	if lastEvent.Type != chat.EventDigest {
-		t.Errorf("expected EventDigest, got %s", lastEvent.Type)
+	content, err := os.ReadFile(filepath.Join(digestsDir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("failed to read digest file: %v", err)
 	}
-	if lastEvent.Content != "Manual summary content" {
-		t.Errorf("expected content match, got %s", lastEvent.Content)
-	}
-	if len(lastEvent.Tags) != 1 || lastEvent.Tags[0] != "tag1" {
-		t.Errorf("expected tag1, got %v", lastEvent.Tags)
+
+	if !strings.Contains(string(content), "Manual summary content") {
+		t.Errorf("expected content match in markdown file, got:\n%s", string(content))
 	}
 }
 
 func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	workspaceRoot := t.TempDir()
-	bus := chat.NewEventBus()
-	bus.Subscribe(chat.NewLedgerSubscriber())
+	spaceID := "test-space"
 
-	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus)
-	thread, _ := svc.StartThread(context.Background(), "test-bg-digest-thread")
+	bus := thinkgraph.NewEventBus()
+	bus.Subscribe(thinkgraph.NewLedgerSubscriber(1000, workspaceRoot))
+	bus.Subscribe(thinkgraph.NewDigestSubscriber(workspaceRoot))
+
+	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+	chatSession, _ := svc.InitializeChat(context.Background(), spaceID, "test-bg-digest-thread")
 
 	jsonResponse := `
 	{
@@ -74,8 +81,8 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 	cfg := session.DigestConfig{BackgroundPrompt: "Context: {{.TargetWindow}}"}
 	manager := session.NewDigestManager(logger, client, cfg)
 
-	targetWindow := []chat.Event{chat.NewEvent(chat.EventPrompt, "Build auth")}
-	count, err := manager.CreateBackgroundDigest(context.Background(), svc, thread, targetWindow, nil, false, "test-model", "Persona")
+	targetWindow := []thinkgraph.Event{thinkgraph.NewEvent(thinkgraph.EventPrompt, "Build auth")}
+	count, err := manager.CreateBackgroundDigest(context.Background(), svc, chatSession, targetWindow, nil, false, "test-model", "Persona")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,16 +91,18 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 		t.Errorf("expected 1 digest created, got %d", count)
 	}
 
-	events, _ := svc.LoadEvents(context.Background(), thread)
-	lastEvent := events[len(events)-1]
+	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatSession.ID, "ledger", "digests")
+	entries, err := os.ReadDir(digestsDir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("expected digest markdown file to be created in %s", digestsDir)
+	}
 
-	if lastEvent.Type != chat.EventDigest {
-		t.Errorf("expected EventDigest, got %s", lastEvent.Type)
+	content, err := os.ReadFile(filepath.Join(digestsDir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("failed to read digest file: %v", err)
 	}
-	if lastEvent.Content != "Added login" {
-		t.Errorf("expected content match, got %s", lastEvent.Content)
-	}
-	if len(lastEvent.Tags) != 1 || lastEvent.Tags[0] != "security" {
-		t.Errorf("expected security tag, got %v", lastEvent.Tags)
+
+	if !strings.Contains(string(content), "Added login") {
+		t.Errorf("expected content match in markdown file, got:\n%s", string(content))
 	}
 }

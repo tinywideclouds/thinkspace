@@ -9,9 +9,9 @@ import (
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
 func TestMarshalPreviewContext(t *testing.T) {
@@ -121,17 +121,17 @@ func TestMarshalSyncHistory(t *testing.T) {
 	evID := uuid.New()
 	digestID := uuid.New()
 
-	events := []chat.Event{
+	events := []thinkgraph.Event{
 		{
 			ID:        evID,
 			Timestamp: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
-			Type:      chat.EventPrompt,
+			Type:      thinkgraph.EventPrompt,
 			Content:   "Hello",
 			Metadata:  map[string]string{"user": "test"},
 		},
 	}
 
-	digests := map[uuid.UUID]chat.DigestMeta{
+	digests := map[uuid.UUID]thinkgraph.DigestMeta{
 		digestID: {
 			ID:       digestID,
 			Summary:  "Sticky context",

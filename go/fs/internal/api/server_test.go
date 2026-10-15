@@ -75,7 +75,9 @@ fanout:
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	factory := func(repoRoot string) workspace.ChatEngine { return nil }
-	manager := workspace.NewServiceManager(logger, baseRoot, factory)
+
+	// Passing nil for the GraphRepository
+	manager := workspace.NewServiceManager(logger, baseRoot, factory, nil)
 
 	mockClient := &mockModelClient{}
 	dummyFlowInstance := &dummyFlow{}

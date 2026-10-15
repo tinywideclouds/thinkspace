@@ -4,17 +4,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"time"
-
 	"uuid"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -23,8 +23,7 @@ type TurnManager struct {
 	registry         *config.Registry
 	workspaceManager *workspace.ServiceManager
 	modelClient      llm.ModelClient
-	playbackEngine   *chat.PlaybackEngine
-	chatAssembler    *chat.Assembler
+	chatAssembler    *thinkgraph.Assembler
 	fanOutFlow       flows.Flow
 	digestManager    *DigestManager
 }
@@ -42,37 +41,56 @@ func NewTurnManager(
 		registry:         registry,
 		workspaceManager: workspaceManager,
 		modelClient:      modelClient,
-		playbackEngine:   chat.NewPlaybackEngine(),
-		chatAssembler:    chat.NewAssembler(),
+		chatAssembler:    thinkgraph.NewAssembler(),
 		fanOutFlow:       fanOutFlow,
 		digestManager:    digestManager,
 	}
 }
 
-func (tm *TurnManager) LoadThreadState(ctx context.Context, spaceID, chatID string) (*chat.Thread, *chat.ChatGraph, *chat.ThreadManifest, error) {
+func (tm *TurnManager) LoadChatState(ctx context.Context, spaceID, chatID string) (*thinkgraph.Chat, *thinkgraph.GraphData, *thinkgraph.ChatManifest, error) {
 	workspaceService := tm.workspaceManager.GetService(spaceID)
-	thread, err := workspaceService.StartThread(ctx, chatID)
+	chatSession, err := workspaceService.InitializeChat(ctx, spaceID, chatID)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("starting thread: %w", err)
+		return nil, nil, nil, fmt.Errorf("initializing chat: %w", err)
 	}
 
-	graph, manifest, err := tm.playbackEngine.LoadState(ctx, thread)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("loading state: %w", err)
+	graphStore := tm.workspaceManager.GraphStore()
+	if graphStore == nil {
+		return nil, nil, nil, fmt.Errorf("graph store is not initialized")
 	}
 
-	return thread, graph, manifest, nil
+	timeline, err := graphStore.GetTimeline(ctx, chatSession)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to fetch timeline: %w", err)
+	}
+
+	stickyDigests, err := graphStore.GetStickyDigests(ctx, chatSession)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to fetch sticky digests: %w", err)
+	}
+
+	graphData := &thinkgraph.GraphData{
+		Timeline: timeline,
+		Digests:  stickyDigests,
+	}
+
+	manifest := thinkgraph.NewChatManifest(chatID)
+	for _, digest := range stickyDigests {
+		manifest.Digests[digest.ID] = digest
+	}
+
+	return chatSession, graphData, manifest, nil
 }
 
 func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText string, ui UserInterface, emitter telemetry.Emitter) error {
 	workspaceService := tm.workspaceManager.GetService(spaceID)
-	thread, err := workspaceService.StartThread(ctx, chatID)
+	chatSession, err := workspaceService.InitializeChat(ctx, spaceID, chatID)
 	if err != nil {
-		return fmt.Errorf("starting thread: %w", err)
+		return fmt.Errorf("initializing chat: %w", err)
 	}
 
 	if promptText != "" {
-		if err := workspaceService.LogUserPrompt(ctx, thread, promptText); err != nil {
+		if err := workspaceService.LogUserPrompt(ctx, chatSession, promptText); err != nil {
 			return fmt.Errorf("logging user prompt: %w", err)
 		}
 	}
@@ -95,7 +113,7 @@ func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText 
 			return fmt.Errorf("domain configuration not found: %s", activeDomain)
 		}
 
-		bundle, manifest, err := tm.assembleBundle(ctx, thread, workspaceService, thinkSpace, activeDomain)
+		bundle, manifest, err := tm.assembleBundle(ctx, chatSession, workspaceService, thinkSpace, activeDomain)
 		if err != nil {
 			return err
 		}
@@ -113,7 +131,6 @@ func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText 
 			return nil
 		}
 
-		// --- PHASE 2: CONTEXT PRUNING ---
 		if decision.RetainedFilePaths != nil {
 			retainedPaths := make(map[string]bool)
 			for _, p := range decision.RetainedFilePaths {
@@ -150,12 +167,12 @@ func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText 
 		flowEngine := NewFlowEngine(tm.logger, workspaceService, executor, emitter)
 		coordinator := NewCoordinator(tm.logger, workspaceService, tm.modelClient, emitter, flowEngine, tm.fanOutFlow, tm.digestManager, spaceID, spaceConfig.WorkerSystemPrompt())
 
-		err = coordinator.RunAgentLoop(ctx, thread, manifest, thinkSpace, bundle, ui, availableTools)
+		err = coordinator.RunAgentLoop(ctx, chatSession, manifest, thinkSpace, bundle, ui, availableTools)
 
-		tm.evaluateAndTriggerDigestion(ctx, spaceID, thread, thinkSpace.Config().Memory)
+		tm.evaluateAndTriggerDigestion(ctx, spaceID, chatSession, thinkSpace.Config().Memory)
 
 		if transitionReq, isTransition := err.(*TransitionRequest); isTransition {
-			if rebootErr := tm.handleTransition(ctx, thread, spaceID, chatID, transitionReq.TargetDomain, hasInitialized, ui); rebootErr != nil {
+			if rebootErr := tm.handleTransition(ctx, chatSession, spaceID, chatID, transitionReq.TargetDomain, hasInitialized, ui); rebootErr != nil {
 				return rebootErr
 			}
 			continue
@@ -165,19 +182,23 @@ func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText 
 	}
 }
 
-func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID string, thread *chat.Thread, memoryConfig spaces.MemoryConfig) {
-	workspaceService := tm.workspaceManager.GetService(spaceID)
-	chatMeta, _ := tm.workspaceManager.GetChatMeta(spaceID, thread.ID)
-	graph, _, err := tm.playbackEngine.LoadState(ctx, thread)
-	if err != nil || len(graph.RecentEvents) == 0 {
+func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID string, chatSession *thinkgraph.Chat, memoryConfig spaces.MemoryConfig) {
+	chatMeta, _ := tm.workspaceManager.GetChatMeta(spaceID, chatSession.ID)
+	graphStore := tm.workspaceManager.GraphStore()
+	if graphStore == nil {
 		return
 	}
 
-	var volatileEvents []chat.Event
+	timeline, err := graphStore.GetTimeline(ctx, chatSession)
+	if err != nil || len(timeline) == 0 {
+		return
+	}
+
+	var volatileEvents []thinkgraph.Event
 	horizonIndex := -1
 	evalIndex := -1
 
-	for i, ev := range graph.RecentEvents {
+	for i, ev := range timeline {
 		if ev.ID == chatMeta.DigestionHorizon {
 			horizonIndex = i
 		}
@@ -186,10 +207,10 @@ func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID 
 		}
 	}
 
-	if horizonIndex >= 0 && horizonIndex+1 < len(graph.RecentEvents) {
-		volatileEvents = graph.RecentEvents[horizonIndex+1:]
+	if horizonIndex >= 0 && horizonIndex+1 < len(timeline) {
+		volatileEvents = timeline[horizonIndex+1:]
 	} else if horizonIndex == -1 {
-		volatileEvents = graph.RecentEvents
+		volatileEvents = timeline
 	}
 
 	if len(volatileEvents) == 0 {
@@ -200,7 +221,7 @@ func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID 
 	if len(volatileEvents) >= memoryConfig.MaxVolatile {
 		forceDigest = true
 	} else if len(volatileEvents) >= memoryConfig.TriggerThreshold {
-		evalDistance := len(graph.RecentEvents) - 1 - evalIndex
+		evalDistance := len(timeline) - 1 - evalIndex
 		if evalIndex != -1 && evalDistance < 4 {
 			return
 		}
@@ -215,12 +236,12 @@ func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID 
 
 	targetWindow := volatileEvents[:splitIndex]
 	activeBuffer := volatileEvents[splitIndex:]
-	newEvalHorizonEvent := graph.RecentEvents[len(graph.RecentEvents)-1]
+	newEvalHorizonEvent := timeline[len(timeline)-1]
 	targetWindowHorizonEvent := targetWindow[len(targetWindow)-1]
 
 	tm.logger.Info("Triggering background digestion", "target_events", len(targetWindow), "buffer_events", len(activeBuffer), "forced", forceDigest)
 
-	_ = tm.workspaceManager.UpdateChatMeta(spaceID, thread.ID, func(meta *workspace.ChatMeta) {
+	_ = tm.workspaceManager.UpdateChatMeta(spaceID, chatSession.ID, func(meta *workspace.ChatMeta) {
 		meta.EvaluationHorizon = newEvalHorizonEvent.ID
 	})
 
@@ -230,6 +251,7 @@ func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID 
 
 		spaceState, _ := tm.workspaceManager.GetSpaceState(spaceID)
 		thinkSpace, _ := tm.registry.GetDomain(spaceState.Domain)
+		workspaceService := tm.workspaceManager.GetService(spaceID)
 
 		workerModel := thinkSpace.Config().Roles.Worker.Model
 		workerPersona := thinkSpace.Config().WorkerSystemPrompt()
@@ -237,7 +259,7 @@ func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID 
 		count, digestErr := tm.digestManager.CreateBackgroundDigest(
 			bgCtx,
 			workspaceService,
-			thread,
+			chatSession,
 			targetWindow,
 			activeBuffer,
 			forceDigest,
@@ -250,7 +272,7 @@ func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID 
 		}
 
 		if count > 0 {
-			_ = tm.workspaceManager.UpdateChatMeta(spaceID, thread.ID, func(meta *workspace.ChatMeta) {
+			_ = tm.workspaceManager.UpdateChatMeta(spaceID, chatSession.ID, func(meta *workspace.ChatMeta) {
 				meta.DigestionHorizon = targetWindowHorizonEvent.ID
 			})
 			tm.logger.Info("Digestion Horizon advanced", "new_horizon", targetWindowHorizonEvent.ID, "digests_created", count)
@@ -280,10 +302,25 @@ func (tm *TurnManager) resolveDomain(spaceID, chatID string) (activeDomain strin
 	return activeDomain, hasInitialized, nil
 }
 
-func (tm *TurnManager) assembleBundle(ctx context.Context, thread *chat.Thread, service *workspace.Service, thinkSpace spaces.ThinkSpace, activeDomain string) (cognition.ThinkBundle, *chat.ThreadManifest, error) {
-	graph, manifest, err := tm.playbackEngine.LoadState(ctx, thread)
+func (tm *TurnManager) assembleBundle(ctx context.Context, chatSession *thinkgraph.Chat, service *workspace.Service, thinkSpace spaces.ThinkSpace, activeDomain string) (cognition.ThinkBundle, *thinkgraph.ChatManifest, error) {
+	graphStore := tm.workspaceManager.GraphStore()
+	if graphStore == nil {
+		return cognition.ThinkBundle{}, nil, fmt.Errorf("graph store is not initialized")
+	}
+
+	timeline, err := graphStore.GetTimeline(ctx, chatSession)
 	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("loading state: %w", err)
+		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching timeline: %w", err)
+	}
+
+	stickyDigests, err := graphStore.GetStickyDigests(ctx, chatSession)
+	if err != nil {
+		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching digests: %w", err)
+	}
+
+	manifest := thinkgraph.NewChatManifest(chatSession.ID)
+	for _, digest := range stickyDigests {
+		manifest.Digests[digest.ID] = digest
 	}
 
 	rawMapbook, err := thinkSpace.Mapbook().GenerateLayers(ctx, service.WorkspaceRoot())
@@ -296,16 +333,16 @@ func (tm *TurnManager) assembleBundle(ctx context.Context, thread *chat.Thread, 
 		stringMaps[string(k)] = v
 	}
 
-	var catalystEvent *chat.Event
-	if len(graph.RecentEvents) > 0 {
-		last := graph.RecentEvents[len(graph.RecentEvents)-1]
+	var catalystEvent *thinkgraph.Event
+	if len(timeline) > 0 {
+		last := timeline[len(timeline)-1]
 		catalystEvent = &last
-		graph.RecentEvents = graph.RecentEvents[:len(graph.RecentEvents)-1]
+		timeline = timeline[:len(timeline)-1]
 	}
 
-	trajectory, err := tm.chatAssembler.Build(ctx, chat.AssemblyRequest{
+	trajectory, err := tm.chatAssembler.Build(ctx, thinkgraph.AssemblyRequest{
 		Manifest:     manifest,
-		RecentEvents: graph.RecentEvents,
+		RecentEvents: timeline,
 		Catalyst:     catalystEvent,
 	})
 	if err != nil {
@@ -342,15 +379,18 @@ func (tm *TurnManager) buildToolRegistry(thinkSpace spaces.ThinkSpace) []llm.Too
 	return tools
 }
 
-func (tm *TurnManager) handleTransition(ctx context.Context, thread *chat.Thread, spaceID, chatID, targetDomain string, hasInitialized bool, ui UserInterface) error {
+func (tm *TurnManager) handleTransition(ctx context.Context, chatSession *thinkgraph.Chat, spaceID, chatID, targetDomain string, hasInitialized bool, ui UserInterface) error {
 	targetSpace, exists := tm.registry.GetDomain(targetDomain)
 	if !exists {
 		ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Error:** Domain '%s' does not exist in registry. Transition aborted.\n", targetDomain))
 		return fmt.Errorf("invalid transition target: %s", targetDomain)
 	}
 
+	svc := tm.workspaceManager.GetService(spaceID)
+	chatDir := filepath.Join(svc.WorkspaceRoot(), spaceID, "chats", chatSession.ID)
+
 	if !hasInitialized {
-		if initErr := targetSpace.Initialize(ctx, thread.Dir); initErr != nil {
+		if initErr := targetSpace.Initialize(ctx, chatDir); initErr != nil {
 			return fmt.Errorf("failed to initialize domain %s: %w", targetDomain, initErr)
 		}
 	}
@@ -362,7 +402,6 @@ func (tm *TurnManager) handleTransition(ctx context.Context, thread *chat.Thread
 		}
 	})
 
-	svc := tm.workspaceManager.GetService(spaceID)
-	svc.LogDigest(ctx, thread, fmt.Sprintf("Workspace transitioned to %s domain.", targetDomain), []string{"system"}, false)
+	svc.LogDigest(ctx, chatSession, fmt.Sprintf("Workspace transitioned to %s domain.", targetDomain), []string{"system"}, false)
 	return nil
 }

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/chat"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -107,11 +107,11 @@ func setupServiceTest(t *testing.T) (*workspace.Service, *mockChatEngine, string
 	mockEngine := &mockChatEngine{}
 	workspaceRoot := t.TempDir()
 
-	bus := chat.NewEventBus()
+	bus := thinkgraph.NewEventBus()
 	// Must attach subscriber to physically write to disk for LoadEvents to work
-	bus.Subscribe(chat.NewLedgerSubscriber())
+	bus.Subscribe(thinkgraph.NewLedgerSubscriber(10, workspaceRoot))
 
-	svc := workspace.NewService(logger, mockEngine, workspaceRoot, bus)
+	svc := workspace.NewService(logger, mockEngine, workspaceRoot, bus, nil)
 	return svc, mockEngine, workspaceRoot
 }
 
@@ -119,7 +119,7 @@ func TestService_StartThread(t *testing.T) {
 	svc, mockEngine, _ := setupServiceTest(t)
 	ctx := context.Background()
 
-	thread, err := svc.StartThread(ctx, "test-thread")
+	thread, err := svc.InitializeChat(ctx, "test-space", "test-thread")
 	if err != nil {
 		t.Fatalf("StartThread failed: %v", err)
 	}
@@ -131,17 +131,13 @@ func TestService_StartThread(t *testing.T) {
 	if thread.ID != "test-thread" {
 		t.Errorf("Expected thread ID 'test-thread', got '%s'", thread.ID)
 	}
-
-	if _, err := os.Stat(thread.LedgerPath); os.IsNotExist(err) {
-		t.Errorf("Expected ledger file to be created at %s", thread.LedgerPath)
-	}
 }
 
 func TestService_ProposeAndResolveCandidate(t *testing.T) {
 	svc, mockEngine, _ := setupServiceTest(t)
 	ctx := context.Background()
 
-	thread, _ := svc.StartThread(ctx, "test-thread")
+	thread, _ := svc.InitializeChat(ctx, "test-space", "test-thread")
 
 	files := map[string][]byte{
 		"main.go": []byte("package main"),
@@ -187,7 +183,7 @@ func TestService_Receipts(t *testing.T) {
 	svc, _, _ := setupServiceTest(t)
 	ctx := context.Background()
 
-	thread, _ := svc.StartThread(ctx, "receipt-thread")
+	thread, _ := svc.InitializeChat(ctx, "test-space", "receipt-thread")
 
 	receipt := workspace.FlowReceipt{
 		FlowID:    "flow-999",
@@ -229,7 +225,7 @@ func TestService_LedgerTags(t *testing.T) {
 	svc, _, _ := setupServiceTest(t)
 	ctx := context.Background()
 
-	thread, _ := svc.StartThread(ctx, "tag-thread")
+	thread, _ := svc.InitializeChat(ctx, "test-space", "tag-thread")
 
 	tags := []string{"ui", "frontend"}
 	if err := svc.LogProposal(ctx, thread, "cand-123", "Added UI", tags); err != nil {

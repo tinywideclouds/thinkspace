@@ -1,4 +1,4 @@
-package chat
+package thinkgraph
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 )
 
 type AssemblyRequest struct {
-	Manifest     *ThreadManifest
+	Manifest     *ChatManifest
 	RecentEvents []Event
 	Catalyst     *Event // The explicit triggering event (usually a user prompt) that initiated the current assembly request.
 }
