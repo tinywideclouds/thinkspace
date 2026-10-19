@@ -2,6 +2,7 @@ package session
 
 import (
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
 type ManagerPayload struct {
@@ -28,6 +29,7 @@ type TurnContext struct {
 	StickyDigests       []string
 	RecentHistory       []string
 	FileContexts        []FileContext
+	Focus               thinkgraph.AttentionFocus // <-- Added
 }
 
 type FileContext struct {

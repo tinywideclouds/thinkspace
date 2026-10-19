@@ -26,9 +26,12 @@ files:
   - libs/llm/ui/chat/src/lib/chat-flow-card/chat-flow-card.component.ts
   - libs/llm/ui/chat/src/lib/chat-header/chat-header.component.spec.ts
   - libs/llm/ui/chat/src/lib/chat-header/chat-header.component.ts
-  - libs/llm/ui/chat/src/lib/pipes/markdown.pipe.ts
   - libs/llm/ui/chat/src/lib/context-inspector/context-inspector.component.spec.ts
   - libs/llm/ui/chat/src/lib/context-inspector/context-inspector.component.ts
   - libs/llm/ui/chat/src/lib/chat-transition-prompt/chat-transition-prompt.component.spec.ts
   - libs/llm/ui/chat/src/lib/chat-transition-prompt/chat-transition-prompt.component.ts
+  - libs/llm/ui/chat/src/lib/markdown/markdown.component.html
+  - libs/llm/ui/chat/src/lib/markdown/markdown.component.scss
+  - libs/llm/ui/chat/src/lib/markdown/markdown.component.spec.ts
+  - libs/llm/ui/chat/src/lib/markdown/markdown.component.ts
 last_context: llm_ui_04.md

@@ -13,7 +13,7 @@ type ConfigHeader struct {
 }
 
 type ParsedConfig struct {
-	Spaces map[string]spaces.ThinkSpaceConfig
+	Spaces map[string]spaces.ThinkStateConfig
 	Flows  map[string]yaml.Node
 	Core   map[string]yaml.Node
 }
@@ -25,7 +25,7 @@ func ParseConfigBytes(data []byte) (*ParsedConfig, error) {
 	}
 
 	result := &ParsedConfig{
-		Spaces: make(map[string]spaces.ThinkSpaceConfig),
+		Spaces: make(map[string]spaces.ThinkStateConfig),
 		Flows:  make(map[string]yaml.Node),
 		Core:   make(map[string]yaml.Node),
 	}
@@ -44,7 +44,7 @@ func ParseConfigBytes(data []byte) (*ParsedConfig, error) {
 			result.Core[id] = node
 
 		case "space", "": // Default to space for backward compatibility
-			var cfg spaces.ThinkSpaceConfig
+			var cfg spaces.ThinkStateConfig
 			if err := node.Decode(&cfg); err != nil {
 				return nil, fmt.Errorf("failed to parse space '%s': %w", id, err)
 			}

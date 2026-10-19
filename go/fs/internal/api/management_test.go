@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,9 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
+	"github.com/tinywideclouds.com/thinkspace/internal/db"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -21,8 +26,11 @@ func setupManagementAPI(t *testing.T) (*http.ServeMux, *workspace.ServiceManager
 
 	factory := func(repoRoot string) workspace.ChatEngine { return nil }
 
-	// Passing nil for the GraphRepository
-	manager := workspace.NewServiceManager(logger, baseRoot, factory, nil)
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graphDB, _ := db.NewBadgerGraph(opts)
+	t.Cleanup(func() { graphDB.Close() })
+
+	manager := workspace.NewServiceManager(logger, baseRoot, factory, graphDB)
 
 	registry := config.NewRegistry()
 	appCfg := workspace.AppConfig{SupportedDomains: []string{"golang"}}
@@ -68,7 +76,6 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 	registry := config.NewRegistry()
 	_ = registry.LoadDirectory(configsDir)
 
-	// Passing nil for the GraphRepository
 	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return nil }, nil)
 	appCfg := workspace.AppConfig{SupportedDomains: []string{"golang"}}
 
@@ -130,5 +137,40 @@ func TestManagementAPI_CreateAndListChats(t *testing.T) {
 
 	if rrList.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", rrList.Code)
+	}
+}
+
+func TestManagementAPI_GetEvents(t *testing.T) {
+	mux, manager := setupManagementAPI(t)
+	spaceID := "sandbox"
+	chatID := "chat-1"
+
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+
+	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "First test event")
+	event1.Timestamp = time.Now()
+
+	if err := manager.GraphStore().AppendEvent(context.Background(), chat, event1); err != nil {
+		t.Fatalf("Failed to seed event in GraphDB: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceID+"/chats/"+chatID+"/events?ids="+event1.ID.String(), nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rr.Code)
+	}
+
+	var events []thinkgraph.Event
+	if err := json.NewDecoder(rr.Body).Decode(&events); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected exactly 1 event, got %d", len(events))
+	}
+	if events[0].ID != event1.ID {
+		t.Errorf("Expected event ID %s, got %s", event1.ID, events[0].ID)
 	}
 }

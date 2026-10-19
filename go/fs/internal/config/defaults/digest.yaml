@@ -1,4 +1,5 @@
 digest:
+  version: 1
   type: "core"
   name: "Digest Manager"
   manual_prompt: |

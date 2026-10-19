@@ -1,4 +1,5 @@
 golang:
+  version: 1
   type: "space"
   name: "golang"
   system_prompt: |
@@ -21,6 +22,9 @@ golang:
     turn_seconds: 300
     agent_seconds: 60
     verify_seconds: 15
+    
+  memory:
+    focus_depth: 2 # Narrow focus for strict coding
 
   roles:
     manager:

@@ -1,4 +1,5 @@
 fanout:
+  version: 1
   type: "flow"
   name: "Parallel FanOut"
   description: "Delegate a specific coding task to parallel sub-agents."

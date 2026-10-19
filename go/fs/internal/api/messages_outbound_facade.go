@@ -11,7 +11,7 @@ import (
 	"uuid"
 )
 
-func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests map[uuid.UUID]thinkgraph.DigestMeta) ([]byte, error) {
+func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests map[uuid.UUID]thinkgraph.DigestMeta, focus thinkgraph.AttentionFocus) ([]byte, error) {
 	var pbEvents []*pb.LedgerEvent
 	for _, e := range recentEvents {
 		pbEvents = append(pbEvents, &pb.LedgerEvent{
@@ -32,11 +32,18 @@ func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests map[uuid.UUID]t
 		}
 	}
 
+	pbFocus := &pb.AttentionFocusPayload{
+		PrimaryFocus:   focus.PrimaryFocus,
+		RelatedContext: focus.RelatedContext,
+		DormantLenses:  focus.DormantLenses,
+	}
+
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_SyncHistory{
 			SyncHistory: &pb.SyncHistoryPayload{
 				RecentEvents: pbEvents,
 				Digests:      pbDigests,
+				Focus:        pbFocus,
 			},
 		},
 	}
@@ -152,6 +159,12 @@ func MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
 		})
 	}
 
+	pbFocus := &pb.AttentionFocusPayload{
+		PrimaryFocus:   ctxData.Focus.PrimaryFocus,
+		RelatedContext: ctxData.Focus.RelatedContext,
+		DormantLenses:  ctxData.Focus.DormantLenses,
+	}
+
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_PreviewContext{
 			PreviewContext: &pb.PreviewContextPayload{
@@ -162,6 +175,7 @@ func MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
 				StickyDigests:       ctxData.StickyDigests,
 				RecentHistory:       ctxData.RecentHistory,
 				FileContexts:        fileContexts,
+				Focus:               pbFocus,
 			},
 		},
 	}

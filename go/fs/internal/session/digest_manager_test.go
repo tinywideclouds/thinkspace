@@ -81,7 +81,11 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 	cfg := session.DigestConfig{BackgroundPrompt: "Context: {{.TargetWindow}}"}
 	manager := session.NewDigestManager(logger, client, cfg)
 
-	targetWindow := []thinkgraph.Event{thinkgraph.NewEvent(thinkgraph.EventPrompt, "Build auth")}
+	// Create specific events to test the UUID serialization into frontmatter
+	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Build auth")
+	ev2 := thinkgraph.NewEvent(thinkgraph.EventModel, "Sure thing")
+	targetWindow := []thinkgraph.Event{ev1, ev2}
+
 	count, err := manager.CreateBackgroundDigest(context.Background(), svc, chatSession, targetWindow, nil, false, "test-model", "Persona")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -102,7 +106,19 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 		t.Fatalf("failed to read digest file: %v", err)
 	}
 
-	if !strings.Contains(string(content), "Added login") {
-		t.Errorf("expected content match in markdown file, got:\n%s", string(content))
+	contentStr := string(content)
+	if !strings.Contains(contentStr, "Added login") {
+		t.Errorf("expected content match in markdown file, got:\n%s", contentStr)
+	}
+
+	// Verify the linkage data is properly serialized to the markdown frontmatter
+	if !strings.Contains(contentStr, "summarizes: [") {
+		t.Errorf("expected summarizes array in frontmatter, got:\n%s", contentStr)
+	}
+	if !strings.Contains(contentStr, ev1.ID.String()) {
+		t.Errorf("expected frontmatter to contain event ID %s", ev1.ID.String())
+	}
+	if !strings.Contains(contentStr, ev2.ID.String()) {
+		t.Errorf("expected frontmatter to contain event ID %s", ev2.ID.String())
 	}
 }

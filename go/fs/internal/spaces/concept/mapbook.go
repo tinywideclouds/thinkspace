@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,8 +23,8 @@ type Frontmatter struct {
 	Tags     []string `yaml:"tags"`
 }
 
-func (m *ConceptMapbook) GenerateLayers(ctx context.Context, workspaceRoot string) (map[assembler.MapbookLayer]string, error) {
-	layers := make(map[assembler.MapbookLayer]string)
+func (m *ConceptMapbook) GenerateLayers(ctx context.Context, workspaceRoot string) (map[spaces.MapbookLayer]string, error) {
+	layers := make(map[spaces.MapbookLayer]string)
 
 	var tocBuilder strings.Builder
 	tocBuilder.WriteString("Table of Contents:\n")
@@ -72,7 +72,7 @@ func (m *ConceptMapbook) GenerateLayers(ctx context.Context, workspaceRoot strin
 	})
 
 	if err == nil {
-		layers[assembler.LayerStructural] = tocBuilder.String()
+		layers[spaces.LayerStructural] = tocBuilder.String()
 	}
 
 	var indexBuilder strings.Builder
@@ -84,7 +84,7 @@ func (m *ConceptMapbook) GenerateLayers(ctx context.Context, workspaceRoot strin
 			indexBuilder.WriteString(fmt.Sprintf("#%s -> %s\n", tag, strings.Join(files, ", ")))
 		}
 	}
-	layers[assembler.LayerConceptual] = indexBuilder.String()
+	layers[spaces.LayerConceptual] = indexBuilder.String()
 
 	return layers, nil
 }

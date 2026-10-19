@@ -10,3 +10,8 @@ This library contains the generated TypeScript bindings for the ThinkSpace Proto
 ## Rules
 * **DO NOT** write manual business logic in this library.
 * **DO NOT** modify the generated `.ts` files manually. Always use the `buf generate` pipeline to update the schemas.
+
+### CMD
+```
+npx buf generate
+```

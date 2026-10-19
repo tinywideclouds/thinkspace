@@ -23,6 +23,12 @@ export interface FileContextMetaData {
   tokenCount: number;
 }
 
+export interface DomainAttentionFocus {
+  primaryFocus: string[];
+  relatedContext: string[];
+  dormantLenses: string[];
+}
+
 export interface DomainPreviewContext {
   spaceId: string;
   chatId: string;
@@ -30,6 +36,7 @@ export interface DomainPreviewContext {
   stickyDigests: string[];
   recentHistory: string[];
   fileContexts: FileContextMetaData[];
+  focus: DomainAttentionFocus;
 }
 
 export interface DomainTelemetryEvent {
@@ -49,7 +56,7 @@ export type DomainEvent =
   | { type: 'request_review'; branch: string }
   | { type: 'request_transition'; targetDomain: string; reasoning: string }
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
-  | { type: 'sync_history'; recentEvents: DomainLedgerEvent[]; digests: Record<string, DomainDigestMeta> }
+  | { type: 'sync_history'; recentEvents: DomainLedgerEvent[]; digests: Record<string, DomainDigestMeta>; focus: DomainAttentionFocus }
   | { type: 'preview_context'; context: DomainPreviewContext }
   | { type: 'agent_stream'; agentId: number; text: string }
   | DomainTelemetryEvent;

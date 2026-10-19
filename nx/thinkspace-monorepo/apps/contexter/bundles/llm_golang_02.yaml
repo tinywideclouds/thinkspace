@@ -48,14 +48,6 @@ files:
   - ../../go/fs/internal/config/defaults/fanout.yaml
   - ../../go/fs/internal/config/defaults/golang.yaml
   - ../../go/fs/internal/config/defaults/skeleton.yaml
-  - ../../go/fs/internal/chat/bus_test.go
-  - ../../go/fs/internal/chat/bus.go
-  - ../../go/fs/internal/chat/event_test.go
-  - ../../go/fs/internal/chat/event.go
-  - ../../go/fs/internal/chat/manifest.go
-  - ../../go/fs/internal/chat/models.go
-  - ../../go/fs/internal/chat/playback_test.go
-  - ../../go/fs/internal/chat/playback.go
   - ../../go/fs/internal/session/turn_manager_test.go
   - ../../go/fs/internal/session/turn_manager.go
   - ../../go/fs/internal/session/flows/config.go
@@ -75,8 +67,6 @@ files:
   - ../../go/fs/internal/assembler/workbench_test.go
   - ../../go/fs/internal/spaces/config_test.go
   - ../../go/fs/docs/context_fusion.md
-  - ../../go/fs/internal/chat/assembler_test.go
-  - ../../go/fs/internal/chat/assembler.go
   - ../../go/fs/internal/gitfs/implementation.md
   - ../../go/fs/internal/spaces/golang/patcher_test.go
   - ../../go/fs/internal/spaces/golang/patcher.go
@@ -117,4 +107,19 @@ files:
   - ../../go/fs/internal/api/messages_inbound_facade_test.go
   - ../../go/fs/internal/api/messages_outbound_facade_test.go
   - ../../go/fs/internal/telemetry/usage.go
+  - ../../go/fs/internal/thinkgraph/assembler_test.go
+  - ../../go/fs/internal/thinkgraph/assembler.go
+  - ../../go/fs/internal/thinkgraph/bus_test.go
+  - ../../go/fs/internal/thinkgraph/bus.go
+  - ../../go/fs/internal/thinkgraph/digest_subscriber_test.go
+  - ../../go/fs/internal/thinkgraph/event_test.go
+  - ../../go/fs/internal/thinkgraph/event.go
+  - ../../go/fs/internal/thinkgraph/ledger_manifest.go
+  - ../../go/fs/internal/thinkgraph/manifest.go
+  - ../../go/fs/internal/thinkgraph/models.go
+  - ../../go/fs/internal/thinkgraph/playback_test.go
+  - ../../go/fs/internal/thinkgraph/playback.go
+  - ../../go/fs/internal/db/badger.go
+  - ../../go/fs/internal/thinkgraph/file_ledger.go
+  - ../../go/fs/internal/thinkgraph/store.go
 last_context: llm_golang_49.md

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
@@ -79,7 +78,7 @@ type feMockThinkSpace struct {
 }
 
 func (m *feMockThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
-func (m *feMockThinkSpace) Config() spaces.ThinkSpaceConfig                        { return spaces.ThinkSpaceConfig{} }
+func (m *feMockThinkSpace) Config() spaces.ThinkStateConfig                        { return spaces.ThinkStateConfig{} }
 func (m *feMockThinkSpace) Tools() []llm.ToolDef                                   { return nil }
 func (m *feMockThinkSpace) Patcher() workspace.Patcher                             { return nil }
 func (m *feMockThinkSpace) Verifier() spaces.Verifier                              { return m }
@@ -92,9 +91,12 @@ func (m *feMockThinkSpace) Verify(ctx context.Context, sandbox workspace.Candida
 	m.verifyCalls++
 	return nil
 }
-func (m *feMockThinkSpace) Mapbook() assembler.Mapbook { return m }
-func (m *feMockThinkSpace) GenerateLayers(ctx context.Context, root string) (map[assembler.MapbookLayer]string, error) {
-	return map[assembler.MapbookLayer]string{assembler.LayerStructural: "Mock Tree"}, nil
+func (m *feMockThinkSpace) Mapbook() spaces.Mapbook { return m }
+func (m *feMockThinkSpace) GenerateLayers(ctx context.Context, root string) (map[spaces.MapbookLayer]string, error) {
+	return map[spaces.MapbookLayer]string{spaces.LayerStructural: "Mock Tree"}, nil
+}
+func (m *feMockThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus, workspaceRoot string) error {
+	return nil
 }
 
 type feMockEmitter struct {

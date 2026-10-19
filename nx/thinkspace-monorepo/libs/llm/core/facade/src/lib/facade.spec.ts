@@ -40,7 +40,36 @@ describe('LlmFacade', () => {
       });
     });
 
-    it('should map a preview context event correctly', () => {
+    it('should map a sync history event with focus correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'syncHistory',
+          value: {
+            recentEvents: [],
+            digests: {},
+            focus: {
+              primaryFocus: ['architecture'],
+              relatedContext: ['auth'],
+              dormantLenses: ['database']
+            }
+          }
+        }
+      });
+
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'sync_history',
+        recentEvents: [],
+        digests: {},
+        focus: {
+          primaryFocus: ['architecture'],
+          relatedContext: ['auth'],
+          dormantLenses: ['database']
+        }
+      });
+    });
+
+    it('should map a preview context event with focus correctly', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'previewContext',
@@ -51,7 +80,12 @@ describe('LlmFacade', () => {
             stickyDigests: ['Sticky memory'],
             fileContexts: [
               { path: 'src/main.go', level: 'structural', tokenCount: 100 }
-            ]
+            ],
+            focus: {
+              primaryFocus: ['golang'],
+              relatedContext: [],
+              dormantLenses: []
+            }
           }
         }
       });
@@ -67,7 +101,12 @@ describe('LlmFacade', () => {
           recentHistory: [],
           fileContexts: [
             { path: 'src/main.go', level: 'structural', tokenCount: 100 }
-          ]
+          ],
+          focus: {
+            primaryFocus: ['golang'],
+            relatedContext: [],
+            dormantLenses: []
+          }
         }
       });
     });

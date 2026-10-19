@@ -1,0 +1,30 @@
+<div class="flex flex-col h-full bg-white border-l border-gray-200 font-sans">
+  <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+    <span class="text-xs font-bold uppercase tracking-wider text-gray-600">🛠️ Materialized Workbench</span>
+    <span class="text-[11px] text-gray-500">{{ items().length }} files loaded</span>
+  </div>
+
+  <div class="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+    @for (file of items(); track file.path) {
+      <div class="px-3 py-2.5 border border-gray-200 rounded-md bg-white flex justify-between items-center transition-colors duration-200 hover:border-blue-400 cursor-pointer" 
+           (click)="fileSelected.emit(file.path)">
+        <span class="font-mono text-xs text-gray-800">{{ file.path }}</span>
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase"
+                [ngClass]="{
+                  'bg-blue-50 text-blue-700': file.level === 'injected',
+                  'bg-purple-100 text-purple-700': file.level === 'structural',
+                  'bg-yellow-100 text-yellow-600': file.level === 'skeleton'
+                }">
+            {{ file.level }}
+          </span>
+          <span class="text-[11px] text-gray-500 font-mono">~{{ file.tokenCount }}t</span>
+        </div>
+      </div>
+    } @empty {
+      <div class="text-gray-400 text-xs italic text-center mt-6">
+        No files currently placed on the desk.
+      </div>
+    }
+  </div>
+</div>

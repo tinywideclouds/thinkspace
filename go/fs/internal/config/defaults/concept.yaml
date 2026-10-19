@@ -1,4 +1,5 @@
 concept:
+  version: 1
   type: "space"
   name: "concept"
   system_prompt: |

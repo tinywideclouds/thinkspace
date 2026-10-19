@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// ThinkSpaceConfig represents the root YAML configuration for a domain space.
-type ThinkSpaceConfig struct {
+// ThinkStateConfig represents the root YAML configuration for a domain space.
+type ThinkStateConfig struct {
 	Type         string          `yaml:"type"`
 	Name         string          `yaml:"name"`
 	SystemPrompt string          `yaml:"system_prompt"`
@@ -79,9 +79,10 @@ type MemoryConfig struct {
 	TriggerThreshold int `yaml:"trigger_threshold"`
 	MaxVolatile      int `yaml:"max_volatile"`
 	ActiveBuffer     int `yaml:"active_buffer"`
+	FocusDepth       int `yaml:"focus_depth"` // Controls the semantic aperture
 }
 
-func (c *ThinkSpaceConfig) ApplyDefaults() {
+func (c *ThinkStateConfig) ApplyDefaults() {
 	if c.Timeouts.TurnSeconds == 0 {
 		c.Timeouts.TurnSeconds = 300
 	}
@@ -100,9 +101,12 @@ func (c *ThinkSpaceConfig) ApplyDefaults() {
 	if c.Memory.ActiveBuffer == 0 {
 		c.Memory.ActiveBuffer = 6
 	}
+	if c.Memory.FocusDepth == 0 {
+		c.Memory.FocusDepth = 3
+	}
 }
 
-func (c ThinkSpaceConfig) ManagerSystemPrompt() string {
+func (c ThinkStateConfig) ManagerSystemPrompt() string {
 	var parts []string
 	if c.SystemPrompt != "" {
 		parts = append(parts, c.SystemPrompt)
@@ -113,7 +117,7 @@ func (c ThinkSpaceConfig) ManagerSystemPrompt() string {
 	return strings.Join(parts, "\n\n")
 }
 
-func (c ThinkSpaceConfig) WorkerSystemPrompt() string {
+func (c ThinkStateConfig) WorkerSystemPrompt() string {
 	var parts []string
 	if c.SystemPrompt != "" {
 		parts = append(parts, c.SystemPrompt)
@@ -124,14 +128,14 @@ func (c ThinkSpaceConfig) WorkerSystemPrompt() string {
 	return strings.Join(parts, "\n\n")
 }
 
-func (c ThinkSpaceConfig) TurnTimeout() time.Duration {
+func (c ThinkStateConfig) TurnTimeout() time.Duration {
 	return time.Duration(c.Timeouts.TurnSeconds) * time.Second
 }
 
-func (c ThinkSpaceConfig) AgentTimeout() time.Duration {
+func (c ThinkStateConfig) AgentTimeout() time.Duration {
 	return time.Duration(c.Timeouts.AgentSeconds) * time.Second
 }
 
-func (c ThinkSpaceConfig) VerifyTimeout() time.Duration {
+func (c ThinkStateConfig) VerifyTimeout() time.Duration {
 	return time.Duration(c.Timeouts.VerifySeconds) * time.Second
 }

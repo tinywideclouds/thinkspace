@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"text/template"
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
@@ -88,7 +89,7 @@ func (m *DigestManager) CreateManualDigest(
 		return fmt.Errorf("manual digest generation returned empty string")
 	}
 
-	return svc.LogDigest(ctx, chatSession, summary, tags, true)
+	return svc.LogDigest(ctx, chatSession, summary, tags, true, nil)
 }
 
 type generatedDigest struct {
@@ -119,8 +120,10 @@ func (m *DigestManager) CreateBackgroundDigest(
 	m.logger.InfoContext(ctx, "Creating background context digest", "events", len(targetWindow), "forced", force)
 
 	var targetSb strings.Builder
+	var targetIDs []uuid.UUID
 	for _, ev := range targetWindow {
 		targetSb.WriteString(fmt.Sprintf("[%s]: %s\n", ev.Type, ev.Content))
+		targetIDs = append(targetIDs, ev.ID)
 	}
 
 	var bufferSb strings.Builder
@@ -185,7 +188,7 @@ func (m *DigestManager) CreateBackgroundDigest(
 		if d.Summary == "" {
 			continue
 		}
-		if err := svc.LogDigest(ctx, chatSession, d.Summary, d.Tags, false); err != nil {
+		if err := svc.LogDigest(ctx, chatSession, d.Summary, d.Tags, false, targetIDs); err != nil {
 			return count, fmt.Errorf("failed to log background digest: %w", err)
 		}
 		count++

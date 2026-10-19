@@ -48,7 +48,12 @@ export class LlmFacade {
           digests: Object.entries(protocolBufferEvent.payload.value.digests).reduce((acc, [key, val]) => {
             acc[key] = { id: val.id, summary: val.summary, isSticky: val.isSticky };
             return acc;
-          }, {} as Record<string, DomainDigestMeta>)
+          }, {} as Record<string, DomainDigestMeta>),
+          focus: {
+            primaryFocus: protocolBufferEvent.payload.value.focus?.primaryFocus || [],
+            relatedContext: protocolBufferEvent.payload.value.focus?.relatedContext || [],
+            dormantLenses: protocolBufferEvent.payload.value.focus?.dormantLenses || []
+          }
         };
 
       case 'previewContext':
@@ -64,7 +69,12 @@ export class LlmFacade {
               path: fc.path,
               level: fc.level,
               tokenCount: fc.tokenCount
-            }))
+            })),
+            focus: {
+              primaryFocus: protocolBufferEvent.payload.value.focus?.primaryFocus || [],
+              relatedContext: protocolBufferEvent.payload.value.focus?.relatedContext || [],
+              dormantLenses: protocolBufferEvent.payload.value.focus?.dormantLenses || []
+            }
           }
         };
 

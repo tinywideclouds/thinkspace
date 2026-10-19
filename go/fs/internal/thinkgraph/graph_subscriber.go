@@ -36,6 +36,7 @@ func (g *GraphSubscriber) OnEvent(ctx context.Context, c *Chat, event Event) err
 			ID:               event.ID,
 			Summary:          event.Content,
 			IsSticky:         isSticky,
+			Tags:             event.Tags,
 			SummarizedEvents: summarized,
 		}
 

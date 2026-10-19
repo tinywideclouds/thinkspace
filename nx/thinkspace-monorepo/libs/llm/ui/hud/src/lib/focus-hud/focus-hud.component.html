@@ -1,0 +1,45 @@
+<div class="flex items-center gap-3 px-4 py-2 bg-gray-50 border-b border-gray-200 font-sans text-xs overflow-x-auto">
+  <span class="font-bold text-gray-500 uppercase tracking-wider text-[10px] whitespace-nowrap">Cognitive Focus</span>
+  
+  @if (focus()?.primaryFocus?.length) {
+    <div class="flex items-center gap-1.5">
+      @for (tag of focus()?.primaryFocus; track tag) {
+        <span 
+          class="px-2 py-0.5 rounded-full font-semibold font-mono cursor-pointer transition-all duration-200 select-none bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+          [class.scale-105]="activeHoverTag() === tag"
+          [class.shadow-md]="activeHoverTag() === tag"
+          [class.shadow-blue-500/40]="activeHoverTag() === tag"
+          (mouseenter)="tagHovered.emit(tag)"
+          (mouseleave)="tagHovered.emit(null)"
+          (click)="tagClicked.emit(tag)">
+          #{{ tag }}
+        </span>
+      }
+    </div>
+  }
+
+  @if (focus()?.primaryFocus?.length && focus()?.relatedContext?.length) {
+    <div class="w-px h-4 bg-gray-300"></div>
+  }
+
+  @if (focus()?.relatedContext?.length) {
+    <div class="flex items-center gap-1.5">
+      @for (tag of focus()?.relatedContext; track tag) {
+        <span 
+          class="px-2 py-0.5 rounded-full font-semibold font-mono cursor-pointer transition-all duration-200 select-none bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200"
+          [class.scale-105]="activeHoverTag() === tag"
+          [class.shadow-md]="activeHoverTag() === tag"
+          [class.shadow-blue-500/40]="activeHoverTag() === tag"
+          (mouseenter)="tagHovered.emit(tag)"
+          (mouseleave)="tagHovered.emit(null)"
+          (click)="tagClicked.emit(tag)">
+          #{{ tag }}
+        </span>
+      }
+    </div>
+  }
+
+  @if (!focus()?.primaryFocus?.length && !focus()?.relatedContext?.length) {
+    <span class="text-gray-400 italic">No active tags in focus</span>
+  }
+</div>

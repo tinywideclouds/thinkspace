@@ -1,7 +1,16 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { TransportService } from '@org/llm-core-transport';
-import { LlmFacade, DomainEvent, DomainDelegationStrategy, DomainPreviewContext, DomainTelemetryEvent } from '@org/llm-core-facade';
+import { 
+  LlmFacade, 
+  DomainEvent, 
+  DomainDelegationStrategy, 
+  DomainPreviewContext, 
+  DomainTelemetryEvent,
+  DomainAttentionFocus,
+  DomainDigestMeta,
+  FileContextMetaData
+} from '@org/llm-core-facade';
 import { firstValueFrom } from 'rxjs';
 import { WorkspaceStateService } from './workspace-state.service';
 
@@ -67,6 +76,11 @@ export class ChatStateService {
   public activeAgents = signal<Map<number, AgentState>>(new Map());
   public flowStates = signal<Map<string, FlowState>>(new Map());
   
+  // Cognitive State Signals (Glass Box)
+  public activeFocus = signal<DomainAttentionFocus | null>(null);
+  public activeDigests = signal<Record<string, DomainDigestMeta>>({});
+  public activeWorkbench = signal<FileContextMetaData[]>([]);
+
   public pendingStrategy = signal<boolean>(false);
   public pendingReviewBranch = signal<string | null>(null);
   public pendingContextReview = signal<DomainPreviewContext | null>(null);
@@ -105,6 +119,9 @@ export class ChatStateService {
     this.systemLogs.set([]);
     this.activeAgents.set(new Map());
     this.flowStates.set(new Map());
+    this.activeFocus.set(null);
+    this.activeDigests.set({});
+    this.activeWorkbench.set([]);
     this.pendingStrategy.set(false);
     this.pendingReviewBranch.set(null);
     this.pendingContextReview.set(null);
@@ -135,8 +152,11 @@ export class ChatStateService {
 
     this.executeTurnAction();
     
-    this.appendCoreChat('user', text);
-    this.appendCoreChat('system', 'Manager Thinking...');
+    // Only append the optimistic UI elements if the user actually typed something
+    if (text.trim() !== '') {
+      this.appendCoreChat('user', text);
+      this.appendCoreChat('system', 'Manager Thinking...');
+    }
     
     const protocolBufferEvent = LlmFacade.createSubmitPrompt(text, spaceId, chatId);
     this.transportService.send(protocolBufferEvent);
@@ -224,7 +244,25 @@ export class ChatStateService {
 
   private handleEvent(event: DomainEvent): void {
     switch (event.type) {
+      case 'sync_history': {
+          this.activeFocus.set(event.focus);
+          this.activeDigests.set(event.digests);
+          
+          // Reconstruct timeline. (Filtering down to just conversational prompts and model responses)
+          const timeline: ChatItem[] = event.recentEvents
+            .filter(e => e.type === 'prompt' || e.type === 'model')
+            .map(e => ({
+              id: e.id,
+              source: e.type === 'model' ? 'model' : 'user',
+              content: e.content
+            }));
+          this.coreChat.set(timeline);
+          break;
+        }
       case 'preview_context':
+        this.activeFocus.set(event.context.focus);
+        this.activeWorkbench.set(event.context.fileContexts);
+
         if (this.autoApproveContext()) {
           const filePaths = event.context.fileContexts.map(f => f.path);
           const historyIndices = event.context.recentHistory.map((_, i) => i);
@@ -233,18 +271,23 @@ export class ChatStateService {
           this.pendingContextReview.set(event.context);
         }
         break;
+
       case 'chat_stream':
         this.appendToLastModelMessage(event.text);
         break;
+
       case 'telemetry_event':
         this.handleTelemetryEvent(event);
         break;
+
       case 'request_strategy':
         this.pendingStrategy.set(event.active);
         break;
+
       case 'request_review':
         this.pendingReviewBranch.set(event.branch);
         break;
+
       case 'request_transition':
         this.pendingTransition.set({ targetDomain: event.targetDomain, reasoning: event.reasoning });
         break;

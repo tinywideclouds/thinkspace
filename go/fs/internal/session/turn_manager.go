@@ -19,13 +19,13 @@ import (
 )
 
 type TurnManager struct {
-	logger           *slog.Logger
-	registry         *config.Registry
-	workspaceManager *workspace.ServiceManager
-	modelClient      llm.ModelClient
-	chatAssembler    *thinkgraph.Assembler
-	fanOutFlow       flows.Flow
-	digestManager    *DigestManager
+	logger            *slog.Logger
+	registry          *config.Registry
+	workspaceManager  *workspace.ServiceManager
+	modelClient       llm.ModelClient
+	trajectoryBuilder *thinkgraph.TrajectoryBuilder
+	fanOutFlow        flows.Flow
+	digestManager     *DigestManager
 }
 
 func NewTurnManager(
@@ -37,13 +37,13 @@ func NewTurnManager(
 	digestManager *DigestManager,
 ) *TurnManager {
 	return &TurnManager{
-		logger:           logger,
-		registry:         registry,
-		workspaceManager: workspaceManager,
-		modelClient:      modelClient,
-		chatAssembler:    thinkgraph.NewAssembler(),
-		fanOutFlow:       fanOutFlow,
-		digestManager:    digestManager,
+		logger:            logger,
+		registry:          registry,
+		workspaceManager:  workspaceManager,
+		modelClient:       modelClient,
+		trajectoryBuilder: thinkgraph.NewTrajectoryBuilder(),
+		fanOutFlow:        fanOutFlow,
+		digestManager:     digestManager,
 	}
 }
 
@@ -59,24 +59,9 @@ func (tm *TurnManager) LoadChatState(ctx context.Context, spaceID, chatID string
 		return nil, nil, nil, fmt.Errorf("graph store is not initialized")
 	}
 
-	timeline, err := graphStore.GetTimeline(ctx, chatSession)
+	_, manifest, graphData, err := tm.assembleBundle(ctx, chatSession, workspaceService, nil, "")
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to fetch timeline: %w", err)
-	}
-
-	stickyDigests, err := graphStore.GetStickyDigests(ctx, chatSession)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to fetch sticky digests: %w", err)
-	}
-
-	graphData := &thinkgraph.GraphData{
-		Timeline: timeline,
-		Digests:  stickyDigests,
-	}
-
-	manifest := thinkgraph.NewChatManifest(chatID)
-	for _, digest := range stickyDigests {
-		manifest.Digests[digest.ID] = digest
+		return nil, nil, nil, err
 	}
 
 	return chatSession, graphData, manifest, nil
@@ -108,14 +93,28 @@ func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText 
 			return err
 		}
 
-		thinkSpace, ok := tm.registry.GetDomain(activeDomain)
+		thinkState, ok := tm.registry.GetDomain(activeDomain)
 		if !ok {
 			return fmt.Errorf("domain configuration not found: %s", activeDomain)
 		}
 
-		bundle, manifest, err := tm.assembleBundle(ctx, chatSession, workspaceService, thinkSpace, activeDomain)
+		bundle, manifest, graphData, err := tm.assembleBundle(ctx, chatSession, workspaceService, thinkState, activeDomain)
 		if err != nil {
 			return err
+		}
+
+		var recentHistory []string
+		for _, mem := range bundle.Trajectory.WorkingMemory {
+			recentHistory = append(recentHistory, fmt.Sprintf("[%s] %s", mem.Role, mem.Content))
+		}
+
+		var fileContexts []FileContext
+		for _, item := range bundle.Workbench {
+			fileContexts = append(fileContexts, FileContext{
+				Path:       item.Path,
+				Level:      "injected",
+				TokenCount: item.TokenCount,
+			})
 		}
 
 		turnCtx := TurnContext{
@@ -123,6 +122,9 @@ func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText 
 			ChatID:              chatID,
 			ManagerSystemPrompt: bundle.Rules.Persona,
 			StickyDigests:       bundle.Trajectory.LongTermMemory,
+			RecentHistory:       recentHistory,
+			FileContexts:        fileContexts,
+			Focus:               graphData.Focus,
 		}
 
 		decision := ui.ReviewContext(turnCtx)
@@ -159,17 +161,17 @@ func (tm *TurnManager) RunTurn(ctx context.Context, spaceID, chatID, promptText 
 			bundle.Trajectory.WorkingMemory = prunedMemory
 		}
 
-		availableTools := tm.buildToolRegistry(thinkSpace)
+		availableTools := tm.buildToolRegistry(thinkState)
 
-		executor := llm.NewSubAgentExecutor(tm.logger, tm.modelClient, thinkSpace.Config().Roles.Worker.Model, thinkSpace.Patcher())
+		executor := llm.NewSubAgentExecutor(tm.logger, tm.modelClient, thinkState.Config().Roles.Worker.Model, thinkState.Patcher())
 		spaceConfig, _ := tm.registry.GetConfig(activeDomain)
 
 		flowEngine := NewFlowEngine(tm.logger, workspaceService, executor, emitter)
 		coordinator := NewCoordinator(tm.logger, workspaceService, tm.modelClient, emitter, flowEngine, tm.fanOutFlow, tm.digestManager, spaceID, spaceConfig.WorkerSystemPrompt())
 
-		err = coordinator.RunAgentLoop(ctx, chatSession, manifest, thinkSpace, bundle, ui, availableTools)
+		err = coordinator.RunAgentLoop(ctx, chatSession, manifest, thinkState, bundle, ui, availableTools)
 
-		tm.evaluateAndTriggerDigestion(ctx, spaceID, chatSession, thinkSpace.Config().Memory)
+		tm.evaluateAndTriggerDigestion(ctx, spaceID, chatSession, thinkState.Config().Memory)
 
 		if transitionReq, isTransition := err.(*TransitionRequest); isTransition {
 			if rebootErr := tm.handleTransition(ctx, chatSession, spaceID, chatID, transitionReq.TargetDomain, hasInitialized, ui); rebootErr != nil {
@@ -250,11 +252,11 @@ func (tm *TurnManager) evaluateAndTriggerDigestion(ctx context.Context, spaceID 
 		defer cancel()
 
 		spaceState, _ := tm.workspaceManager.GetSpaceState(spaceID)
-		thinkSpace, _ := tm.registry.GetDomain(spaceState.Domain)
+		thinkState, _ := tm.registry.GetDomain(spaceState.Domain)
 		workspaceService := tm.workspaceManager.GetService(spaceID)
 
-		workerModel := thinkSpace.Config().Roles.Worker.Model
-		workerPersona := thinkSpace.Config().WorkerSystemPrompt()
+		workerModel := thinkState.Config().Roles.Worker.Model
+		workerPersona := thinkState.Config().WorkerSystemPrompt()
 
 		count, digestErr := tm.digestManager.CreateBackgroundDigest(
 			bgCtx,
@@ -302,30 +304,103 @@ func (tm *TurnManager) resolveDomain(spaceID, chatID string) (activeDomain strin
 	return activeDomain, hasInitialized, nil
 }
 
-func (tm *TurnManager) assembleBundle(ctx context.Context, chatSession *thinkgraph.Chat, service *workspace.Service, thinkSpace spaces.ThinkSpace, activeDomain string) (cognition.ThinkBundle, *thinkgraph.ChatManifest, error) {
+func (tm *TurnManager) assembleBundle(ctx context.Context, chatSession *thinkgraph.Chat, service *workspace.Service, thinkState spaces.ThinkState, activeDomain string) (cognition.ThinkBundle, *thinkgraph.ChatManifest, *thinkgraph.GraphData, error) {
 	graphStore := tm.workspaceManager.GraphStore()
 	if graphStore == nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("graph store is not initialized")
+		return cognition.ThinkBundle{}, nil, nil, fmt.Errorf("graph store is not initialized")
 	}
 
-	timeline, err := graphStore.GetTimeline(ctx, chatSession)
-	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching timeline: %w", err)
+	chatMeta, _ := tm.workspaceManager.GetChatMeta(chatSession.SpaceID, chatSession.ID)
+
+	var volatileEvents []thinkgraph.Event
+	primaryTags := make(map[string]bool)
+	relatedTags := make(map[string]bool)
+
+	focusDepth := 3 // Safe fallback
+	if thinkState != nil {
+		focusDepth = thinkState.Config().Memory.FocusDepth
 	}
 
-	stickyDigests, err := graphStore.GetStickyDigests(ctx, chatSession)
+	err := graphStore.WalkTimelineReverse(ctx, chatSession, func(ev thinkgraph.Event) bool {
+		if ev.ID == chatMeta.DigestionHorizon {
+			return false // Horizon hit. Stop reading.
+		}
+
+		volatileEvents = append(volatileEvents, ev)
+
+		if len(volatileEvents) <= focusDepth {
+			for _, tag := range ev.Tags {
+				primaryTags[tag] = true
+			}
+		} else {
+			for _, tag := range ev.Tags {
+				relatedTags[tag] = true
+			}
+		}
+
+		if len(volatileEvents) >= 50 {
+			return false
+		}
+		return true
+	})
 	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching digests: %w", err)
+		return cognition.ThinkBundle{}, nil, nil, fmt.Errorf("walking timeline: %w", err)
+	}
+
+	for i, j := 0, len(volatileEvents)-1; i < j; i, j = i+1, j-1 {
+		volatileEvents[i], volatileEvents[j] = volatileEvents[j], volatileEvents[i]
+	}
+
+	allStickyDigests, err := graphStore.GetStickyDigests(ctx, chatSession)
+	if err != nil {
+		return cognition.ThinkBundle{}, nil, nil, fmt.Errorf("fetching digests: %w", err)
+	}
+
+	var activeDigests []thinkgraph.DigestMeta
+	for _, d := range allStickyDigests {
+		if len(d.Tags) == 0 {
+			activeDigests = append(activeDigests, d)
+			continue
+		}
+
+		isActive := false
+		for _, tag := range d.Tags {
+			if primaryTags[tag] || relatedTags[tag] {
+				isActive = true
+				break
+			}
+		}
+		if isActive {
+			activeDigests = append(activeDigests, d)
+		}
 	}
 
 	manifest := thinkgraph.NewChatManifest(chatSession.ID)
-	for _, digest := range stickyDigests {
+	for _, digest := range activeDigests {
 		manifest.Digests[digest.ID] = digest
 	}
 
-	rawMapbook, err := thinkSpace.Mapbook().GenerateLayers(ctx, service.WorkspaceRoot())
+	var dormantLenses []string
+
+	focus := thinkgraph.AttentionFocus{
+		PrimaryFocus:   mapKeys(primaryTags),
+		RelatedContext: mapKeys(relatedTags),
+		DormantLenses:  dormantLenses,
+	}
+
+	graphData := &thinkgraph.GraphData{
+		Timeline: volatileEvents,
+		Digests:  activeDigests,
+		Focus:    focus,
+	}
+
+	if thinkState == nil {
+		return cognition.ThinkBundle{}, manifest, graphData, nil
+	}
+
+	rawMapbook, err := thinkState.Mapbook().GenerateLayers(ctx, service.WorkspaceRoot())
 	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("generating mapbook layers: %w", err)
+		return cognition.ThinkBundle{}, nil, nil, fmt.Errorf("generating mapbook layers: %w", err)
 	}
 
 	stringMaps := make(map[string]string)
@@ -334,22 +409,23 @@ func (tm *TurnManager) assembleBundle(ctx context.Context, chatSession *thinkgra
 	}
 
 	var catalystEvent *thinkgraph.Event
-	if len(timeline) > 0 {
-		last := timeline[len(timeline)-1]
+	if len(volatileEvents) > 0 {
+		last := volatileEvents[len(volatileEvents)-1]
 		catalystEvent = &last
-		timeline = timeline[:len(timeline)-1]
+		volatileEvents = volatileEvents[:len(volatileEvents)-1]
 	}
 
-	trajectory, err := tm.chatAssembler.Build(ctx, thinkgraph.AssemblyRequest{
+	trajectory, err := tm.trajectoryBuilder.Build(ctx, thinkgraph.TrajectoryRequest{
 		Manifest:     manifest,
-		RecentEvents: timeline,
+		RecentEvents: volatileEvents,
 		Catalyst:     catalystEvent,
+		Focus:        focus,
 	})
 	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("assembling trajectory: %w", err)
+		return cognition.ThinkBundle{}, nil, nil, fmt.Errorf("assembling trajectory: %w", err)
 	}
 
-	systemPrompt := thinkSpace.Config().ManagerSystemPrompt()
+	systemPrompt := thinkState.Config().ManagerSystemPrompt()
 	systemPrompt += fmt.Sprintf("\n\n[GLOBAL SYSTEM RULE]: You are currently operating in the '%s' domain. You may use the `transition_workspace` tool to switch to a different domain if the user's task requires different tools or a different directory structure.", activeDomain)
 
 	bundle := cognition.ThinkBundle{
@@ -359,11 +435,15 @@ func (tm *TurnManager) assembleBundle(ctx context.Context, chatSession *thinkgra
 		Workbench:  []cognition.WorkbenchItem{},
 	}
 
-	return bundle, manifest, nil
+	if err := thinkState.EnrichBundle(ctx, &bundle, focus, service.WorkspaceRoot()); err != nil {
+		return cognition.ThinkBundle{}, nil, nil, fmt.Errorf("enriching bundle: %w", err)
+	}
+
+	return bundle, manifest, graphData, nil
 }
 
-func (tm *TurnManager) buildToolRegistry(thinkSpace spaces.ThinkSpace) []llm.ToolDef {
-	tools := thinkSpace.Tools()
+func (tm *TurnManager) buildToolRegistry(thinkState spaces.ThinkState) []llm.ToolDef {
+	tools := thinkState.Tools()
 	tools = append(tools, llm.ToolDef{
 		Name:        "transition_workspace",
 		Description: "Transition the workspace to a different domain environment (e.g., from 'concept' to 'golang') to access new tools and physical scaffolding.",
@@ -402,6 +482,14 @@ func (tm *TurnManager) handleTransition(ctx context.Context, chatSession *thinkg
 		}
 	})
 
-	svc.LogDigest(ctx, chatSession, fmt.Sprintf("Workspace transitioned to %s domain.", targetDomain), []string{"system"}, false)
+	svc.LogDigest(ctx, chatSession, fmt.Sprintf("Workspace transitioned to %s domain.", targetDomain), []string{"system"}, false, nil)
 	return nil
+}
+
+func mapKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

@@ -33,6 +33,13 @@ message DigestMeta {
   bool is_sticky = 3;
 }
 
+// Add this under Shared Types
+message AttentionFocusPayload {
+  repeated string primary_focus = 1;
+  repeated string related_context = 2;
+  repeated string dormant_lenses = 3;
+}
+
 // --- Outbound Payloads (Server -> Client) ---
 message ChatStreamPayload {
   string text = 1;
@@ -46,6 +53,7 @@ message AgentStreamPayload {
 message SyncHistoryPayload {
   repeated LedgerEvent recent_events = 1;
   map<string, DigestMeta> digests = 2;
+  AttentionFocusPayload focus = 3;
 }
 
 // Core System Payloads
@@ -74,6 +82,7 @@ message PreviewContextPayload {
   repeated string sticky_digests = 5;
   repeated string recent_history = 6;
   repeated FileContextMetaData file_contexts = 7;
+  AttentionFocusPayload focus = 8;
 }
 
 message FileContextMetaData {

@@ -139,20 +139,27 @@ func TestMarshalSyncHistory(t *testing.T) {
 		},
 	}
 
-	data, err := api.MarshalSyncHistory(events, digests)
+	focus := thinkgraph.AttentionFocus{
+		PrimaryFocus: []string{"test-focus"},
+	}
+
+	data, err := api.MarshalSyncHistory(events, digests, focus)
 	if err != nil {
 		t.Fatalf("failed to marshal sync history: %v", err)
 	}
 
-	jsonStr := string(data)
-	if !strings.Contains(jsonStr, "syncHistory") {
-		t.Errorf("expected wrapper 'syncHistory', got: %s", jsonStr)
+	json := string(data)
+	if !strings.Contains(json, "syncHistory") {
+		t.Errorf("expected wrapper 'syncHistory', got: %s", json)
 	}
-	if !strings.Contains(jsonStr, evID.String()) {
+	if !strings.Contains(json, evID.String()) {
 		t.Errorf("expected event ID %s to be present", evID.String())
 	}
-	if !strings.Contains(jsonStr, "Sticky context") {
+	if !strings.Contains(json, "Sticky context") {
 		t.Errorf("expected digest summary to be present")
+	}
+	if !strings.Contains(json, "test-focus") {
+		t.Errorf("expected focus to be present")
 	}
 }
 

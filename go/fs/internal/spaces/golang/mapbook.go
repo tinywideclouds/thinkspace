@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 )
 
 type GolangMapbook struct{}
@@ -16,8 +16,8 @@ func NewGolangMapbook() *GolangMapbook {
 	return &GolangMapbook{}
 }
 
-func (g *GolangMapbook) GenerateLayers(ctx context.Context, workspaceRoot string) (map[assembler.MapbookLayer]string, error) {
-	layers := make(map[assembler.MapbookLayer]string)
+func (g *GolangMapbook) GenerateLayers(ctx context.Context, workspaceRoot string) (map[spaces.MapbookLayer]string, error) {
+	layers := make(map[spaces.MapbookLayer]string)
 
 	var treeBuilder strings.Builder
 	treeBuilder.WriteString("Directory Tree:\n")
@@ -37,10 +37,10 @@ func (g *GolangMapbook) GenerateLayers(ctx context.Context, workspaceRoot string
 	})
 
 	if err == nil {
-		layers[assembler.LayerStructural] = treeBuilder.String()
+		layers[spaces.LayerStructural] = treeBuilder.String()
 	}
 
-	layers[assembler.LayerConceptual] = "Architecture Rules: Standard Go project layout. All Go code must reside in the src/ directory."
+	layers[spaces.LayerConceptual] = "Architecture Rules: Standard Go project layout. All Go code must reside in the src/ directory."
 
 	return layers, nil
 }

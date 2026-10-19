@@ -3,10 +3,12 @@ package thinkgraph
 import "uuid"
 
 // DigestMeta represents crystallized long-term memory.
+// IsSticky combined with Tags defines a Conditional Law. If Tags is empty, it is globally sticky.
 type DigestMeta struct {
 	ID               uuid.UUID   `json:"id"`
 	Summary          string      `json:"summary"`
 	IsSticky         bool        `json:"is_sticky"`
+	Tags             []string    `json:"tags,omitempty"`
 	SummarizedEvents []uuid.UUID `json:"summarized_events"` // Non-linear zoom linkage
 }
 

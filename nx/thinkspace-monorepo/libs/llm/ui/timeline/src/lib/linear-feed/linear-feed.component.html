@@ -1,0 +1,36 @@
+<div class="flex flex-col gap-4">
+  @for (item of feed(); track item.id) {
+    
+    @if (item.source === 'flow_card' && item.flowId) {
+      <div class="w-full">
+        <llm-chat-flow-card 
+          [flow]="flowStates().get(item.flowId)" 
+          [summary]="item.content"
+          (inspect)="inspectFlow.emit($event)">
+        </llm-chat-flow-card>
+      </div>
+    } 
+    
+    @else if (item.source === 'model' || item.source === 'system') {
+      <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 shadow-sm transition-all hover:shadow-md">
+        <strong class="block mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+          {{ item.source }}
+        </strong>
+        <div class="text-gray-800 text-sm leading-relaxed">
+          <llm-markdown [content]="item.content"></llm-markdown>
+        </div>
+      </div>
+    } 
+    
+    @else {
+      <div class="p-4 rounded-xl bg-blue-50 border border-blue-200 ml-8 shadow-sm">
+        <strong class="block mb-2 text-[11px] font-bold uppercase tracking-wider text-blue-700">
+          {{ item.source }}
+        </strong>
+        <div class="whitespace-pre-wrap text-sm text-blue-900">
+          {{ item.content }}
+        </div>
+      </div>
+    }
+  }
+</div>

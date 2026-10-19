@@ -30,8 +30,11 @@ type GraphRepository interface {
 
 	// Read Paths (The Hot Path)
 	GetTimeline(ctx context.Context, c *Chat) ([]Event, error)
+	WalkTimelineReverse(ctx context.Context, c *Chat, fn func(Event) bool) error
 	GetLenses(ctx context.Context, c *Chat, tag string) ([]Event, error)
 	GetStickyDigests(ctx context.Context, c *Chat) ([]DigestMeta, error)
+	GetDigests(ctx context.Context, c *Chat) ([]DigestMeta, error)
+	GetEvents(ctx context.Context, c *Chat, ids []string) ([]Event, error)
 }
 
 // Store unifies the File and DB brains, ensuring they stay in sync on writes.

@@ -1,45 +1,71 @@
-<div class="chat-layout">
+<div class="chat-layout flex h-screen w-full bg-white overflow-hidden font-sans">
   
-  <main class="chat-main">
-    <div class="chat-header">
-      <llm-chat-header
-        style="flex: 1; margin-right: 24px;"
-        [spaces]="workspaceState.spaces()"
-        [activeSpaceId]="workspaceState.activeSpaceId()"
-        [chats]="workspaceState.chats()"
-        [activeChatId]="workspaceState.activeChatId()"
-        (spaceSelected)="onSpaceSelected($event)"
-        (chatSelected)="onChatSelected($event)"
-        (newChatRequested)="onNewChatRequested()">
-      </llm-chat-header>
-      
-      <div class="connection-status" [class.connected]="chatState.connected()">
-        {{ chatState.connected() ? '🟢 Connected' : '🔴 Disconnected' }}
+  <!-- Left/Main Column: Chat & Topology -->
+  <main class="flex-1 flex flex-col min-w-0 border-r border-gray-200">
+    
+    <!-- Header Area -->
+    <div class="flex flex-col z-20 bg-white shadow-sm">
+      <div class="p-4 flex justify-between items-center border-b border-gray-100">
+        <llm-chat-header
+          class="flex-1 mr-6"
+          [spaces]="workspaceState.spaces()"
+          [activeSpaceId]="workspaceState.activeSpaceId()"
+          [chats]="workspaceState.chats()"
+          [activeChatId]="workspaceState.activeChatId()"
+          (spaceSelected)="onSpaceSelected($event)"
+          (chatSelected)="onChatSelected($event)"
+          (newChatRequested)="onNewChatRequested()">
+        </llm-chat-header>
+        
+        <div class="flex items-center gap-4">
+          <div class="flex bg-gray-100 p-1 rounded-lg">
+            <button 
+              (click)="viewMode.set('linear')"
+              class="px-4 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-all duration-200"
+              [ngClass]="viewMode() === 'linear' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+              Linear
+            </button>
+            <button 
+              (click)="viewMode.set('cognitive')"
+              class="px-4 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-all duration-200"
+              [ngClass]="viewMode() === 'cognitive' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+              Graph
+            </button>
+          </div>
+          <div class="text-[11px] font-bold uppercase tracking-wider" [class.text-green-600]="chatState.connected()" [class.text-red-500]="!chatState.connected()">
+            {{ chatState.connected() ? '🟢' : '🔴' }}
+          </div>
+        </div>
       </div>
-      
-      <!-- Developer Toggle for Auto-Approve -->
-      <label style="margin-left: 16px; font-size: 11px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
-        <input 
-          type="checkbox" 
-          [checked]="chatState.autoApproveContext()" 
-          (change)="chatState.autoApproveContext.set(!chatState.autoApproveContext())" 
-        />
-        Auto-Approve Context
-      </label>
+
+      <!-- Cognitive Focus HUD -->
+      <llm-focus-hud
+        [focus]="chatState.activeFocus()"
+        [activeHoverTag]="hoveredTag()"
+        (tagHovered)="hoveredTag.set($event)">
+      </llm-focus-hud>
     </div>
     
-    <div class="chat-scroll-area">
-      <llm-chat-feed 
-        [feed]="chatState.coreChat()" 
-        [flowStates]="chatState.flowStates()"
-        (inspectFlow)="chatState.inspectFlow($event)">
-      </llm-chat-feed>
+    <!-- Dynamic Workspace Area -->
+    <div class="flex-1 overflow-y-auto bg-gray-50 relative">
+      @if (viewMode() === 'linear') {
+        <div class="max-w-4xl mx-auto w-full p-6">
+          <llm-linear-feed></llm-linear-feed>
+        </div>
+      } @else {
+        <div class="w-full h-full">
+          <llm-cognitive-graph></llm-cognitive-graph>
+        </div>
+      }
+    </div>
 
-      <div class="prompt-area">
+    <!-- Input Footer -->
+    <div class="p-4 bg-white border-t border-gray-200 shrink-0 z-20">
+      <div class="max-w-4xl mx-auto w-full">
         @if (chatState.pendingContextReview(); as contextReview) {
           <llm-context-inspector
             [context]="contextReview"
-            (approve)="chatState.submitContextApproval(true)"
+            (approve)="chatState.submitContextApproval(true, $event.retainedFilePaths, $event.retainedHistoryIndices)"
             (reviewCancelled)="chatState.submitContextApproval(false)"
             (copyFull)="chatState.copyFullContextPreview($event)">
           </llm-context-inspector>
@@ -67,16 +93,28 @@
     </div>
   </main>
 
-  <aside class="chat-drawer">
-    <llm-flow-tracker 
-      [systemLogs]="chatState.systemLogs()"
-      [flows]="chatState.flowStates()"
-      [retainLogs]="chatState.retainLogs()"
-      (toggleRetainLogs)="chatState.retainLogs.set(!chatState.retainLogs())"
-      (manualClearLogs)="chatState.manualClearLogs()">
-    </llm-flow-tracker>
+  <!-- Right Column: Workbench & Flow Tracker -->
+  <aside class="w-80 flex flex-col shrink-0 bg-white z-30 relative shadow-[-4px_0_15px_rgba(0,0,0,0.03)]">
+    <!-- Top Half: Materialized Desk -->
+    <div class="h-1/2 min-h-[300px] border-b border-gray-200">
+      <llm-desk
+        [items]="chatState.activeWorkbench()">
+      </llm-desk>
+    </div>
+
+    <!-- Bottom Half: Flow Tracker -->
+    <div class="flex-1 overflow-hidden bg-gray-50">
+      <llm-flow-tracker 
+        [systemLogs]="chatState.systemLogs()"
+        [flows]="chatState.flowStates()"
+        [retainLogs]="chatState.retainLogs()"
+        (toggleRetainLogs)="chatState.retainLogs.set(!chatState.retainLogs())"
+        (manualClearLogs)="chatState.manualClearLogs()">
+      </llm-flow-tracker>
+    </div>
   </aside>
 
+  <!-- Modals -->
   @if (chatState.inspectedReceipt()) {
     <llm-flow-inspector 
       [receiptXml]="chatState.inspectedReceipt()!"

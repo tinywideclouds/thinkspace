@@ -1,9 +1,7 @@
 package workspace
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -42,6 +40,10 @@ func NewService(logger *slog.Logger, engine ChatEngine, workspaceRoot string, bu
 
 func (s *Service) WorkspaceRoot() string {
 	return s.workspaceRoot
+}
+
+func (s *Service) Graph() thinkgraph.GraphRepository {
+	return s.graph
 }
 
 func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*thinkgraph.Chat, error) {
@@ -175,111 +177,6 @@ func (s *Service) Checkpoint(ctx context.Context, c *thinkgraph.Chat, reason str
 	return sha, nil
 }
 
-func (s *Service) LoadEvents(ctx context.Context, c *thinkgraph.Chat) ([]thinkgraph.Event, error) {
-	var events []thinkgraph.Event
-
-	logsDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "logs")
-	entries, err := os.ReadDir(logsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return events, nil
-		}
-		return nil, fmt.Errorf("reading logs dir: %w", err)
-	}
-
-	var shards []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
-			shards = append(shards, e.Name())
-		}
-	}
-	sort.Strings(shards)
-
-	for _, shard := range shards {
-		file, err := os.Open(filepath.Join(logsDir, shard))
-		if err != nil {
-			continue
-		}
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-
-			var ev thinkgraph.Event
-			if err := json.Unmarshal(line, &ev); err != nil {
-				s.logger.WarnContext(ctx, "skipping malformed ledger entry", slog.String("error", err.Error()))
-				continue
-			}
-			events = append(events, ev)
-		}
-		file.Close()
-	}
-
-	return events, nil
-}
-
-func (s *Service) FetchEvents(ctx context.Context, c *thinkgraph.Chat, ids []string) ([]thinkgraph.Event, error) {
-	idMap := make(map[string]bool)
-	for _, id := range ids {
-		idMap[id] = true
-	}
-
-	var matchedEvents []thinkgraph.Event
-
-	logsDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "logs")
-	entries, err := os.ReadDir(logsDir)
-	if err != nil {
-		return nil, fmt.Errorf("reading logs dir: %w", err)
-	}
-
-	var shards []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
-			shards = append(shards, e.Name())
-		}
-	}
-	sort.Strings(shards)
-
-	for _, shard := range shards {
-		file, err := os.Open(filepath.Join(logsDir, shard))
-		if err != nil {
-			continue
-		}
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-
-			matchFound := false
-			for id := range idMap {
-				if strings.Contains(string(line), id) {
-					matchFound = true
-					break
-				}
-			}
-
-			if !matchFound {
-				continue
-			}
-
-			var ev thinkgraph.Event
-			if err := json.Unmarshal(line, &ev); err == nil && idMap[ev.ID.String()] {
-				matchedEvents = append(matchedEvents, ev)
-				delete(idMap, ev.ID.String())
-			}
-		}
-		file.Close()
-	}
-
-	return matchedEvents, nil
-}
-
 func (s *Service) LogUserPrompt(ctx context.Context, c *thinkgraph.Chat, content string) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventPrompt, content)
 	return s.bus.Publish(ctx, c, event)
@@ -398,7 +295,7 @@ func (s *Service) GetContextPreview(ctx context.Context, c *thinkgraph.Chat, pre
 	return os.ReadFile(path)
 }
 
-func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.Chat, summary string, tags []string, isSticky bool) error {
+func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.Chat, summary string, tags []string, isSticky bool, summarized []uuid.UUID) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventDigest, summary)
 	event.Tags = tags
 	isStickyStr := "false"
@@ -408,5 +305,14 @@ func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.Chat, summary str
 	event.Metadata = map[string]string{
 		"is_sticky": isStickyStr,
 	}
+
+	if len(summarized) > 0 {
+		var ids []string
+		for _, id := range summarized {
+			ids = append(ids, id.String())
+		}
+		event.Metadata["summarizes"] = strings.Join(ids, ",")
+	}
+
 	return s.bus.Publish(ctx, c, event)
 }

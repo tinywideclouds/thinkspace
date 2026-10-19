@@ -10,8 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
+	"uuid"
+
+	"github.com/dgraph-io/badger/v4"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/db"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
@@ -64,8 +68,8 @@ func (m *coordMockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, can
 
 type coordMockThinkSpace struct{}
 
-func (m *coordMockThinkSpace) Config() spaces.ThinkSpaceConfig {
-	cfg := spaces.ThinkSpaceConfig{
+func (m *coordMockThinkSpace) Config() spaces.ThinkStateConfig {
+	cfg := spaces.ThinkStateConfig{
 		Roles: spaces.RolesConfig{
 			Manager: spaces.ManagerConfig{Model: "test-manager"},
 			Worker:  spaces.WorkerConfig{Model: "test-worker"},
@@ -77,9 +81,12 @@ func (m *coordMockThinkSpace) Config() spaces.ThinkSpaceConfig {
 }
 func (m *coordMockThinkSpace) Tools() []llm.ToolDef                                   { return nil }
 func (m *coordMockThinkSpace) Verifier() spaces.Verifier                              { return nil }
-func (m *coordMockThinkSpace) Mapbook() assembler.Mapbook                             { return nil }
+func (m *coordMockThinkSpace) Mapbook() spaces.Mapbook                                { return nil }
 func (m *coordMockThinkSpace) Patcher() workspace.Patcher                             { return nil }
 func (m *coordMockThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
+func (m *coordMockThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus, workspaceRoot string) error {
+	return nil
+}
 
 type coordMockFlow struct {
 	executeCalled bool
@@ -187,8 +194,19 @@ func TestCoordinator_QueryLens(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 	bus := thinkgraph.NewEventBus()
-	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	defer graphDB.Close()
+
+	workspaceService := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, graphDB)
 	chatSession, _ := workspaceService.InitializeChat(ctx, "golang", "test-thread-lens")
+
+	ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Historical DB context!")
+	_ = graphDB.AppendEvent(ctx, chatSession, ev)
 
 	client := &coordMockModelClient{
 		responses: []llm.StreamChunk{
@@ -210,11 +228,13 @@ func TestCoordinator_QueryLens(t *testing.T) {
 	coordinator := session.NewCoordinator(logger, workspaceService, client, emitter, flowEngine, &coordMockFlow{}, digestManager, "golang", "")
 
 	manifest := thinkgraph.NewChatManifest(chatSession.ID)
+	manifest.Lenses["database"] = []uuid.UUID{ev.ID}
+
 	_ = coordinator.RunAgentLoop(ctx, chatSession, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{reviewToReturn: true}, nil)
 
 	foundLensLog := false
-	for _, ev := range emitter.events {
-		if ev.event.Type == "log" && ev.event.Message == "Manager invoked query_lens for tag: database" {
+	for _, e := range emitter.events {
+		if e.event.Type == "log" && e.event.Message == "Manager invoked query_lens for tag: database" {
 			foundLensLog = true
 		}
 	}
@@ -264,7 +284,6 @@ func TestCoordinator_CreateDigest(t *testing.T) {
 	manifest := thinkgraph.NewChatManifest(chatSession.ID)
 	_ = coordinator.RunAgentLoop(ctx, chatSession, manifest, &coordMockThinkSpace{}, cognition.ThinkBundle{}, &coordMockUI{reviewToReturn: true}, nil)
 
-	// In the new architecture, discrete digests are written to the `digests` directory.
 	digestsDir := filepath.Join(workspaceRoot, "golang", "chats", chatSession.ID, "ledger", "digests")
 	entries, err := os.ReadDir(digestsDir)
 	if err != nil || len(entries) == 0 {
@@ -276,12 +295,12 @@ func TestCoordinator_CreateDigest(t *testing.T) {
 		t.Fatalf("Failed to read digest file")
 	}
 
-	contentStr := string(content)
-	if !strings.Contains(contentStr, "Generated Manual Summary") {
-		t.Errorf("Expected digest body in markdown, got: %s", contentStr)
+	output := string(content)
+	if !strings.Contains(output, "Generated Manual Summary") {
+		t.Errorf("Expected digest body in markdown, got: %s", output)
 	}
-	if !strings.Contains(contentStr, "auth") {
-		t.Errorf("Expected 'auth' tag in markdown frontmatter, got: %s", contentStr)
+	if !strings.Contains(output, "auth") {
+		t.Errorf("Expected 'auth' tag in markdown frontmatter, got: %s", output)
 	}
 }
 

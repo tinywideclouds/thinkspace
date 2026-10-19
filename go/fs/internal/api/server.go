@@ -166,7 +166,7 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			_, graphData, manifest, err := s.turnManager.LoadChatState(ctx, payload.SpaceID, payload.ChatID)
 			if err == nil {
-				if syncData, err := MarshalSyncHistory(graphData.Timeline, manifest.Digests); err == nil {
+				if syncData, err := MarshalSyncHistory(graphData.Timeline, manifest.Digests, graphData.Focus); err == nil {
 					ui.SendSyncHistory(syncData)
 				}
 			}

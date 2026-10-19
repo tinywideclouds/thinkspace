@@ -1,0 +1,7 @@
+
+npx nx g @nx/angular:library --name=llm-ui-linear-feed --directory=libs/llm/ui/linear-feed --tags="scope:llm"
+
+nx g @nx/workspace:move --project=llm-ui-chat --destination=libs/llm/ui/core
+
+npx nx g @nx/angular:library --name=llm-ui-cognitive-graph --directory=libs/llm/ui/cognitive-graph --tags="scope:llm"
+

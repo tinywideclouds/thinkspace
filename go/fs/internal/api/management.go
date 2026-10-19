@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -27,6 +29,7 @@ func (api *ManagementAPI) RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/spaces", api.handleGetSpaces)
 	mux.HandleFunc("GET /api/spaces/{space_id}/chats", api.handleListChats)
 	mux.HandleFunc("POST /api/spaces/{space_id}/chats", api.handleCreateChat)
+	mux.HandleFunc("GET /api/spaces/{space_id}/chats/{chat_id}/events", api.handleGetEvents)
 }
 
 func (api *ManagementAPI) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -123,5 +126,35 @@ func (api *ManagementAPI) handleCreateChat(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(meta); err != nil {
 		http.Error(w, "Failed to encode chat meta", http.StatusInternalServerError)
+	}
+}
+
+func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request) {
+	spaceID := r.PathValue("space_id")
+	chatID := r.PathValue("chat_id")
+	idsParam := r.URL.Query().Get("ids")
+
+	if spaceID == "" || chatID == "" || idsParam == "" {
+		http.Error(w, "Missing space_id, chat_id, or ids parameter", http.StatusBadRequest)
+		return
+	}
+
+	if api.manager.GraphStore() == nil {
+		http.Error(w, "Graph database is not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	ids := strings.Split(idsParam, ",")
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+
+	events, err := api.manager.GraphStore().GetEvents(r.Context(), chat, ids)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(events); err != nil {
+		http.Error(w, "Failed to encode events", http.StatusInternalServerError)
 	}
 }

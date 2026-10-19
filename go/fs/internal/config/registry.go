@@ -16,16 +16,16 @@ import (
 
 type Registry struct {
 	mu      sync.RWMutex
-	domains map[string]spaces.ThinkSpace
-	configs map[string]spaces.ThinkSpaceConfig
+	domains map[string]spaces.ThinkState
+	configs map[string]spaces.ThinkStateConfig
 	flows   map[string]yaml.Node
 	core    map[string]yaml.Node
 }
 
 func NewRegistry() *Registry {
 	return &Registry{
-		domains: make(map[string]spaces.ThinkSpace),
-		configs: make(map[string]spaces.ThinkSpaceConfig),
+		domains: make(map[string]spaces.ThinkState),
+		configs: make(map[string]spaces.ThinkStateConfig),
 		flows:   make(map[string]yaml.Node),
 		core:    make(map[string]yaml.Node),
 	}
@@ -62,7 +62,7 @@ func (r *Registry) LoadFS(fsys fs.FS, dir string) error {
 
 		for k, v := range parsed.Spaces {
 			r.configs[k] = v
-			r.domains[k] = golang.NewGoThinkSpace(v)
+			r.domains[k] = golang.NewGoThinkState(v)
 		}
 		for k, v := range parsed.Flows {
 			r.flows[k] = v
@@ -74,14 +74,14 @@ func (r *Registry) LoadFS(fsys fs.FS, dir string) error {
 	return nil
 }
 
-func (r *Registry) GetDomain(id string) (spaces.ThinkSpace, bool) {
+func (r *Registry) GetDomain(id string) (spaces.ThinkState, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	domain, ok := r.domains[id]
 	return domain, ok
 }
 
-func (r *Registry) GetConfig(id string) (spaces.ThinkSpaceConfig, bool) {
+func (r *Registry) GetConfig(id string) (spaces.ThinkStateConfig, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	cfg, ok := r.configs[id]
@@ -108,12 +108,24 @@ func (r *Registry) DecodeCoreConfig(id string, dest any) error {
 	return node.Decode(dest)
 }
 
-func (r *Registry) GetAllConfigs() map[string]spaces.ThinkSpaceConfig {
+func (r *Registry) GetAllConfigs() map[string]spaces.ThinkStateConfig {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	res := make(map[string]spaces.ThinkSpaceConfig)
+	res := make(map[string]spaces.ThinkStateConfig)
 	for k, v := range r.configs {
 		res[k] = v
 	}
 	return res
+}
+
+func (r *Registry) RegisterDomain(id string, state spaces.ThinkState) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.domains[id] = state
+}
+
+func (r *Registry) RegisterConfig(id string, cfg spaces.ThinkStateConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.configs[id] = cfg
 }

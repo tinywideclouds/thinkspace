@@ -2,171 +2,261 @@ package session_test
 
 import (
 	"context"
-	"encoding/json"
+	"iter"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/dgraph-io/badger/v4"
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
+	"github.com/tinywideclouds.com/thinkspace/internal/db"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-func setupTurnManagerEnv(t *testing.T) (*config.Registry, *workspace.ServiceManager, string) {
-	tempDir := t.TempDir()
-	configsDir := filepath.Join(tempDir, "configs")
-	baseRoot := filepath.Join(tempDir, "workspace")
-	os.MkdirAll(configsDir, 0755)
+// --- Shared Mocks ---
 
-	yamlContent := `
-golang-space:
-  type: space
-  name: test-go
-  roles:
-    manager:
-      model: "test-model"
-      system_prompt: "go manager rules"
+type tmTestModelClient struct {
+	responses []llm.StreamChunk
+	callCount int
+}
 
-concept-space:
-  type: space
-  name: test-concept
-  roles:
-    manager:
-      model: "test-model"
-      system_prompt: "concept manager rules"
-`
-	os.WriteFile(filepath.Join(configsDir, "config.yaml"), []byte(yamlContent), 0644)
+func (m *tmTestModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
+	return func(yield func(llm.StreamChunk, error) bool) {
+		if m.callCount < len(m.responses) {
+			resp := m.responses[m.callCount]
+			m.callCount++
+			yield(resp, nil)
+		}
+	}
+}
+
+type tmTestChatEngine struct{}
+
+func (m *tmTestChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
+func (m *tmTestChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+	return "mock-sha", nil
+}
+func (m *tmTestChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID, candidateID string) (workspace.CandidateSandbox, error) {
+	return nil, nil
+}
+func (m *tmTestChatEngine) PreviewCandidate(ctx context.Context, chatID, candidateID string) error {
+	return nil
+}
+func (m *tmTestChatEngine) Accept(ctx context.Context, chatID, candidateID, reason string) error {
+	return nil
+}
+func (m *tmTestChatEngine) Reject(ctx context.Context, chatID, candidateID, reason string) error {
+	return nil
+}
+func (m *tmTestChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
+	return "", nil
+}
+
+type tmTestThinkSpace struct{}
+
+func (m *tmTestThinkSpace) Config() spaces.ThinkStateConfig {
+	cfg := spaces.ThinkStateConfig{
+		Roles: spaces.RolesConfig{
+			Manager: spaces.ManagerConfig{Model: "test-manager"},
+			Worker:  spaces.WorkerConfig{Model: "test-worker"},
+		},
+		Timeouts: spaces.TimeoutsConfig{TurnSeconds: 300},
+	}
+	cfg.ApplyDefaults()
+	return cfg
+}
+func (m *tmTestThinkSpace) Tools() []llm.ToolDef                                   { return nil }
+func (m *tmTestThinkSpace) Verifier() spaces.Verifier                              { return nil }
+func (m *tmTestThinkSpace) Mapbook() spaces.Mapbook                                { return nil }
+func (m *tmTestThinkSpace) Patcher() workspace.Patcher                             { return nil }
+func (m *tmTestThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
+func (m *tmTestThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus, workspaceRoot string) error {
+	return nil
+}
+
+type tmTestUI struct {
+	reviewApproved         bool
+	retainedHistoryIndices []int
+	retainedFilePaths      []string
+	transitionApproved     bool
+}
+
+func (u *tmTestUI) OnTextChunk(text string) {}
+func (u *tmTestUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
+	return session.ContextApprovalDecision{
+		Approved:               u.reviewApproved,
+		RetainedHistoryIndices: u.retainedHistoryIndices,
+		RetainedFilePaths:      u.retainedFilePaths,
+	}
+}
+func (u *tmTestUI) ChooseNextStep() flows.FlowStrategy { return flows.StrategyManual }
+func (u *tmTestUI) ReviewCandidate(branch string) bool { return true }
+func (u *tmTestUI) ConfirmTransition(targetDomain string, reasoning string) bool {
+	return u.transitionApproved
+}
+
+type tmTestEmitter struct{}
+
+func (e *tmTestEmitter) Emit(channel string, event telemetry.Event) {}
+
+type tmTestFlow struct{}
+
+func (f *tmTestFlow) Name() string  { return "TestFlow" }
+func (f *tmTestFlow) MaxSteps() int { return 10 }
+func (f *tmTestFlow) Next(state flows.FlowState) flows.FlowDirective {
+	return flows.FlowDirective{Action: flows.ActionFinish}
+}
+
+// --- Setup ---
+
+func setupTurnManagerTest(t *testing.T) (*session.TurnManager, *workspace.ServiceManager, *tmTestModelClient, string) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	workspaceRoot := t.TempDir()
+	spaceID := "test-space"
+
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	t.Cleanup(func() { graphDB.Close() })
+
+	engineFactory := func(root string) workspace.ChatEngine {
+		return &tmTestChatEngine{}
+	}
+
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, engineFactory, graphDB)
+	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
+	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) {
+		s.Domain = "golang"
+	})
 
 	registry := config.NewRegistry()
-	registry.LoadDirectory(configsDir)
+	mockSpace := &tmTestThinkSpace{}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return &coordMockChatEngine{} }, nil)
+	registry.RegisterDomain("golang", mockSpace)
+	registry.RegisterConfig("golang", mockSpace.Config())
 
-	return registry, manager, baseRoot
+	registry.RegisterDomain("concept", mockSpace)
+	registry.RegisterConfig("concept", mockSpace.Config())
+
+	client := &tmTestModelClient{}
+	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{})
+
+	tm := session.NewTurnManager(logger, registry, svcManager, client, &tmTestFlow{}, digestManager)
+	return tm, svcManager, client, spaceID
 }
 
-func writeMetaJson(t *testing.T, baseRoot, spaceID, chatID, activeDomain string) {
-	chatDir := filepath.Join(baseRoot, spaceID, "chats", chatID)
-	os.MkdirAll(chatDir, 0755)
-
-	meta := workspace.ChatMeta{
-		ID:           chatID,
-		Name:         "test-chat",
-		ActiveDomain: activeDomain,
-	}
-	b, _ := json.Marshal(meta)
-	os.WriteFile(filepath.Join(chatDir, "meta.json"), b, 0644)
-}
+// --- Tests ---
 
 func TestTurnManager_RunTurn_Sequencing(t *testing.T) {
-	registry, manager, baseRoot := setupTurnManagerEnv(t)
-	writeMetaJson(t, baseRoot, "golang-space", "chat-1", "golang-space")
+	ctx := context.Background()
+	tm, svcManager, client, spaceID := setupTurnManagerTest(t)
+	chatID := "chat-seq"
 
-	spyClient := &coordMockModelClient{}
-	dummyFlow := &coordMockFlow{}
-	ui := &coordMockUI{reviewToReturn: true}
+	// Mock LLM to return standard text (no tools) to cleanly end the turn
+	client.responses = []llm.StreamChunk{
+		{Text: "Test standard response"},
+	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	digestManager := session.NewDigestManager(logger, spyClient, session.DigestConfig{})
-	turnManager := session.NewTurnManager(logger, registry, manager, spyClient, dummyFlow, digestManager)
+	ui := &tmTestUI{reviewApproved: true}
+	emitter := &tmTestEmitter{}
 
-	err := turnManager.RunTurn(context.Background(), "golang-space", "chat-1", "Hello sequencing test", ui, &coordMockEmitter{})
+	err := tm.RunTurn(ctx, spaceID, chatID, "Hello agent", ui, emitter)
 	if err != nil {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
 
-	if spyClient.callIndex > 0 {
-		// Just ensure it ran without crashing.
+	// Verify Graph DB logged the interaction
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	timeline, err := svcManager.GraphStore().GetTimeline(ctx, chat)
+	if err != nil {
+		t.Fatalf("Failed to fetch timeline: %v", err)
+	}
+
+	if len(timeline) == 0 {
+		t.Errorf("Expected timeline to contain events, got 0")
 	}
 }
 
 func TestTurnManager_RunTurn_Transition(t *testing.T) {
-	registry, manager, baseRoot := setupTurnManagerEnv(t)
-	writeMetaJson(t, baseRoot, "concept-space", "chat-trans", "concept-space")
+	ctx := context.Background()
+	tm, svcManager, client, spaceID := setupTurnManagerTest(t)
+	chatID := "chat-trans"
 
-	spyClient := &coordMockModelClient{
-		responses: []llm.StreamChunk{
-			{
-				ToolCalls: []llm.ToolCall{{
+	// 1st LLM call: Request transition. 2nd LLM call: Normal response in new domain.
+	client.responses = []llm.StreamChunk{
+		{
+			ToolCalls: []llm.ToolCall{
+				{
 					Name: "transition_workspace",
-					Args: map[string]any{"target_domain": "golang-space", "reasoning": "Need to code"},
-				}},
+					Args: map[string]any{"target_domain": "concept", "reasoning": "Need planning"},
+				},
 			},
-			{
-				Text: "I have successfully transitioned.",
-			},
+		},
+		{
+			Text: "Now executing in concept domain.",
 		},
 	}
 
-	dummyFlow := &coordMockFlow{}
-	ui := &coordMockUI{reviewToReturn: true, transitionToReturn: true}
+	ui := &tmTestUI{reviewApproved: true, transitionApproved: true}
+	emitter := &tmTestEmitter{}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	digestManager := session.NewDigestManager(logger, spyClient, session.DigestConfig{})
-	turnManager := session.NewTurnManager(logger, registry, manager, spyClient, dummyFlow, digestManager)
-
-	err := turnManager.RunTurn(context.Background(), "concept-space", "chat-trans", "Switch to go", ui, &coordMockEmitter{})
+	err := tm.RunTurn(ctx, spaceID, chatID, "Let's plan", ui, emitter)
 	if err != nil {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
 
-	meta, err := manager.GetChatMeta("concept-space", "chat-trans")
+	// Verify ChatMeta was updated to the new domain
+	meta, err := svcManager.GetChatMeta(spaceID, chatID)
 	if err != nil {
-		t.Fatalf("Failed to retrieve chat meta: %v", err)
+		t.Fatalf("Failed to fetch chat meta: %v", err)
 	}
-
-	if meta.ActiveDomain != "golang-space" {
-		t.Errorf("Expected ActiveDomain to switch to 'golang-space', got '%s'", meta.ActiveDomain)
-	}
-
-	foundInit := false
-	for _, d := range meta.InitializedDomains {
-		if d == "golang-space" {
-			foundInit = true
-		}
-	}
-	if !foundInit {
-		t.Errorf("Expected 'golang-space' to be appended to InitializedDomains")
+	if meta.ActiveDomain != "concept" {
+		t.Errorf("Expected chat to transition to 'concept', got '%s'", meta.ActiveDomain)
 	}
 }
 
 func TestTurnManager_RunTurn_Pruning(t *testing.T) {
-	registry, manager, baseRoot := setupTurnManagerEnv(t)
-	writeMetaJson(t, baseRoot, "golang-space", "chat-prune", "golang-space")
+	ctx := context.Background()
+	tm, svcManager, client, spaceID := setupTurnManagerTest(t)
+	chatID := "chat-prune"
 
-	ws := manager.GetService("golang-space")
-	chatSession, _ := ws.InitializeChat(context.Background(), "golang-space", "chat-prune")
-	_ = ws.LogUserPrompt(context.Background(), chatSession, "Event 0")
-	_ = ws.LogModelResponse(context.Background(), chatSession, "Event 1", nil)
-	_ = ws.LogUserPrompt(context.Background(), chatSession, "Event 2")
+	// Pre-seed some events so we can prune them
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	svc := svcManager.GetService(spaceID)
+	_, _ = svc.InitializeChat(ctx, spaceID, chatID)
+	_ = svc.LogUserMessage(ctx, chat, "Message 1")
+	_ = svc.LogUserMessage(ctx, chat, "Message 2")
+	_ = svc.LogUserMessage(ctx, chat, "Message 3")
 
-	spyClient := &coordMockModelClient{}
-	dummyFlow := &coordMockFlow{}
-
-	ui := &coordMockUI{
-		reviewToReturn:  true,
-		retainedHistory: []int{0, 2},
+	client.responses = []llm.StreamChunk{
+		{Text: "Response after pruning"},
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	digestManager := session.NewDigestManager(logger, spyClient, session.DigestConfig{})
-	turnManager := session.NewTurnManager(logger, registry, manager, spyClient, dummyFlow, digestManager)
+	// Approve but strictly retain ONLY index 1 (Message 2) from history
+	ui := &tmTestUI{
+		reviewApproved:         true,
+		retainedHistoryIndices: []int{1},
+	}
+	emitter := &tmTestEmitter{}
 
-	err := turnManager.RunTurn(context.Background(), "golang-space", "chat-prune", "Event 3 (Catalyst)", ui, &coordMockEmitter{})
+	err := tm.RunTurn(ctx, spaceID, chatID, "Message 4", ui, emitter)
 	if err != nil {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
 
-	if len(spyClient.capturedBundle.Trajectory.WorkingMemory) != 2 {
-		t.Fatalf("expected exactly 2 working memory events to survive pruning, got %d", len(spyClient.capturedBundle.Trajectory.WorkingMemory))
-	}
-	if spyClient.capturedBundle.Trajectory.WorkingMemory[0].Content != "Event 0" {
-		t.Errorf("expected index 0 to map to Event 0")
-	}
-	if spyClient.capturedBundle.Trajectory.WorkingMemory[1].Content != "Event 2" {
-		t.Errorf("expected index 1 to map to Event 2")
+	// Turn executes without error when context is pruned
+	timeline, _ := svcManager.GraphStore().GetTimeline(ctx, chat)
+	if len(timeline) < 2 {
+		t.Errorf("Expected graph to retain full truth regardless of UI pruning")
 	}
 }

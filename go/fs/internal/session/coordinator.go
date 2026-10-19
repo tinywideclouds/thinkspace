@@ -58,7 +58,7 @@ func (c *Coordinator) RunAgentLoop(
 	ctx context.Context,
 	chatSession *thinkgraph.Chat,
 	manifest *thinkgraph.ChatManifest,
-	thinkSpace spaces.ThinkSpace,
+	thinkSpace spaces.ThinkState,
 	bundle cognition.ThinkBundle,
 	userInterface UserInterface,
 	availableTools []llm.ToolDef,
@@ -148,7 +148,7 @@ func (c *Coordinator) RunAgentLoop(
 	return err
 }
 
-func (c *Coordinator) handleToolCall(ctx context.Context, chatSession *thinkgraph.Chat, manifest *thinkgraph.ChatManifest, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+func (c *Coordinator) handleToolCall(ctx context.Context, chatSession *thinkgraph.Chat, manifest *thinkgraph.ChatManifest, thinkSpace spaces.ThinkState, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
 	switch call.Name {
 	case "transition_workspace":
 		return c.handleTransitionWorkspace(ctx, bundle, ui, call)
@@ -225,12 +225,17 @@ func (c *Coordinator) handleQueryLens(ctx context.Context, chatSession *thinkgra
 	if len(idsToFetch) == 0 {
 		toolResponse.WriteString("No historical events found for this tag.\n")
 	} else {
-		events, err := c.workspaceService.FetchEvents(ctx, chatSession, idsToFetch)
-		if err != nil {
-			toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", err))
+		graph := c.workspaceService.Graph()
+		if graph == nil {
+			toolResponse.WriteString("Error: Graph database is not initialized.\n")
 		} else {
-			for _, ev := range events {
-				toolResponse.WriteString(fmt.Sprintf("- [%s] %s: %s\n", ev.Timestamp.Format("15:04:05"), ev.Type, ev.Content))
+			events, err := graph.GetEvents(ctx, chatSession, idsToFetch)
+			if err != nil {
+				toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", err))
+			} else {
+				for _, ev := range events {
+					toolResponse.WriteString(fmt.Sprintf("- [%s] %s: %s\n", ev.Timestamp.Format("15:04:05"), ev.Type, ev.Content))
+				}
 			}
 		}
 	}
@@ -242,7 +247,7 @@ func (c *Coordinator) handleQueryLens(ctx context.Context, chatSession *thinkgra
 	return false, nil
 }
 
-func (c *Coordinator) handleCreateDigest(ctx context.Context, chatSession *thinkgraph.Chat, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, call llm.ToolCall) (bool, error) {
+func (c *Coordinator) handleCreateDigest(ctx context.Context, chatSession *thinkgraph.Chat, thinkSpace spaces.ThinkState, bundle *cognition.ThinkBundle, call llm.ToolCall) (bool, error) {
 	instruction, _ := call.Args["instruction"].(string)
 	topicName, _ := call.Args["topic_name"].(string)
 
@@ -284,7 +289,7 @@ func (c *Coordinator) handleCreateDigest(ctx context.Context, chatSession *think
 	return true, nil
 }
 
-func (c *Coordinator) handleProposeChange(ctx context.Context, chatSession *thinkgraph.Chat, thinkSpace spaces.ThinkSpace, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
+func (c *Coordinator) handleProposeChange(ctx context.Context, chatSession *thinkgraph.Chat, thinkSpace spaces.ThinkState, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
 	c.emitter.Emit("manager", telemetry.Event{
 		ID:        uuid.NewV7(),
 		Type:      "log",

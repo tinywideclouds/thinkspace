@@ -11,7 +11,6 @@ import (
 
 	"uuid"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/assembler"
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
@@ -75,7 +74,7 @@ type FlowEngine struct {
 	service   *workspace.Service
 	executor  workspace.SubAgentExecutor
 	emitter   telemetry.Emitter
-	workbench *assembler.Workbench
+	workbench *workspace.Workbench
 }
 
 func NewFlowEngine(
@@ -89,14 +88,14 @@ func NewFlowEngine(
 		service:   service,
 		executor:  executor,
 		emitter:   emitter,
-		workbench: assembler.NewWorkbench(),
+		workbench: workspace.NewWorkbench(),
 	}
 }
 
 func (e *FlowEngine) Run(
 	ctx context.Context,
 	chatSession *thinkgraph.Chat,
-	space spaces.ThinkSpace,
+	space spaces.ThinkState,
 	flow flows.Flow,
 	args map[string]any,
 	flowContext flows.FlowContext,
@@ -156,7 +155,7 @@ func (e *FlowEngine) Run(
 func (e *FlowEngine) spawnAgents(
 	ctx context.Context,
 	chatSession *thinkgraph.Chat,
-	space spaces.ThinkSpace,
+	space spaces.ThinkState,
 	flowContext flows.FlowContext,
 	tasks []flows.SubAgentTask,
 ) ([]flows.BranchResult, error) {
@@ -217,7 +216,7 @@ func (e *FlowEngine) spawnAgents(
 func (e *FlowEngine) runSingleAgent(
 	ctx context.Context,
 	chatSession *thinkgraph.Chat,
-	space spaces.ThinkSpace,
+	space spaces.ThinkState,
 	flowContext flows.FlowContext,
 	task flows.SubAgentTask,
 	agentIndex int,

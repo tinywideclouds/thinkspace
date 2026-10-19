@@ -1,9 +1,13 @@
 package workspace_test
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -108,7 +112,7 @@ func setupServiceTest(t *testing.T) (*workspace.Service, *mockChatEngine, string
 	workspaceRoot := t.TempDir()
 
 	bus := thinkgraph.NewEventBus()
-	// Must attach subscriber to physically write to disk for LoadEvents to work
+	// Must attach subscriber to physically write to disk to verify the ledger logic
 	bus.Subscribe(thinkgraph.NewLedgerSubscriber(10, workspaceRoot))
 
 	svc := workspace.NewService(logger, mockEngine, workspaceRoot, bus, nil)
@@ -222,7 +226,7 @@ func TestService_Receipts(t *testing.T) {
 }
 
 func TestService_LedgerTags(t *testing.T) {
-	svc, _, _ := setupServiceTest(t)
+	svc, _, workspaceRoot := setupServiceTest(t)
 	ctx := context.Background()
 
 	thread, _ := svc.InitializeChat(ctx, "test-space", "tag-thread")
@@ -232,16 +236,40 @@ func TestService_LedgerTags(t *testing.T) {
 		t.Fatalf("LogProposal failed: %v", err)
 	}
 
-	events, err := svc.LoadEvents(ctx, thread)
+	// Read directly from the JSONL files because FetchEvents was securely removed from Service.
+	logsDir := filepath.Join(workspaceRoot, thread.SpaceID, "chats", thread.ID, "ledger", "logs")
+	entries, err := os.ReadDir(logsDir)
 	if err != nil {
-		t.Fatalf("LoadEvents failed: %v", err)
+		t.Fatalf("failed to read logs dir: %v", err)
 	}
 
-	if len(events) != 1 {
-		t.Fatalf("expected exactly 1 event in ledger, got %d", len(events))
+	var shards []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			shards = append(shards, e.Name())
+		}
+	}
+	sort.Strings(shards)
+
+	var recoveredEvents []thinkgraph.Event
+	for _, shard := range shards {
+		file, _ := os.Open(filepath.Join(logsDir, shard))
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			if len(scanner.Bytes()) > 0 {
+				var ev thinkgraph.Event
+				json.Unmarshal(scanner.Bytes(), &ev)
+				recoveredEvents = append(recoveredEvents, ev)
+			}
+		}
+		file.Close()
 	}
 
-	if len(events[0].Tags) != 2 || events[0].Tags[0] != "ui" {
-		t.Errorf("expected tags [ui, frontend] to be recovered from ledger, got %v", events[0].Tags)
+	if len(recoveredEvents) != 1 {
+		t.Fatalf("expected exactly 1 event in ledger, got %d", len(recoveredEvents))
+	}
+
+	if len(recoveredEvents[0].Tags) != 2 || recoveredEvents[0].Tags[0] != "ui" {
+		t.Errorf("expected tags [ui, frontend] to be recovered from ledger, got %v", recoveredEvents[0].Tags)
 	}
 }

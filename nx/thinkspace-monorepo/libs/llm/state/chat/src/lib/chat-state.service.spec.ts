@@ -46,6 +46,73 @@ describe('ChatStateService', () => {
     httpTestingController = TestBed.inject(HttpTestingController);
   });
 
+  it('should process syncHistory to populate coreChat, focus, and digests', () => {
+    service.connect('ws://test');
+    
+    const syncEvent = create(WSEventSchema, {
+      payload: {
+        case: 'syncHistory',
+        value: {
+          recentEvents: [
+            { id: '1', type: 'prompt', content: 'historical prompt', timestamp: '2026-09-02T15:00:00Z', metadata: {} },
+            { id: '2', type: 'model', content: 'historical model', timestamp: '2026-09-02T15:01:00Z', metadata: {} }
+          ],
+          digests: {
+            'uuid-1': { id: 'uuid-1', summary: 'test digest', isSticky: true }
+          },
+          focus: {
+            primaryFocus: ['golang'],
+            relatedContext: ['auth'],
+            dormantLenses: []
+          }
+        }
+      }
+    });
+
+    webSocketSubject.next(syncEvent);
+
+    const chatHistory = service.coreChat();
+    expect(chatHistory.length).toBe(2);
+    expect(chatHistory[0].source).toBe('user');
+    expect(chatHistory[0].content).toBe('historical prompt');
+    
+    expect(service.activeFocus()?.primaryFocus).toEqual(['golang']);
+    expect(service.activeDigests()['uuid-1'].summary).toBe('test digest');
+  });
+
+  it('should process previewContext to populate focus and workbench', () => {
+    service.connect('ws://test');
+    
+    const previewEvent = create(WSEventSchema, {
+      payload: {
+        case: 'previewContext',
+        value: {
+          spaceId: 'golang',
+          chatId: 'test-chat',
+          managerSystemPrompt: 'test',
+          stickyDigests: [],
+          recentHistory: [],
+          fileContexts: [
+            { path: 'src/main.go', level: 'structural', tokenCount: 100 }
+          ],
+          focus: {
+            primaryFocus: ['database'],
+            relatedContext: [],
+            dormantLenses: []
+          }
+        }
+      }
+    });
+
+    // Disable auto-approve to test state assignment
+    service.autoApproveContext.set(false);
+    webSocketSubject.next(previewEvent);
+
+    expect(service.activeFocus()?.primaryFocus).toEqual(['database']);
+    expect(service.activeWorkbench().length).toBe(1);
+    expect(service.activeWorkbench()[0].path).toBe('src/main.go');
+  });
+
   it('should stream model chunks into a single coreChat item', () => {
     service.connect('ws://test');
     

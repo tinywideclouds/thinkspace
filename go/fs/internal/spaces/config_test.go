@@ -8,7 +8,7 @@ import (
 )
 
 func TestThinkSpaceConfig_ApplyDefaults(t *testing.T) {
-	configuration := spaces.ThinkSpaceConfig{}
+	configuration := spaces.ThinkStateConfig{}
 
 	// Apply defaults to an empty configuration
 	configuration.ApplyDefaults()
@@ -25,7 +25,7 @@ func TestThinkSpaceConfig_ApplyDefaults(t *testing.T) {
 }
 
 func TestThinkSpaceConfig_DoNotOverrideExplicitValues(t *testing.T) {
-	configuration := spaces.ThinkSpaceConfig{
+	configuration := spaces.ThinkStateConfig{
 		Timeouts: spaces.TimeoutsConfig{
 			TurnSeconds:   500,
 			AgentSeconds:  120,
@@ -48,7 +48,7 @@ func TestThinkSpaceConfig_DoNotOverrideExplicitValues(t *testing.T) {
 }
 
 func TestThinkSpaceConfig_SystemPrompts(t *testing.T) {
-	configuration := spaces.ThinkSpaceConfig{
+	configuration := spaces.ThinkStateConfig{
 		SystemPrompt: "Base rules.",
 		Roles: spaces.RolesConfig{
 			Manager: spaces.ManagerConfig{
@@ -74,7 +74,7 @@ func TestThinkSpaceConfig_SystemPrompts(t *testing.T) {
 }
 
 func TestThinkSpaceConfig_Timeouts(t *testing.T) {
-	configuration := spaces.ThinkSpaceConfig{
+	configuration := spaces.ThinkStateConfig{
 		Timeouts: spaces.TimeoutsConfig{
 			TurnSeconds:   10,
 			AgentSeconds:  20,

@@ -82,6 +82,7 @@ func (r *Rehydrator) FastForward(ctx context.Context, c *Chat, graphManifest, di
 	}
 	sort.Strings(shards)
 
+	targetSkip := graphManifest.TotalEvents
 	skipped := 0
 	for _, shard := range shards {
 		file, err := os.Open(filepath.Join(logsDir, shard))
@@ -95,7 +96,7 @@ func (r *Rehydrator) FastForward(ctx context.Context, c *Chat, graphManifest, di
 				continue
 			}
 
-			if skipped < graphManifest.TotalEvents {
+			if skipped < targetSkip {
 				skipped++
 				continue
 			}
