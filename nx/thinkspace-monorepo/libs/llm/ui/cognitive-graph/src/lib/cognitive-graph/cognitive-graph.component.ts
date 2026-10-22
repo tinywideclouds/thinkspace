@@ -1,7 +1,7 @@
 import { Component, inject, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ChatFlowCardComponent, MarkdownComponent } from '@org/llm-ui-core';
-import { CognitiveGraphStore } from '../cognitive-graph.store';
+import { CognitiveGraphFacade } from '../cognitive-graph.facade';
 
 @Component({
   selector: 'llm-cognitive-graph',
@@ -18,11 +18,14 @@ import { CognitiveGraphStore } from '../cognitive-graph.store';
         </div>
 
         <div class="flex flex-col gap-6">
-          @for (node of store.stickyNodes(); track node.id) {
-            <div class="relative p-4 bg-orange-50 border-2 border-orange-200 rounded-xl shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5"
-                 [class.ring-2]="store.isNodeInFocus(node.summary)"
-                 [class.ring-orange-400]="store.isNodeInFocus(node.summary)"
-                 (click)="nodeSelected.emit(node.id)">
+          @for (node of facade.stickyNodes(); track node.id) {
+            <div class="relative p-4 bg-orange-50 border-2 border-orange-200 rounded-xl shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-orange-500 block w-full text-left"
+                 [class.ring-2]="facade.isNodeInFocus(node.summary)"
+                 [class.ring-orange-400]="facade.isNodeInFocus(node.summary)"
+                 role="button"
+                 tabindex="0"
+                 (click)="nodeSelected.emit(node.id)"
+                 (keydown.enter)="nodeSelected.emit(node.id)">
               
               <!-- Connection Point -->
               <div class="absolute top-1/2 -right-8 w-8 h-0.5 bg-orange-200"></div>
@@ -53,15 +56,18 @@ import { CognitiveGraphStore } from '../cognitive-graph.store';
 
         <!-- Historical Nodes (Digests) -->
         <div class="flex flex-col gap-8 ml-6 mb-12">
-          @for (node of store.trajectoryNodes(); track node.id) {
-            <div class="relative p-5 bg-white border border-gray-200 rounded-xl shadow-sm cursor-pointer transition-all hover:border-blue-300 hover:shadow-md"
-                 [class.ring-2]="store.isNodeInFocus(node.summary)"
-                 [class.ring-blue-300]="store.isNodeInFocus(node.summary)"
-                 (click)="nodeSelected.emit(node.id)">
+          @for (node of facade.trajectoryNodes(); track node.id) {
+            <div class="relative p-5 bg-white border border-gray-200 rounded-xl shadow-sm cursor-pointer transition-all hover:border-blue-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 block w-full text-left"
+                 [class.ring-2]="facade.isNodeInFocus(node.summary)"
+                 [class.ring-blue-300]="facade.isNodeInFocus(node.summary)"
+                 role="button"
+                 tabindex="0"
+                 (click)="nodeSelected.emit(node.id)"
+                 (keydown.enter)="nodeSelected.emit(node.id)">
               
               <!-- Node Dot -->
               <div class="absolute top-6 -left-7 w-3 h-3 rounded-full border-2 border-white shadow-sm -translate-x-1/2"
-                   [ngClass]="store.isNodeInFocus(node.summary) ? 'bg-blue-400' : 'bg-gray-300'"></div>
+                   [ngClass]="facade.isNodeInFocus(node.summary) ? 'bg-blue-400' : 'bg-gray-300'"></div>
               
               <div class="flex justify-between items-center mb-3">
                 <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500">📚 Memory Cluster</span>
@@ -87,15 +93,15 @@ import { CognitiveGraphStore } from '../cognitive-graph.store';
         <div class="flex flex-col gap-4 ml-6 relative">
           <div class="absolute -left-6 top-0 bottom-0 w-0.5 bg-blue-400/30 border-l-2 border-dashed border-blue-400/50 -translate-x-1/2"></div>
           
-          @for (item of store.activeFeed(); track item.id) {
+          @for (item of facade.activeFeed(); track item.id) {
             <div class="relative">
               <div class="absolute top-1/2 -left-6 w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)] -translate-y-1/2 -translate-x-1/2"></div>
               
               @if (item.source === 'flow_card' && item.flowId) {
                 <llm-chat-flow-card 
-                  [flow]="store.flowStates().get(item.flowId)" 
+                  [flow]="facade.flowStates().get(item.flowId)" 
                   [summary]="item.content"
-                  (inspect)="store.inspectFlow($event)">
+                  (inspect)="facade.inspectFlow($event)">
                 </llm-chat-flow-card>
               } @else {
                 <div class="p-4 rounded-xl border"
@@ -118,7 +124,7 @@ import { CognitiveGraphStore } from '../cognitive-graph.store';
   `
 })
 export class CognitiveGraphComponent {
-  public store = inject(CognitiveGraphStore);
+  public facade = inject(CognitiveGraphFacade);
   
   nodeSelected = output<string>();
 }

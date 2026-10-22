@@ -21,7 +21,6 @@ files:
   - libs/llm/core/protos/vite.config.mts
   - libs/llm/core/protos/src/index.ts
   - libs/llm/core/protos/src/test-setup.ts
-  - libs/llm/core/protos/src/generated/src/thinkspace/api/v1/events_pb.ts
   - libs/llm/core/protos/src/thinkspace/api/v1/events.proto
   - libs/llm/core/transport/eslint.config.mjs
   - libs/llm/core/transport/project.json
@@ -36,4 +35,4 @@ files:
   - libs/llm/core/transport/src/lib/transport.service.ts
   - libs/llm/core/facade/src/lib/trace-parser.spec.ts
   - libs/llm/core/facade/src/lib/trace-parser.ts
-last_context: llm_core_02.md
+last_context: llm_core_06.md

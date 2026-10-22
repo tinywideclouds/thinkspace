@@ -6,6 +6,13 @@
   "sourceRoot": "apps/llm/chat-app/src",
   "tags": ["scope:llm"],
   "targets": {
+    "generate-mock": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node tools/scripts/llm/generate-mock-graph.js",
+        "cwd": "{workspaceRoot}"
+      }
+    },
     "build": {
       "executor": "@angular/build:application",
       "outputs": ["{options.outputPath}"],

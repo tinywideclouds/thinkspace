@@ -11,17 +11,33 @@ const (
 	EventTool       = "tool"
 	EventCandidate  = "candidate"
 	EventResolution = "resolution"
-	EventDigest     = "digest" // <-- Restored
+	EventDigest     = "digest"
+	EventSystem     = "system"
 )
 
-// Event represents a single immutable beat in the chronological ledger.
+type MutationType string
+
+const (
+	MutationTombstone MutationType = "tombstone"
+	MutationRestore   MutationType = "restore"
+	MutationUpdate    MutationType = "update"
+)
+
+type MutationEvent struct {
+	TargetID  uuid.UUID    `json:"target_id"`
+	Type      MutationType `json:"type"`
+	Timestamp time.Time    `json:"timestamp"`
+	Payload   string       `json:"payload,omitempty"`
+}
+
 type Event struct {
-	ID        uuid.UUID         `json:"id"`
-	Type      string            `json:"type"`
-	Timestamp time.Time         `json:"timestamp"`
-	Content   string            `json:"content"`
-	Tags      []string          `json:"tags,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	ID         uuid.UUID         `json:"id"`
+	Type       string            `json:"type"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Content    string            `json:"content"`
+	Tags       []string          `json:"tags,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+	Tombstoned bool              `json:"tombstoned"`
 }
 
 func NewEvent(eventType, content string) Event {
@@ -30,5 +46,11 @@ func NewEvent(eventType, content string) Event {
 		Type:      eventType,
 		Timestamp: time.Now().UTC(),
 		Content:   content,
+		Tags:      []string{},
+		Metadata:  make(map[string]string),
 	}
+}
+
+func (e Event) IsTombstoned() bool {
+	return e.Tombstoned
 }

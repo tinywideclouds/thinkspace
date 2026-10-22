@@ -114,7 +114,6 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Ensure the new chat inherits the CLI's requested domain
 		_ = serviceManager.UpdateChatMeta(*spaceName, meta.ID, func(m *workspace.ChatMeta) {
 			m.ActiveDomain = *domainName
 		})
@@ -151,14 +150,18 @@ func main() {
 	}
 	digestManager := session.NewDigestManager(logger, modelClient, digestCfg)
 
-	turnManager := session.NewTurnManager(logger, registry, serviceManager, modelClient, fanOutFlow, digestManager)
+	chatSession, err := session.OpenChat(ctx, logger, registry, serviceManager, modelClient, fanOutFlow, digestManager, *spaceName, meta.ID)
+	if err != nil {
+		logger.Error("Execution turn failed to open session", "error", err)
+		os.Exit(1)
+	}
 
 	userInterface := cli.NewTerminalUI()
 	emitter := telemetry.MultiEmitter{telemetry.NewSlogEmitter(logger)}
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	if err := turnManager.RunTurn(ctx, *spaceName, meta.ID, promptText, userInterface, emitter); err != nil {
+	if err := chatSession.RunTurn(ctx, promptText, userInterface, emitter); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)
 	}

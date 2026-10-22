@@ -148,6 +148,38 @@ func TestUnmarshalInbound_TransitionDecision(t *testing.T) {
 	}
 }
 
+func TestUnmarshalInbound_LoadHistory(t *testing.T) {
+	payload := []byte(`{
+		"loadHistory": {
+			"spaceId": "golang",
+			"chatId": "chat-123",
+			"cursor": "some-uuid-v7",
+			"limit": 50
+		}
+	}`)
+
+	inbound, err := api.UnmarshalInbound(payload)
+	if err != nil {
+		t.Fatalf("unexpected error unmarshaling: %v", err)
+	}
+
+	if inbound.Type != "load_history" {
+		t.Errorf("expected 'load_history', got '%s'", inbound.Type)
+	}
+	if inbound.LoadHistory.SpaceID != "golang" {
+		t.Errorf("expected spaceId 'golang', got '%s'", inbound.LoadHistory.SpaceID)
+	}
+	if inbound.LoadHistory.ChatID != "chat-123" {
+		t.Errorf("expected chatId 'chat-123', got '%s'", inbound.LoadHistory.ChatID)
+	}
+	if inbound.LoadHistory.Cursor != "some-uuid-v7" {
+		t.Errorf("expected cursor 'some-uuid-v7', got '%s'", inbound.LoadHistory.Cursor)
+	}
+	if inbound.LoadHistory.Limit != 50 {
+		t.Errorf("expected limit 50, got %d", inbound.LoadHistory.Limit)
+	}
+}
+
 func TestInvalidInbound(t *testing.T) {
 	_, err := api.UnmarshalInbound([]byte(`{"unknownPayload": {}}`))
 	if err == nil {

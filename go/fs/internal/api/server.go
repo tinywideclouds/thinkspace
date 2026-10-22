@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/coder/websocket"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
@@ -16,10 +17,16 @@ import (
 )
 
 type Server struct {
-	logger      *slog.Logger
-	registry    *config.Registry
-	manager     *workspace.ServiceManager
-	turnManager *session.TurnManager
+	logger        *slog.Logger
+	registry      *config.Registry
+	manager       *workspace.ServiceManager
+	fanOutFlow    flows.Flow
+	digestManager *session.DigestManager
+	modelClient   llm.ModelClient
+
+	// Single-user local architecture state
+	sessionMu     sync.Mutex
+	activeSession *session.ChatSession
 }
 
 func NewServer(
@@ -31,10 +38,12 @@ func NewServer(
 	modelClient llm.ModelClient,
 ) *Server {
 	return &Server{
-		logger:      logger,
-		registry:    registry,
-		manager:     manager,
-		turnManager: session.NewTurnManager(logger, registry, manager, modelClient, fanOutFlow, digestManager),
+		logger:        logger,
+		registry:      registry,
+		manager:       manager,
+		fanOutFlow:    fanOutFlow,
+		digestManager: digestManager,
+		modelClient:   modelClient,
 	}
 }
 
@@ -164,12 +173,25 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		case "submit_prompt":
 			payload := inbound.SubmitPrompt
 
-			_, graphData, manifest, err := s.turnManager.LoadChatState(ctx, payload.SpaceID, payload.ChatID)
-			if err == nil {
-				if syncData, err := MarshalSyncHistory(graphData.Timeline, manifest.Digests, graphData.Focus); err == nil {
-					ui.SendSyncHistory(syncData)
+			s.sessionMu.Lock()
+			if s.activeSession == nil || s.activeSession.ChatID != payload.ChatID {
+				newSession, err := session.OpenChat(ctx, s.logger, s.registry, s.manager, s.modelClient, s.fanOutFlow, s.digestManager, payload.SpaceID, payload.ChatID)
+				if err != nil {
+					s.sessionMu.Unlock()
+					s.logger.Error("failed to open chat session", "error", err)
+					continue
+				}
+				s.activeSession = newSession
+
+				graphData, err := s.activeSession.GetGraphData(ctx)
+				if err == nil {
+					if syncData, err := MarshalSyncHistory(graphData.Timeline, graphData.Digests, graphData.Focus, "", false); err == nil {
+						ui.SendSyncHistory(syncData)
+					}
 				}
 			}
+			activeSession := s.activeSession
+			s.sessionMu.Unlock()
 
 			if payload.Text == "" {
 				continue
@@ -177,11 +199,30 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			emitter := NewWebSocketEmitter(ctx, connection)
 			go func() {
-				if err := s.turnManager.RunTurn(ctx, payload.SpaceID, payload.ChatID, payload.Text, ui, emitter); err != nil {
+				if err := activeSession.RunTurn(ctx, payload.Text, ui, emitter); err != nil {
 					s.logger.Error("turn failed", "error", err)
 					ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ System Error: %v\n", err))
 				}
 			}()
+
+		case "load_history":
+			payload := inbound.LoadHistory
+			chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID}
+
+			limit := payload.Limit
+			if limit <= 0 {
+				limit = 50
+			}
+
+			events, nextCursor, hasMore, err := s.manager.GraphStore().GetTimelinePage(ctx, chatObj, payload.Cursor, limit)
+			if err != nil {
+				s.logger.Error("Failed to fetch timeline page", "error", err)
+				continue
+			}
+
+			if syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore); err == nil {
+				ui.SendSyncHistory(syncData)
+			}
 
 		case "select_strategy":
 			ui.PushStrategy(inbound.SelectStrategy.StrategyID)

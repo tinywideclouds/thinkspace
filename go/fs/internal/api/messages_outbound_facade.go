@@ -8,10 +8,9 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
-	"uuid"
 )
 
-func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests map[uuid.UUID]thinkgraph.DigestMeta, focus thinkgraph.AttentionFocus) ([]byte, error) {
+func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests []thinkgraph.DigestMeta, focus thinkgraph.AttentionFocus, nextCursor string, hasMore bool) ([]byte, error) {
 	var pbEvents []*pb.LedgerEvent
 	for _, e := range recentEvents {
 		pbEvents = append(pbEvents, &pb.LedgerEvent{
@@ -24,11 +23,11 @@ func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests map[uuid.UUID]t
 	}
 
 	pbDigests := make(map[string]*pb.DigestMeta)
-	for id, d := range digests {
-		pbDigests[id.String()] = &pb.DigestMeta{
+	for _, d := range digests {
+		pbDigests[d.ID.String()] = &pb.DigestMeta{
 			Id:       d.ID.String(),
 			Summary:  d.Summary,
-			IsSticky: d.IsSticky,
+			IsSticky: d.Promoted,
 		}
 	}
 
@@ -44,6 +43,8 @@ func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests map[uuid.UUID]t
 				RecentEvents: pbEvents,
 				Digests:      pbDigests,
 				Focus:        pbFocus,
+				NextCursor:   nextCursor,
+				HasMore:      hasMore,
 			},
 		},
 	}

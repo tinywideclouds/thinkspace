@@ -17,6 +17,17 @@ describe('LlmFacade', () => {
       expect(domainEvent).toEqual({ type: 'chat_stream', text: 'Hello from model' });
     });
 
+    it('should map an agent stream event correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'agentStream',
+          value: { agentId: 1, text: 'thinking' }
+        }
+      });
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({ type: 'agent_stream', agentId: 1, text: 'thinking' });
+    });
+
     it('should map an available spaces event correctly', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
@@ -51,7 +62,9 @@ describe('LlmFacade', () => {
               primaryFocus: ['architecture'],
               relatedContext: ['auth'],
               dormantLenses: ['database']
-            }
+            },
+            nextCursor: 'cursor-123',
+            hasMore: true
           }
         }
       });
@@ -65,7 +78,9 @@ describe('LlmFacade', () => {
           primaryFocus: ['architecture'],
           relatedContext: ['auth'],
           dormantLenses: ['database']
-        }
+        },
+        nextCursor: 'cursor-123',
+        hasMore: true
       });
     });
 
@@ -179,6 +194,18 @@ describe('LlmFacade', () => {
         expect(protocolBufferEvent.payload.value.text).toBe('Write a test');
         expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
         expect(protocolBufferEvent.payload.value.chatId).toBe('test-chat');
+      }
+    });
+
+    it('should create a valid LoadHistory WSEvent', () => {
+      const protocolBufferEvent = LlmFacade.createLoadHistory('golang', 'chat-1', 'cursor-123', 20);
+      
+      expect(protocolBufferEvent.payload.case).toBe('loadHistory');
+      if (protocolBufferEvent.payload.case === 'loadHistory') {
+        expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
+        expect(protocolBufferEvent.payload.value.chatId).toBe('chat-1');
+        expect(protocolBufferEvent.payload.value.cursor).toBe('cursor-123');
+        expect(protocolBufferEvent.payload.value.limit).toBe(20);
       }
     });
 

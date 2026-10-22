@@ -15,6 +15,7 @@ type InboundEvent struct {
 	ReviewDecision     *ReviewDecisionPayload
 	ApproveContext     *ApproveContextPayload
 	TransitionDecision *TransitionDecisionPayload
+	LoadHistory        *LoadHistoryPayload
 }
 
 type SubmitPromptPayload struct {
@@ -40,4 +41,11 @@ type ApproveContextPayload struct {
 
 type TransitionDecisionPayload struct {
 	Approved bool
+}
+
+type LoadHistoryPayload struct {
+	SpaceID string
+	ChatID  string
+	Cursor  string
+	Limit   int
 }

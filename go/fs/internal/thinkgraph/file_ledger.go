@@ -65,7 +65,7 @@ func (l *FileLedger) SaveDigest(ctx context.Context, c *Chat, digest DigestMeta)
 	_ = os.MkdirAll(digestsDir, 0755)
 
 	isSticky := "false"
-	if digest.IsSticky {
+	if digest.Promoted {
 		isSticky = "true"
 	}
 
@@ -78,9 +78,53 @@ func (l *FileLedger) SaveDigest(ctx context.Context, c *Chat, digest DigestMeta)
 		summarizesStr = "[" + strings.Join(sumStrs, ", ") + "]"
 	}
 
-	content := fmt.Sprintf("---\nid: \"%s\"\nsticky: %s\nsummarizes: %s\n---\n%s\n",
-		digest.ID.String(), isSticky, summarizesStr, digest.Summary)
+	var tagStrs []string
+	for _, tag := range digest.Tags {
+		tagStrs = append(tagStrs, fmt.Sprintf(`"%s"`, tag))
+	}
+	tagsStr := "[]"
+	if len(tagStrs) > 0 {
+		tagsStr = "[" + strings.Join(tagStrs, ", ") + "]"
+	}
+
+	content := fmt.Sprintf("---\nid: \"%s\"\nsticky: %s\ntags: %s\nsummarizes: %s\ntombstoned: %v\n---\n%s\n",
+		digest.ID.String(), isSticky, tagsStr, summarizesStr, digest.Tombstoned, digest.Summary)
 
 	filePath := filepath.Join(digestsDir, digest.ID.String()+".md")
 	return os.WriteFile(filePath, []byte(content), 0644)
+}
+
+func (l *FileLedger) SaveSpaceContext(ctx context.Context, c *Chat, spaceCtx SpaceContext) error {
+	contextsDir := filepath.Join(l.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "contexts")
+	_ = os.MkdirAll(contextsDir, 0755)
+
+	var tagStrs []string
+	for _, tag := range spaceCtx.Tags {
+		tagStrs = append(tagStrs, fmt.Sprintf(`"%s"`, tag))
+	}
+	tagsStr := "[]"
+	if len(tagStrs) > 0 {
+		tagsStr = "[" + strings.Join(tagStrs, ", ") + "]"
+	}
+
+	content := fmt.Sprintf("---\nid: \"%s\"\ntags: %s\ntombstoned: %v\n---\n%s\n",
+		spaceCtx.ID.String(), tagsStr, spaceCtx.Tombstoned, spaceCtx.Content)
+
+	filePath := filepath.Join(contextsDir, spaceCtx.ID.String()+".md")
+	return os.WriteFile(filePath, []byte(content), 0644)
+}
+
+func (l *FileLedger) SaveMutation(ctx context.Context, c *Chat, mutation MutationEvent) error {
+	mutationsDir := filepath.Join(l.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "mutations")
+	_ = os.MkdirAll(mutationsDir, 0755)
+
+	b, err := json.MarshalIndent(mutation, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling mutation: %w", err)
+	}
+
+	// Prefix with UnixNano to ensure strictly chronological sorting during rehydration
+	filename := fmt.Sprintf("%019d_%s.json", mutation.Timestamp.UnixNano(), mutation.TargetID.String())
+	filePath := filepath.Join(mutationsDir, filename)
+	return os.WriteFile(filePath, b, 0644)
 }

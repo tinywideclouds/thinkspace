@@ -18,9 +18,9 @@ func NewGraphSubscriber(graph GraphRepository) *GraphSubscriber {
 
 func (g *GraphSubscriber) OnEvent(ctx context.Context, c *Chat, event Event) error {
 	if event.Type == EventDigest {
-		isSticky := false
+		isPromoted := false
 		if val, ok := event.Metadata["is_sticky"]; ok && val == "true" {
-			isSticky = true
+			isPromoted = true
 		}
 
 		var summarized []uuid.UUID
@@ -35,7 +35,7 @@ func (g *GraphSubscriber) OnEvent(ctx context.Context, c *Chat, event Event) err
 		digestMeta := DigestMeta{
 			ID:               event.ID,
 			Summary:          event.Content,
-			IsSticky:         isSticky,
+			Promoted:         isPromoted,
 			Tags:             event.Tags,
 			SummarizedEvents: summarized,
 		}

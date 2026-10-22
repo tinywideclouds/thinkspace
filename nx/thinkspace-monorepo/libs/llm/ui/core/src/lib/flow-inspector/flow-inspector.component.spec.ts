@@ -62,7 +62,7 @@ describe('FlowInspectorComponent', () => {
   });
 
   it('should emit close event when close button is clicked', () => {
-    const emitSpy = vi.spyOn(component.close, 'emit');
+    const emitSpy = vi.spyOn(component.inspectorClosed, 'emit');
 
     // Select the close button specifically
     const closeButton = fixture.nativeElement.querySelector('button');

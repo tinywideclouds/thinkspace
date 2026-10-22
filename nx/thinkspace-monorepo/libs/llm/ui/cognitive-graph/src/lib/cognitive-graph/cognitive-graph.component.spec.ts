@@ -1,20 +1,37 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { CognitiveGraphComponent } from './cognitive-graph.component';
-import { CognitiveGraphStore } from '../cognitive-graph.store.spec';
-import { signal } from '@angular/core';
-import { describe, beforeEach, it, expect, vi } from 'vitest';
+import { CognitiveGraphFacade } from '../cognitive-graph.facade';
+import { signal, WritableSignal } from '@angular/core';
+import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
+import { ChatItem, FlowState } from '@org/llm-state-chat';
+import { DomainDigestMeta } from '@org/llm-core-facade';
+
+interface MockCognitiveGraphFacade {
+  stickyNodes: WritableSignal<DomainDigestMeta[]>;
+  trajectoryNodes: WritableSignal<DomainDigestMeta[]>;
+  activeFeed: WritableSignal<ChatItem[]>;
+  flowStates: WritableSignal<Map<string, FlowState>>;
+  isNodeInFocus: Mock<(summary: string) => boolean>;
+  inspectFlow: Mock<(flowId: string) => void>;
+}
 
 describe('CognitiveGraphComponent', () => {
   let component: CognitiveGraphComponent;
   let fixture: ComponentFixture<CognitiveGraphComponent>;
-  let mockStore: any;
+  let mockFacade: MockCognitiveGraphFacade;
 
   beforeEach(async () => {
-    mockStore = {
-      stickyNodes: signal([{ id: 'sticky-1', summary: 'Global architecture rule', isSticky: true }]),
-      trajectoryNodes: signal([{ id: 'traj-1', summary: 'Refactored auth module', isSticky: false }]),
-      activeFeed: signal([{ id: 'msg-1', source: 'user', content: 'What next?' }]),
-      flowStates: signal(new Map()),
+    mockFacade = {
+      stickyNodes: signal([
+        { id: 'sticky-1', summary: 'Global architecture rule', isSticky: true }
+      ]),
+      trajectoryNodes: signal([
+        { id: 'traj-1', summary: 'Refactored auth module', isSticky: false }
+      ]),
+      activeFeed: signal([
+        { id: 'msg-1', source: 'user', content: 'What next?' }
+      ]),
+      flowStates: signal(new Map<string, FlowState>()),
       isNodeInFocus: vi.fn((summary: string) => false),
       inspectFlow: vi.fn()
     };
@@ -22,7 +39,7 @@ describe('CognitiveGraphComponent', () => {
     await TestBed.configureTestingModule({
       imports: [CognitiveGraphComponent],
       providers: [
-        { provide: CognitiveGraphStore, useValue: mockStore }
+        { provide: CognitiveGraphFacade, useValue: mockFacade }
       ]
     }).compileComponents();
 

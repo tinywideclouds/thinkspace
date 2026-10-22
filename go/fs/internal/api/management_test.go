@@ -147,30 +147,71 @@ func TestManagementAPI_GetEvents(t *testing.T) {
 
 	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
 
+	// Seed multiple events for pagination testing
 	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "First test event")
-	event1.Timestamp = time.Now()
+	event1.Timestamp = time.Now().Add(-2 * time.Hour)
+	event2 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Second test event")
+	event2.Timestamp = time.Now().Add(-1 * time.Hour)
+	event3 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Third test event")
+	event3.Timestamp = time.Now()
 
-	if err := manager.GraphStore().AppendEvent(context.Background(), chat, event1); err != nil {
-		t.Fatalf("Failed to seed event in GraphDB: %v", err)
-	}
+	_ = manager.GraphStore().AppendEvent(context.Background(), chat, event1)
+	_ = manager.GraphStore().AppendEvent(context.Background(), chat, event2)
+	_ = manager.GraphStore().AppendEvent(context.Background(), chat, event3)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceID+"/chats/"+chatID+"/events?ids="+event1.ID.String(), nil)
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
+	t.Run("Fetch By Explicit IDs", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceID+"/chats/"+chatID+"/events?ids="+event1.ID.String(), nil)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d", rr.Code)
-	}
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", rr.Code)
+		}
 
-	var events []thinkgraph.Event
-	if err := json.NewDecoder(rr.Body).Decode(&events); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
+		var events []thinkgraph.Event
+		if err := json.NewDecoder(rr.Body).Decode(&events); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
 
-	if len(events) != 1 {
-		t.Fatalf("Expected exactly 1 event, got %d", len(events))
-	}
-	if events[0].ID != event1.ID {
-		t.Errorf("Expected event ID %s, got %s", event1.ID, events[0].ID)
-	}
+		if len(events) != 1 || events[0].ID != event1.ID {
+			t.Errorf("Expected only event1 via ID fetch")
+		}
+	})
+
+	t.Run("Paginate Timeline Limit Only", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceID+"/chats/"+chatID+"/events?limit=2", nil)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", rr.Code)
+		}
+
+		var events []thinkgraph.Event
+		_ = json.NewDecoder(rr.Body).Decode(&events)
+
+		if len(events) != 2 {
+			t.Fatalf("Expected exactly 2 events limited, got %d", len(events))
+		}
+		if events[0].ID != event2.ID || events[1].ID != event3.ID {
+			t.Errorf("Expected most recent events (event2, event3)")
+		}
+	})
+
+	t.Run("Paginate Timeline With Cursor", func(t *testing.T) {
+		// Ask for 2 events BEFORE event3
+		req := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceID+"/chats/"+chatID+"/events?limit=2&cursor="+event3.ID.String(), nil)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		var events []thinkgraph.Event
+		_ = json.NewDecoder(rr.Body).Decode(&events)
+
+		if len(events) != 2 {
+			t.Fatalf("Expected exactly 2 events limited before cursor, got %d", len(events))
+		}
+		if events[0].ID != event1.ID || events[1].ID != event2.ID {
+			t.Errorf("Expected events before cursor (event1, event2)")
+		}
+	})
 }

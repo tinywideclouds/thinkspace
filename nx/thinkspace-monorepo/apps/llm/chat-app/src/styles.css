@@ -1,3 +1,5 @@
-/* You can add global styles to this file, and also import other style files */
 @import "tailwindcss";
+
+/* Scan only the specific LLM UI and Feature libraries */
+@source "../../../../libs/llm/feature";
 @source "../../../../libs/llm/ui";

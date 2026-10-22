@@ -1,3 +1,7 @@
 /* You can add global styles to this file, and also import other style files */
 @import "tailwindcss";
 @source "../../../../libs/contexter/ui";
+
+html, body {
+  @apply h-screen overflow-hidden m-0 p-0 bg-gray-50;
+}

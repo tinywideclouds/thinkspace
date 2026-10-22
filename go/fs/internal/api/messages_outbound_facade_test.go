@@ -131,11 +131,11 @@ func TestMarshalSyncHistory(t *testing.T) {
 		},
 	}
 
-	digests := map[uuid.UUID]thinkgraph.DigestMeta{
-		digestID: {
+	digests := []thinkgraph.DigestMeta{
+		{
 			ID:       digestID,
 			Summary:  "Sticky context",
-			IsSticky: true,
+			Promoted: true,
 		},
 	}
 
@@ -143,23 +143,29 @@ func TestMarshalSyncHistory(t *testing.T) {
 		PrimaryFocus: []string{"test-focus"},
 	}
 
-	data, err := api.MarshalSyncHistory(events, digests, focus)
+	data, err := api.MarshalSyncHistory(events, digests, focus, "cursor-123", true)
 	if err != nil {
 		t.Fatalf("failed to marshal sync history: %v", err)
 	}
 
-	json := string(data)
-	if !strings.Contains(json, "syncHistory") {
-		t.Errorf("expected wrapper 'syncHistory', got: %s", json)
+	jsonStr := string(data)
+	if !strings.Contains(jsonStr, "syncHistory") {
+		t.Errorf("expected wrapper 'syncHistory', got: %s", jsonStr)
 	}
-	if !strings.Contains(json, evID.String()) {
+	if !strings.Contains(jsonStr, evID.String()) {
 		t.Errorf("expected event ID %s to be present", evID.String())
 	}
-	if !strings.Contains(json, "Sticky context") {
+	if !strings.Contains(jsonStr, "Sticky context") {
 		t.Errorf("expected digest summary to be present")
 	}
-	if !strings.Contains(json, "test-focus") {
+	if !strings.Contains(jsonStr, "test-focus") {
 		t.Errorf("expected focus to be present")
+	}
+	if !strings.Contains(jsonStr, `"nextCursor":"cursor-123"`) {
+		t.Errorf("expected nextCursor to be present")
+	}
+	if !strings.Contains(jsonStr, `"hasMore":true`) {
+		t.Errorf("expected hasMore to be true")
 	}
 }
 

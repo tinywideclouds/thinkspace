@@ -1,5 +1,5 @@
 import { Component, inject, afterNextRender } from '@angular/core';
-import { ChatStateService } from '@org/llm-state-chat';
+import { ChatConnectionService } from '@org/llm-state-chat';
 import { ChatContainerComponent } from '@org/llm-feature-chat';
 
 @Component({
@@ -10,13 +10,13 @@ import { ChatContainerComponent } from '@org/llm-feature-chat';
   styleUrls: ['./app.css'],
 })
 export class AppComponent {
-  protected state = inject(ChatStateService);
+  protected connection = inject(ChatConnectionService);
 
   constructor() {
     afterNextRender(() => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/ws`;
-      this.state.connect(wsUrl);
+      this.connection.connect(wsUrl);
     });
   }
 }

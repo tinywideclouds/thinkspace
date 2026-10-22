@@ -63,6 +63,14 @@ func UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		domainEvent.TransitionDecision = &TransitionDecisionPayload{
 			Approved: payload.TransitionDecision.Approved,
 		}
+	case *pb.WSEvent_LoadHistory:
+		domainEvent.Type = "load_history"
+		domainEvent.LoadHistory = &LoadHistoryPayload{
+			SpaceID: payload.LoadHistory.SpaceId,
+			ChatID:  payload.LoadHistory.ChatId,
+			Cursor:  payload.LoadHistory.Cursor,
+			Limit:   int(payload.LoadHistory.Limit),
+		}
 	default:
 		return nil, errors.New("unsupported or unknown inbound event type")
 	}

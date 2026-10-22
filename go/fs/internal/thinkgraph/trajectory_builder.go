@@ -12,7 +12,7 @@ type TrajectoryRequest struct {
 	Manifest     *ChatManifest
 	RecentEvents []Event
 	Catalyst     *Event
-	Focus        AttentionFocus // The calculated active topology
+	Focus        AttentionFocus
 }
 
 type TrajectoryBuilder struct{}
@@ -24,7 +24,6 @@ func NewTrajectoryBuilder() *TrajectoryBuilder {
 func (a *TrajectoryBuilder) Build(ctx context.Context, req TrajectoryRequest) (cognition.Trajectory, error) {
 	var traj cognition.Trajectory
 
-	// Inject the explicit crossover metadata so the LLM understands its cognitive boundaries
 	var metadata strings.Builder
 	metadata.WriteString("[CONTEXT HORIZON METADATA]\n")
 
@@ -40,9 +39,12 @@ func (a *TrajectoryBuilder) Build(ctx context.Context, req TrajectoryRequest) (c
 
 	traj.LongTermMemory = append(traj.LongTermMemory, metadata.String())
 
-	// Append conditional digests
+	for _, sc := range req.Manifest.SpaceContexts {
+		traj.LongTermMemory = append(traj.LongTermMemory, sc.Content)
+	}
+
 	for _, d := range req.Manifest.Digests {
-		if d.IsSticky {
+		if d.Promoted {
 			traj.LongTermMemory = append(traj.LongTermMemory, d.Summary)
 		}
 	}

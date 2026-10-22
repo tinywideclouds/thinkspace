@@ -1,0 +1,202 @@
+{
+  "events": [
+    {
+      "id": "e9b8c110-1234-7000-8000-000000000001",
+      "type": "prompt",
+      "timestamp": "2026-10-20T10:00:00Z",
+      "content": "Let's build a timeline component.",
+      "tags": [],
+      "tombstoned": false
+    },
+    {
+      "id": "e9b8c110-1234-7000-8000-000000000002",
+      "type": "model",
+      "timestamp": "2026-10-20T10:00:05Z",
+      "content": "Sure, I can help with that. What framework are we using?",
+      "tags": [],
+      "tombstoned": false
+    },
+    {
+      "id": "e9b8c110-1234-7000-8000-000000000003",
+      "type": "prompt",
+      "timestamp": "2026-10-20T10:05:00Z",
+      "content": "Angular 22.",
+      "tags": [
+        "ui"
+      ],
+      "tombstoned": false
+    },
+    {
+      "id": "e9b8c110-1234-7000-8000-000000000004",
+      "type": "model",
+      "timestamp": "2026-10-20T10:05:10Z",
+      "content": "Great, I will use modern Signals and the `@analogjs` plugin for Vite.",
+      "tags": [
+        "ui"
+      ],
+      "tombstoned": false
+    }
+  ],
+  "digests": {
+    "e9b8c110-1234-7000-8000-000000000000": {
+      "id": "e9b8c110-1234-7000-8000-000000000000",
+      "summary": "---\r\nid: \"e9b8c110-1234-7000-8000-000000000000\"\r\nsticky: true\r\ntags: [\"ui\", \"angular\"]\r\nsummarizes: [\"e9b8c110-1234-7000-8000-000000000003\", \"e9b8c110-1234-7000-8000-000000000004\"]\r\n---\r\nDecided to build the timeline using Angular 22 Signals and AnalogJS.",
+      "isSticky": false
+    }
+  },
+  "focus": {
+    "primaryFocus": [
+      "ui"
+    ],
+    "relatedContext": [
+      "angular"
+    ],
+    "dormantLenses": []
+  },
+  "scenarios": {
+    "delayed": [
+      {
+        "offsetMs": 200,
+        "payload": {
+          "case": "telemetryEvent",
+          "value": {
+            "channel": "manager",
+            "event": {
+              "id": "scenario-delay-1",
+              "type": "flow_start",
+              "timestamp": "2026-10-20T10:00:00Z",
+              "message": "",
+              "summary": "Executing long-running background task...",
+              "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"agent_count\": 1}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 5000,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "💥 BOOM! This is a massive delayed message block that arrived 5 seconds later. It should trigger the 'New Messages ↓' pill instead of forcing your scroll if you moved your view up."
+          }
+        }
+      },
+      {
+        "offsetMs": 5200,
+        "payload": {
+          "case": "telemetryEvent",
+          "value": {
+            "channel": "manager",
+            "event": {
+              "id": "scenario-delay-end",
+              "type": "flow_complete",
+              "timestamp": "2026-10-20T10:00:05Z",
+              "message": "",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"agent_index\": 1, \"passed\": true}"
+            }
+          }
+        }
+      }
+    ],
+    "slow": [
+      {
+        "offsetMs": 200,
+        "payload": {
+          "case": "telemetryEvent",
+          "value": {
+            "channel": "manager",
+            "event": {
+              "id": "scenario-slow-1",
+              "type": "flow_start",
+              "timestamp": "2026-10-20T10:00:00Z",
+              "message": "",
+              "summary": "Simulating massive streaming response...",
+              "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"agent_count\": 1}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 500,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "Here is a massive simulated response designed to test the scroll physics of the timeline component. When you scroll up, this text should continue generating below the fold without violently hijacking your viewport or pushing the content you are currently reading off the screen.\n\n"
+          }
+        }
+      },
+      {
+        "offsetMs": 1000,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "This is paragraph two. If the IntersectionObserver and CSS overflow anchoring are wired correctly, reading historical messages while I stream will feel perfectly stable. "
+          }
+        }
+      },
+      {
+        "offsetMs": 1500,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "Chunk 3.I will keep arriving in chunks "
+          }
+        }
+      },
+      {
+        "offsetMs": 2000,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "Chunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+          }
+        }
+      },
+      {
+        "offsetMs": 2000,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "Chunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+          }
+        }
+      },
+      {
+        "offsetMs": 2000,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "Chunk 4 repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+          }
+        }
+      },
+      {
+        "offsetMs": 2500,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "Chunk 5 finishing up the test. So if the text is long enough you'll have to sroll down to see the final output."
+          }
+        }
+      },
+      {
+        "offsetMs": 3000,
+        "payload": {
+          "case": "telemetryEvent",
+          "value": {
+            "channel": "manager",
+            "event": {
+              "id": "scenario-slow-end",
+              "type": "flow_complete",
+              "timestamp": "2026-10-20T10:00:03Z",
+              "message": "",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"agent_index\": 1, \"passed\": true}"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,19 +1,25 @@
-import { Component, input, output } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ChatItem, FlowState } from '@org/llm-state-chat';
-// Note: You will need to move MarkdownComponent and ChatFlowCardComponent 
-// to a shared ui library or update their imports based on your exact Nx boundaries.
-import { ChatFlowCardComponent, MarkdownComponent } from '@org/llm-ui-chat';
+import { ChatConnectionService } from '@org/llm-state-chat';
+import { ChatFlowCardComponent } from '@org/llm-ui-core';
+import { ScrollViewportComponent } from '../scroll-viewport/scroll-viewport.component';
+import { TimelineFacade } from '../timeline.facade';
+import { UserMessageBlockComponent } from '../blocks/user-message-block.component';
+import { ModelMessageBlockComponent } from '../blocks/model-message-block.component';
 
 @Component({
   selector: 'llm-linear-feed',
   standalone: true,
-  imports: [CommonModule, ChatFlowCardComponent, MarkdownComponent],
-  templateUrl: './linear-feed.component.html',
-  styleUrl: './linear-feed.component.scss'
+  imports: [
+    CommonModule, 
+    ChatFlowCardComponent, 
+    ScrollViewportComponent, 
+    UserMessageBlockComponent, 
+    ModelMessageBlockComponent
+  ],
+  templateUrl: './linear-feed.component.html'
 })
 export class LinearFeedComponent {
-  feed = input.required<ChatItem[]>();
-  flowStates = input.required<Map<string, FlowState>>();
-  inspectFlow = output<string>();
+  public facade = inject(TimelineFacade);
+  public connection = inject(ChatConnectionService);
 }

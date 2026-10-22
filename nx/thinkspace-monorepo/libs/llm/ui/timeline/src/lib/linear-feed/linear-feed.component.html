@@ -1,36 +1,48 @@
-<div class="flex flex-col gap-4">
-  @for (item of feed(); track item.id) {
-    
-    @if (item.source === 'flow_card' && item.flowId) {
-      <div class="w-full">
-        <llm-chat-flow-card 
-          [flow]="flowStates().get(item.flowId)" 
-          [summary]="item.content"
-          (inspect)="inspectFlow.emit($event)">
-        </llm-chat-flow-card>
-      </div>
-    } 
-    
-    @else if (item.source === 'model' || item.source === 'system') {
-      <div class="p-4 rounded-xl bg-gray-50 border border-gray-200 shadow-sm transition-all hover:shadow-md">
-        <strong class="block mb-2 text-[11px] font-bold uppercase tracking-wider text-gray-500">
-          {{ item.source }}
-        </strong>
-        <div class="text-gray-800 text-sm leading-relaxed">
-          <llm-markdown [content]="item.content"></llm-markdown>
+<llm-scroll-viewport (loadPreviousPage)="connection.loadHistoryPage()">
+  
+  @for (item of facade.workingMemoryFeed(); track item.id) {
+    <div class="w-full transition-all duration-300" style="overflow-anchor: none;">
+      
+      @if (item.source === 'flow_card' && item.flowId) {
+        <div [class.opacity-30]="facade.isItemDimmed(item)" [class.h-2]="facade.isItemCollapsed(item)" class="transition-all duration-300 overflow-hidden">
+          @if (!facade.isItemCollapsed(item)) {
+            <llm-chat-flow-card 
+              [flow]="facade.flowStates().get(item.flowId)" 
+              [summary]="item.content"
+              (inspect)="facade.inspectFlow($event)">
+            </llm-chat-flow-card>
+          }
         </div>
-      </div>
-    } 
-    
-    @else {
-      <div class="p-4 rounded-xl bg-blue-50 border border-blue-200 ml-8 shadow-sm">
-        <strong class="block mb-2 text-[11px] font-bold uppercase tracking-wider text-blue-700">
-          {{ item.source }}
-        </strong>
-        <div class="whitespace-pre-wrap text-sm text-blue-900">
-          {{ item.content }}
+      } 
+      
+      @else if (item.source === 'model' || item.source === 'system') {
+        <llm-model-message-block 
+          [source]="item.source" 
+          [content]="item.content"
+          [tags]="item.tags || []"
+          [isDimmed]="facade.isItemDimmed(item)"
+          [isCollapsed]="facade.isItemCollapsed(item)"
+          [activeTag]="facade.hoveredTag() || facade.selectedTag()"
+          (tagHover)="facade.setHoveredTag($event)"
+          (tagClick)="facade.toggleSelectedTag($event)">
+        </llm-model-message-block>
+      } 
+      
+      @else {
+        <!-- User Blocks -->
+        <div 
+          class="transition-all duration-300 overflow-hidden"
+          [ngClass]="{
+            'opacity-30 scale-[0.98]': facade.isItemDimmed(item) && !facade.isItemCollapsed(item),
+            'h-2 opacity-40 py-0 mb-2 bg-blue-100 border-transparent': facade.isItemCollapsed(item)
+          }"
+        >
+          @if (!facade.isItemCollapsed(item)) {
+            <llm-user-message-block [content]="item.content"></llm-user-message-block>
+          }
         </div>
-      </div>
-    }
+      }
+      
+    </div>
   }
-</div>
+</llm-scroll-viewport>

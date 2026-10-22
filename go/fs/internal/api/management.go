@@ -3,7 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
@@ -30,6 +33,14 @@ func (api *ManagementAPI) RegisterHandlers(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/spaces/{space_id}/chats", api.handleListChats)
 	mux.HandleFunc("POST /api/spaces/{space_id}/chats", api.handleCreateChat)
 	mux.HandleFunc("GET /api/spaces/{space_id}/chats/{chat_id}/events", api.handleGetEvents)
+
+	mux.HandleFunc("GET /api/spaces/{space_id}/chats/{chat_id}/contexts", api.handleGetContexts)
+	mux.HandleFunc("POST /api/spaces/{space_id}/chats/{chat_id}/contexts", api.handleCreateContext)
+	mux.HandleFunc("GET /api/spaces/{space_id}/chats/{chat_id}/lenses/{tag}", api.handleGetLenses)
+
+	mux.HandleFunc("DELETE /api/spaces/{space_id}/chats/{chat_id}/events/{id}", api.handleTombstoneEvent)
+	mux.HandleFunc("POST /api/spaces/{space_id}/chats/{chat_id}/events/{id}/restore", api.handleRestoreEvent)
+	mux.HandleFunc("PUT /api/spaces/{space_id}/chats/{chat_id}/events/{id}", api.handleUpdateEvent)
 }
 
 func (api *ManagementAPI) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -134,8 +145,8 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 	chatID := r.PathValue("chat_id")
 	idsParam := r.URL.Query().Get("ids")
 
-	if spaceID == "" || chatID == "" || idsParam == "" {
-		http.Error(w, "Missing space_id, chat_id, or ids parameter", http.StatusBadRequest)
+	if spaceID == "" || chatID == "" {
+		http.Error(w, "Missing space_id or chat_id parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -144,10 +155,47 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ids := strings.Split(idsParam, ",")
 	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	var events []thinkgraph.Event
+	var err error
 
-	events, err := api.manager.GraphStore().GetEvents(r.Context(), chat, ids)
+	if idsParam != "" {
+		ids := strings.Split(idsParam, ",")
+		events, err = api.manager.GraphStore().GetEvents(r.Context(), chat, ids)
+	} else {
+		limit := 50
+		if l, parseErr := strconv.Atoi(r.URL.Query().Get("limit")); parseErr == nil && l > 0 {
+			limit = l
+		}
+		cursor := r.URL.Query().Get("cursor")
+
+		var timeline []thinkgraph.Event
+		timeline, err = api.manager.GraphStore().GetTimeline(r.Context(), chat)
+
+		if err == nil {
+			endIdx := len(timeline)
+			if cursor != "" {
+				for i, ev := range timeline {
+					if ev.ID.String() == cursor {
+						endIdx = i
+						break
+					}
+				}
+			}
+
+			startIdx := endIdx - limit
+			if startIdx < 0 {
+				startIdx = 0
+			}
+
+			if startIdx < endIdx {
+				events = timeline[startIdx:endIdx]
+			} else {
+				events = []thinkgraph.Event{}
+			}
+		}
+	}
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -157,4 +205,193 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 	if err := json.NewEncoder(w).Encode(events); err != nil {
 		http.Error(w, "Failed to encode events", http.StatusInternalServerError)
 	}
+}
+
+func (api *ManagementAPI) handleGetContexts(w http.ResponseWriter, r *http.Request) {
+	spaceID := r.PathValue("space_id")
+	chatID := r.PathValue("chat_id")
+
+	if spaceID == "" || chatID == "" {
+		http.Error(w, "Missing space_id or chat_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	if api.manager.GraphStore() == nil {
+		http.Error(w, "Graph database is not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+
+	contexts, err := api.manager.GraphStore().GetSpaceContexts(r.Context(), chat)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(contexts); err != nil {
+		http.Error(w, "Failed to encode contexts", http.StatusInternalServerError)
+	}
+}
+
+func (api *ManagementAPI) handleCreateContext(w http.ResponseWriter, r *http.Request) {
+	spaceID := r.PathValue("space_id")
+	chatID := r.PathValue("chat_id")
+
+	if spaceID == "" || chatID == "" {
+		http.Error(w, "Missing space_id or chat_id parameter", http.StatusBadRequest)
+		return
+	}
+
+	var payload struct {
+		Content string   `json:"content"`
+		Tags    []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	svc := api.manager.GetService(spaceID)
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+
+	sc := thinkgraph.SpaceContext{
+		ID:      uuid.NewV7(),
+		Content: payload.Content,
+		Tags:    payload.Tags,
+	}
+
+	if err := svc.SaveSpaceContext(r.Context(), chat, sc); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(sc); err != nil {
+		http.Error(w, "Failed to encode created context", http.StatusInternalServerError)
+	}
+}
+
+func (api *ManagementAPI) handleGetLenses(w http.ResponseWriter, r *http.Request) {
+	spaceID := r.PathValue("space_id")
+	chatID := r.PathValue("chat_id")
+	tag := r.PathValue("tag")
+
+	if spaceID == "" || chatID == "" || tag == "" {
+		http.Error(w, "Missing space_id, chat_id, or tag parameter", http.StatusBadRequest)
+		return
+	}
+
+	if api.manager.GraphStore() == nil {
+		http.Error(w, "Graph database is not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+
+	result, err := api.manager.GraphStore().GetLenses(r.Context(), chat, tag)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		http.Error(w, "Failed to encode lens result", http.StatusInternalServerError)
+	}
+}
+
+func (api *ManagementAPI) handleTombstoneEvent(w http.ResponseWriter, r *http.Request) {
+	spaceID := r.PathValue("space_id")
+	chatID := r.PathValue("chat_id")
+	targetIDStr := r.PathValue("id")
+
+	targetID, err := uuid.Parse(targetIDStr)
+	if err != nil {
+		http.Error(w, "Invalid target ID", http.StatusBadRequest)
+		return
+	}
+
+	svc := api.manager.GetService(spaceID)
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+
+	mut := thinkgraph.MutationEvent{
+		TargetID:  targetID,
+		Type:      thinkgraph.MutationTombstone,
+		Timestamp: time.Now().UTC(),
+	}
+
+	if err := svc.SaveMutation(r.Context(), chat, mut); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (api *ManagementAPI) handleRestoreEvent(w http.ResponseWriter, r *http.Request) {
+	spaceID := r.PathValue("space_id")
+	chatID := r.PathValue("chat_id")
+	targetIDStr := r.PathValue("id")
+
+	targetID, err := uuid.Parse(targetIDStr)
+	if err != nil {
+		http.Error(w, "Invalid target ID", http.StatusBadRequest)
+		return
+	}
+
+	svc := api.manager.GetService(spaceID)
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+
+	mut := thinkgraph.MutationEvent{
+		TargetID:  targetID,
+		Type:      thinkgraph.MutationRestore,
+		Timestamp: time.Now().UTC(),
+	}
+
+	if err := svc.SaveMutation(r.Context(), chat, mut); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (api *ManagementAPI) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
+	spaceID := r.PathValue("space_id")
+	chatID := r.PathValue("chat_id")
+	targetIDStr := r.PathValue("id")
+
+	targetID, err := uuid.Parse(targetIDStr)
+	if err != nil {
+		http.Error(w, "Invalid target ID", http.StatusBadRequest)
+		return
+	}
+
+	var payload struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	svc := api.manager.GetService(spaceID)
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+
+	mut := thinkgraph.MutationEvent{
+		TargetID:  targetID,
+		Type:      thinkgraph.MutationUpdate,
+		Timestamp: time.Now().UTC(),
+		Payload:   payload.Content,
+	}
+
+	if err := svc.SaveMutation(r.Context(), chat, mut); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

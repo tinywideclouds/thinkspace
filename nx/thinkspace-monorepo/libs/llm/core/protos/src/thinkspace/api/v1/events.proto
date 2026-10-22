@@ -54,6 +54,17 @@ message SyncHistoryPayload {
   repeated LedgerEvent recent_events = 1;
   map<string, DigestMeta> digests = 2;
   AttentionFocusPayload focus = 3;
+  
+  // Pagination additions
+  string next_cursor = 4;
+  bool has_more = 5;
+}
+
+message LoadHistoryPayload {
+  string space_id = 1;
+  string chat_id = 2;
+  string cursor = 3;  // The ID of the oldest event currently visible
+  int32 limit = 4;    // Number of events to fetch (e.g., 50)
 }
 
 // Core System Payloads
@@ -172,6 +183,7 @@ message WSEvent {
     ReviewDecisionPayload review_decision = 13;
     ApproveContextPayload approve_context = 17;
     TransitionDecisionPayload transition_decision = 21;
+    LoadHistoryPayload load_history = 22;
   }
 }
 

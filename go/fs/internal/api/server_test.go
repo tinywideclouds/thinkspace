@@ -76,7 +76,6 @@ fanout:
 
 	factory := func(repoRoot string) workspace.ChatEngine { return nil }
 
-	// Passing nil for the GraphRepository
 	manager := workspace.NewServiceManager(logger, baseRoot, factory, nil)
 
 	mockClient := &mockModelClient{}

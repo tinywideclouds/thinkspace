@@ -26,15 +26,22 @@ type Service struct {
 	workspaceRoot string
 	bus           *thinkgraph.EventBus
 	graph         thinkgraph.GraphRepository
+	store         *thinkgraph.Store
 }
 
 func NewService(logger *slog.Logger, engine ChatEngine, workspaceRoot string, bus *thinkgraph.EventBus, graph thinkgraph.GraphRepository) *Service {
+	var store *thinkgraph.Store
+	if graph != nil {
+		store = thinkgraph.NewStore(graph, thinkgraph.NewFileLedger(1000, workspaceRoot))
+	}
+
 	return &Service{
 		logger:        logger,
 		engine:        engine,
 		workspaceRoot: workspaceRoot,
 		bus:           bus,
 		graph:         graph,
+		store:         store,
 	}
 }
 
@@ -69,6 +76,12 @@ func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*
 	}
 	if err := os.MkdirAll(filepath.Join(ledgerPath, "digests"), 0755); err != nil {
 		return nil, fmt.Errorf("creating ledger digests dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(ledgerPath, "mutations"), 0755); err != nil {
+		return nil, fmt.Errorf("creating ledger mutations dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(ledgerPath, "contexts"), 0755); err != nil {
+		return nil, fmt.Errorf("creating ledger contexts dir: %w", err)
 	}
 
 	if s.graph != nil {
@@ -315,4 +328,18 @@ func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.Chat, summary str
 	}
 
 	return s.bus.Publish(ctx, c, event)
+}
+
+func (s *Service) SaveMutation(ctx context.Context, c *thinkgraph.Chat, mut thinkgraph.MutationEvent) error {
+	if s.store == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	return s.store.SaveMutation(ctx, c, mut)
+}
+
+func (s *Service) SaveSpaceContext(ctx context.Context, c *thinkgraph.Chat, sc thinkgraph.SpaceContext) error {
+	if s.store == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	return s.store.SaveSpaceContext(ctx, c, sc)
 }

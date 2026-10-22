@@ -53,7 +53,9 @@ export class LlmFacade {
             primaryFocus: protocolBufferEvent.payload.value.focus?.primaryFocus || [],
             relatedContext: protocolBufferEvent.payload.value.focus?.relatedContext || [],
             dormantLenses: protocolBufferEvent.payload.value.focus?.dormantLenses || []
-          }
+          },
+          nextCursor: protocolBufferEvent.payload.value.nextCursor,
+          hasMore: protocolBufferEvent.payload.value.hasMore
         };
 
       case 'previewContext':
@@ -109,6 +111,12 @@ export class LlmFacade {
   static createSubmitPrompt(text: string, spaceId: string, chatId: string): WSEvent {
     return create(WSEventSchema, {
       payload: { case: 'submitPrompt', value: { text, spaceId, chatId } }
+    });
+  }
+
+  static createLoadHistory(spaceId: string, chatId: string, cursor: string, limit: number): WSEvent {
+    return create(WSEventSchema, {
+      payload: { case: 'loadHistory', value: { spaceId, chatId, cursor, limit } }
     });
   }
 

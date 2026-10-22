@@ -29,7 +29,6 @@ func NewRehydrator(graph GraphRepository, workspaceRoot string) *Rehydrator {
 	return &Rehydrator{graph: graph, workspaceRoot: workspaceRoot}
 }
 
-// CheckSync compares the physical disk truth against the BadgerDB index.
 func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *LedgerManifest, *LedgerManifest, error) {
 	ledgerDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger")
 
@@ -43,14 +42,11 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *Ledge
 		return SyncStatusMismatch, nil, nil, fmt.Errorf("failed to get graph sync state: %w", err)
 	}
 
-	// Cold Boot: New Chat or Wiped DB
 	if graphManifest == nil {
 		if diskManifest.TotalEvents == 0 {
-			// Fast-path for brand new, empty chats. Just initialize empty sync state.
 			_ = r.graph.SetSyncState(ctx, c, *diskManifest)
 			return SyncStatusOK, diskManifest, diskManifest, nil
 		}
-		// Populated disk, but empty Badger. (e.g. server restart on a new machine)
 		return SyncStatusMismatch, diskManifest, nil, nil
 	}
 
@@ -62,11 +58,9 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *Ledge
 		return SyncStatusBehind, diskManifest, graphManifest, nil
 	}
 
-	// The Graph has more events than Disk (User altered git history, e.g., git reset --hard)
 	return SyncStatusMismatch, diskManifest, graphManifest, nil
 }
 
-// FastForward streams only the missing events from the tail of the disk shards into the graph.
 func (r *Rehydrator) FastForward(ctx context.Context, c *Chat, graphManifest, diskManifest *LedgerManifest) error {
 	logsDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "logs")
 	entries, err := os.ReadDir(logsDir)
@@ -120,15 +114,31 @@ func (r *Rehydrator) FastForward(ctx context.Context, c *Chat, graphManifest, di
 	return r.graph.SetSyncState(ctx, c, *diskManifest)
 }
 
-// Rebuild clears the specific chat's graph prefix and streams the physical disk reality back in.
 func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 	if err := r.graph.ClearChatGraph(ctx, c); err != nil {
 		return fmt.Errorf("failed to clear graph: %w", err)
 	}
 
-	// 1. Re-ingest Digests (Markdown -> Badger)
+	// 1. Re-ingest SpaceContexts (Markdown -> Badger)
+	contextsDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "contexts")
+	entries, err := os.ReadDir(contextsDir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				content, err := os.ReadFile(filepath.Join(contextsDir, e.Name()))
+				if err == nil {
+					spaceCtx := r.parseSpaceContextMarkdown(e.Name(), string(content))
+					if spaceCtx.ID != (uuid.UUID{}) {
+						_ = r.graph.SaveSpaceContext(ctx, c, spaceCtx)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Re-ingest Digests (Markdown -> Badger)
 	digestsDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "digests")
-	entries, err := os.ReadDir(digestsDir)
+	entries, err = os.ReadDir(digestsDir)
 	if err == nil {
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
@@ -143,7 +153,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 		}
 	}
 
-	// 2. Re-ingest Event Shards (.jsonl -> Badger)
+	// 3. Re-ingest Event Shards (.jsonl -> Badger)
 	ledgerDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger")
 	diskManifest, err := LoadOrRebuildManifest(ledgerDir)
 	if err != nil {
@@ -151,20 +161,43 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 	}
 
 	emptyGraphManifest := &LedgerManifest{TotalEvents: 0}
-	return r.FastForward(ctx, c, emptyGraphManifest, diskManifest)
+	if err := r.FastForward(ctx, c, emptyGraphManifest, diskManifest); err != nil {
+		return err
+	}
+
+	// 4. Replay Mutations chronologically to re-establish tombstone and update states
+	mutationsDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "mutations")
+	entries, err = os.ReadDir(mutationsDir)
+	if err == nil {
+		var mutFiles []string
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+				mutFiles = append(mutFiles, e.Name())
+			}
+		}
+		sort.Strings(mutFiles) // Chronological execution based on unixnano prefixes
+
+		for _, filename := range mutFiles {
+			if data, err := os.ReadFile(filepath.Join(mutationsDir, filename)); err == nil {
+				var mut MutationEvent
+				if json.Unmarshal(data, &mut) == nil {
+					_ = r.graph.SaveMutation(ctx, c, mut)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (r *Rehydrator) parseDigestMarkdown(filename, content string) DigestMeta {
 	idStr := strings.TrimSuffix(filename, ".md")
-
 	id, err := uuid.Parse(idStr)
 	if err != nil {
 		id = uuid.UUID{}
 	}
 
-	meta := DigestMeta{
-		ID: id,
-	}
+	meta := DigestMeta{ID: id}
 
 	if strings.HasPrefix(content, "---") {
 		parts := strings.SplitN(content, "---", 3)
@@ -173,8 +206,13 @@ func (r *Rehydrator) parseDigestMarkdown(filename, content string) DigestMeta {
 			meta.Summary = strings.TrimSpace(parts[2])
 
 			if strings.Contains(frontmatter, "sticky: true") {
-				meta.IsSticky = true
+				meta.Promoted = true
 			}
+			if strings.Contains(frontmatter, "tombstoned: true") {
+				meta.Tombstoned = true
+			}
+
+			meta.Tags = r.extractTags(frontmatter)
 
 			if strings.Contains(frontmatter, "summarizes: [") {
 				start := strings.Index(frontmatter, "summarizes: [") + 13
@@ -197,4 +235,49 @@ func (r *Rehydrator) parseDigestMarkdown(filename, content string) DigestMeta {
 	}
 
 	return meta
+}
+
+func (r *Rehydrator) parseSpaceContextMarkdown(filename, content string) SpaceContext {
+	idStr := strings.TrimSuffix(filename, ".md")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		id = uuid.UUID{}
+	}
+
+	sc := SpaceContext{ID: id}
+
+	if strings.HasPrefix(content, "---") {
+		parts := strings.SplitN(content, "---", 3)
+		if len(parts) >= 3 {
+			frontmatter := parts[1]
+			sc.Content = strings.TrimSpace(parts[2])
+			sc.Tags = r.extractTags(frontmatter)
+
+			if strings.Contains(frontmatter, "tombstoned: true") {
+				sc.Tombstoned = true
+			}
+		}
+	} else {
+		sc.Content = content
+	}
+
+	return sc
+}
+
+func (r *Rehydrator) extractTags(frontmatter string) []string {
+	var tags []string
+	if strings.Contains(frontmatter, "tags: [") {
+		start := strings.Index(frontmatter, "tags: [") + 7
+		end := strings.Index(frontmatter[start:], "]")
+		if end != -1 {
+			arr := frontmatter[start : start+end]
+			if strings.TrimSpace(arr) != "" {
+				for _, p := range strings.Split(arr, ",") {
+					p = strings.Trim(strings.TrimSpace(p), `"`)
+					tags = append(tags, p)
+				}
+			}
+		}
+	}
+	return tags
 }

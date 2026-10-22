@@ -10,13 +10,19 @@ import (
 )
 
 func TestAssembler_Build(t *testing.T) {
-	manifest := thinkgraph.NewChatManifest("test-thread")
+	manifest := thinkgraph.NewChatManifest()
 
 	stickyID := uuid.NewV7()
 	manifest.Digests[stickyID] = thinkgraph.DigestMeta{
 		ID:       stickyID,
 		Summary:  "Always remember the user prefers idiomatic Go.",
-		IsSticky: true,
+		Promoted: true,
+	}
+
+	ruleID := uuid.NewV7()
+	manifest.SpaceContexts[ruleID] = thinkgraph.SpaceContext{
+		ID:      ruleID,
+		Content: "Use PostgreSQL exclusively.",
 	}
 
 	assemblyRequest := thinkgraph.TrajectoryRequest{
@@ -40,8 +46,8 @@ func TestAssembler_Build(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(trajectory.LongTermMemory) != 2 {
-		t.Fatalf("Expected 2 long-term memory items (1 metadata + 1 sticky), got %d", len(trajectory.LongTermMemory))
+	if len(trajectory.LongTermMemory) != 3 {
+		t.Fatalf("Expected 3 long-term memory items (1 metadata + 1 sticky + 1 rule), got %d", len(trajectory.LongTermMemory))
 	}
 
 	// Assert the new Contextual Horizon metadata was injected first
@@ -52,9 +58,14 @@ func TestAssembler_Build(t *testing.T) {
 		t.Errorf("Metadata did not properly format the AttentionFocus tags")
 	}
 
-	// Assert the sticky memory was appended after the metadata
-	if !strings.Contains(trajectory.LongTermMemory[1], "idiomatic Go") {
-		t.Errorf("Missing sticky context in second slot")
+	// Assert the context rule memory was appended
+	if !strings.Contains(trajectory.LongTermMemory[1], "Use PostgreSQL") {
+		t.Errorf("Missing SpaceContext rule in second slot")
+	}
+
+	// Assert the sticky digest was appended
+	if !strings.Contains(trajectory.LongTermMemory[2], "idiomatic Go") {
+		t.Errorf("Missing promoted digest in third slot")
 	}
 
 	if len(trajectory.WorkingMemory) != 1 {

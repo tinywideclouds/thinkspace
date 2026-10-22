@@ -1,124 +1,126 @@
-<div class="chat-layout flex h-screen w-full bg-white overflow-hidden font-sans">
+<div class="flex flex-col h-full w-full bg-white overflow-hidden font-sans">
   
-  <!-- Left/Main Column: Chat & Topology -->
-  <main class="flex-1 flex flex-col min-w-0 border-r border-gray-200">
-    
-    <!-- Header Area -->
-    <div class="flex flex-col z-20 bg-white shadow-sm">
-      <div class="p-4 flex justify-between items-center border-b border-gray-100">
-        <llm-chat-header
-          class="flex-1 mr-6"
-          [spaces]="workspaceState.spaces()"
-          [activeSpaceId]="workspaceState.activeSpaceId()"
-          [chats]="workspaceState.chats()"
-          [activeChatId]="workspaceState.activeChatId()"
-          (spaceSelected)="onSpaceSelected($event)"
-          (chatSelected)="onChatSelected($event)"
-          (newChatRequested)="onNewChatRequested()">
-        </llm-chat-header>
-        
-        <div class="flex items-center gap-4">
-          <div class="flex bg-gray-100 p-1 rounded-lg">
-            <button 
-              (click)="viewMode.set('linear')"
-              class="px-4 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-all duration-200"
-              [ngClass]="viewMode() === 'linear' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
-              Linear
-            </button>
-            <button 
-              (click)="viewMode.set('cognitive')"
-              class="px-4 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-all duration-200"
-              [ngClass]="viewMode() === 'cognitive' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
-              Graph
-            </button>
-          </div>
-          <div class="text-[11px] font-bold uppercase tracking-wider" [class.text-green-600]="chatState.connected()" [class.text-red-500]="!chatState.connected()">
-            {{ chatState.connected() ? '🟢' : '🔴' }}
-          </div>
+  <!-- Top Full-Width Header Area -->
+  <header class="flex flex-col z-20 bg-white shadow-sm shrink-0">
+    <div class="p-4 flex justify-between items-center border-b border-gray-100">
+      <llm-chat-header
+        class="flex-1 mr-6"
+        [spaces]="workspaceState.spaces()"
+        [activeSpaceId]="workspaceState.activeSpaceId()"
+        [chats]="workspaceState.chats()"
+        [activeChatId]="workspaceState.activeChatId()"
+        (spaceSelected)="onSpaceSelected($event)"
+        (chatSelected)="onChatSelected($event)"
+        (newChatRequested)="onNewChatRequested()">
+      </llm-chat-header>
+      
+      <div class="flex items-center gap-4">
+        <div class="flex bg-gray-100 p-1 rounded-lg">
+          <button 
+            (click)="timelineFacade.viewMode.set('linear')"
+            class="px-4 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-all duration-200"
+            [ngClass]="timelineFacade.viewMode() === 'linear' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+            Linear
+          </button>
+          <button 
+            (click)="timelineFacade.viewMode.set('cognitive')"
+            class="px-4 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-all duration-200"
+            [ngClass]="timelineFacade.viewMode() === 'cognitive' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+            Graph
+          </button>
+        </div>
+        <div class="text-[11px] font-bold uppercase tracking-wider" [class.text-green-600]="connection.connected()" [class.text-red-500]="!connection.connected()">
+          {{ connection.connected() ? '🟢' : '🔴' }}
         </div>
       </div>
-
-      <!-- Cognitive Focus HUD -->
-      <llm-focus-hud
-        [focus]="chatState.activeFocus()"
-        [activeHoverTag]="hoveredTag()"
-        (tagHovered)="hoveredTag.set($event)">
-      </llm-focus-hud>
     </div>
+
+    <!-- Cognitive Focus HUD -->
+    <llm-focus-hud
+      [focus]="timelineFacade.activeFocus()"
+      [activeHoverTag]="timelineFacade.hoveredTag()"
+      (tagHovered)="timelineFacade.setHoveredTag($event)"
+      (tagClicked)="timelineFacade.toggleSelectedTag($event)">
+    </llm-focus-hud>
+  </header>
+
+  <!-- Bottom Split Content Area -->
+  <div class="flex flex-1 overflow-hidden">
     
-    <!-- Dynamic Workspace Area -->
-    <div class="flex-1 overflow-y-auto bg-gray-50 relative">
-      @if (viewMode() === 'linear') {
-        <div class="max-w-4xl mx-auto w-full p-6">
-          <llm-linear-feed></llm-linear-feed>
-        </div>
-      } @else {
-        <div class="w-full h-full">
-          <llm-cognitive-graph></llm-cognitive-graph>
-        </div>
-      }
-    </div>
-
-    <!-- Input Footer -->
-    <div class="p-4 bg-white border-t border-gray-200 shrink-0 z-20">
-      <div class="max-w-4xl mx-auto w-full">
-        @if (chatState.pendingContextReview(); as contextReview) {
-          <llm-context-inspector
-            [context]="contextReview"
-            (approve)="chatState.submitContextApproval(true, $event.retainedFilePaths, $event.retainedHistoryIndices)"
-            (reviewCancelled)="chatState.submitContextApproval(false)"
-            (copyFull)="chatState.copyFullContextPreview($event)">
-          </llm-context-inspector>
-        } @else if (chatState.pendingTransition(); as transition) {
-          <llm-chat-transition-prompt 
-            [targetDomain]="transition.targetDomain"
-            [reasoning]="transition.reasoning"
-            (transitionDecided)="chatState.submitTransitionDecision($event)">
-          </llm-chat-transition-prompt>
-        } @else if (chatState.pendingStrategy()) {
-          <llm-chat-strategy-prompt 
-            (strategySelected)="chatState.selectStrategy($event)">
-          </llm-chat-strategy-prompt>
-        } @else if (chatState.pendingReviewBranch(); as branch) {
-          <llm-chat-review-prompt 
-            [branch]="branch" 
-            (reviewDecided)="chatState.submitReview($event)">
-          </llm-chat-review-prompt>
+    <!-- Left/Main Column: Chat & Topology -->
+    <main class="flex-1 flex flex-col min-w-0 border-r border-gray-200">
+      
+      <!-- Dynamic Workspace Area (Feed/Graph) -->
+      <div class="flex-1 overflow-hidden bg-gray-50 relative">
+        @if (timelineFacade.viewMode() === 'linear') {
+          <div class="max-w-4xl mx-auto w-full h-full">
+            <llm-linear-feed class="block h-full w-full"></llm-linear-feed>
+          </div>
         } @else {
-          <llm-chat-input 
-            (sendPrompt)="chatState.submitPrompt($event)">
-          </llm-chat-input>
+          <div class="w-full h-full">
+            <llm-cognitive-graph></llm-cognitive-graph>
+          </div>
         }
       </div>
-    </div>
-  </main>
 
-  <!-- Right Column: Workbench & Flow Tracker -->
-  <aside class="w-80 flex flex-col shrink-0 bg-white z-30 relative shadow-[-4px_0_15px_rgba(0,0,0,0.03)]">
-    <!-- Top Half: Materialized Desk -->
-    <div class="h-1/2 min-h-[300px] border-b border-gray-200">
-      <llm-desk
-        [items]="chatState.activeWorkbench()">
-      </llm-desk>
-    </div>
+      <!-- Input Footer -->
+      <div class="p-4 bg-white border-t border-gray-200 shrink-0 z-20">
+        <div class="max-w-4xl mx-auto w-full">
+          @if (cognitive.pendingContextReview(); as contextReview) {
+            <llm-context-inspector
+              [context]="contextReview"
+              (approve)="connection.submitContextApproval(true, $event.retainedFilePaths, $event.retainedHistoryIndices)"
+              (reviewCancelled)="connection.submitContextApproval(false)"
+              (copyFull)="cognitive.copyFullContextPreview($event)">
+            </llm-context-inspector>
+          } @else if (cognitive.pendingTransition(); as transition) {
+            <llm-chat-transition-prompt 
+              [targetDomain]="transition.targetDomain"
+              [reasoning]="transition.reasoning"
+              (transitionDecided)="connection.submitTransitionDecision($event)">
+            </llm-chat-transition-prompt>
+          } @else if (cognitive.pendingStrategy()) {
+            <llm-chat-strategy-prompt 
+              (strategySelected)="connection.selectStrategy($event)">
+            </llm-chat-strategy-prompt>
+          } @else if (cognitive.pendingReviewBranch(); as branch) {
+            <llm-chat-review-prompt 
+              [branch]="branch" 
+              (reviewDecided)="connection.submitReview($event)">
+            </llm-chat-review-prompt>
+          } @else {
+            <llm-chat-input 
+              (sendPrompt)="connection.submitPrompt($event)">
+            </llm-chat-input>
+          }
+        </div>
+      </div>
+    </main>
 
-    <!-- Bottom Half: Flow Tracker -->
-    <div class="flex-1 overflow-hidden bg-gray-50">
-      <llm-flow-tracker 
-        [systemLogs]="chatState.systemLogs()"
-        [flows]="chatState.flowStates()"
-        [retainLogs]="chatState.retainLogs()"
-        (toggleRetainLogs)="chatState.retainLogs.set(!chatState.retainLogs())"
-        (manualClearLogs)="chatState.manualClearLogs()">
-      </llm-flow-tracker>
-    </div>
-  </aside>
+    <!-- Right Column: Workbench & Flow Tracker -->
+    <aside class="w-80 flex flex-col shrink-0 bg-white z-30 relative shadow-[-4px_0_15px_rgba(0,0,0,0.03)]">
+      <div class="h-1/2 min-h-[300px] border-b border-gray-200">
+        <llm-desk [items]="cognitive.activeWorkbench()"></llm-desk>
+      </div>
+
+      <div class="flex-1 overflow-hidden bg-gray-50">
+        <llm-flow-tracker 
+          [systemLogs]="flow.systemLogs()"
+          [flows]="flow.flowStates()"
+          [retainLogs]="flow.retainLogs()"
+          (toggleRetainLogs)="flow.retainLogs.set(!flow.retainLogs())"
+          (manualClearLogs)="flow.manualClearLogs()">
+        </llm-flow-tracker>
+      </div>
+    </aside>
+
+  </div>
 
   <!-- Modals -->
-  @if (chatState.inspectedReceipt()) {
+  @if (flow.inspectedReceipt()) {
     <llm-flow-inspector 
-      [receiptXml]="chatState.inspectedReceipt()!"
-      (close)="chatState.inspectedReceipt.set(null)">
+      [receiptXml]="flow.inspectedReceipt()!"
+      (close)="flow.inspectedReceipt.set(null)">
     </llm-flow-inspector>
   }
 </div>

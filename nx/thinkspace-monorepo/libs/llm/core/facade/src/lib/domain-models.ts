@@ -56,7 +56,7 @@ export type DomainEvent =
   | { type: 'request_review'; branch: string }
   | { type: 'request_transition'; targetDomain: string; reasoning: string }
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
-  | { type: 'sync_history'; recentEvents: DomainLedgerEvent[]; digests: Record<string, DomainDigestMeta>; focus: DomainAttentionFocus }
+  | { type: 'sync_history'; recentEvents: DomainLedgerEvent[]; digests: Record<string, DomainDigestMeta>; focus: DomainAttentionFocus; nextCursor: string; hasMore: boolean }
   | { type: 'preview_context'; context: DomainPreviewContext }
   | { type: 'agent_stream'; agentId: number; text: string }
   | DomainTelemetryEvent;
