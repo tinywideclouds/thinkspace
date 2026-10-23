@@ -149,7 +149,7 @@
         "payload": {
           "case": "chatStream",
           "value": {
-            "text": "Chunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+            "text": "\nChunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
           }
         }
       },
@@ -158,7 +158,7 @@
         "payload": {
           "case": "chatStream",
           "value": {
-            "text": "Chunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+            "text": "\nChunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
           }
         }
       },
@@ -167,16 +167,34 @@
         "payload": {
           "case": "chatStream",
           "value": {
-            "text": "Chunk 4 repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+            "text": "\nChunk 5 repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
           }
         }
       },
       {
-        "offsetMs": 2500,
+        "offsetMs": 2000,
         "payload": {
           "case": "chatStream",
           "value": {
-            "text": "Chunk 5 finishing up the test. So if the text is long enough you'll have to sroll down to see the final output."
+            "text": "\nChunk 6 repeated repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+          }
+        }
+      },
+      {
+        "offsetMs": 4000,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "\nChunk 7 short again. <br> But delayed \n"
+          }
+        }
+      },
+      {
+        "offsetMs": 3500,
+        "payload": {
+          "case": "chatStream",
+          "value": {
+            "text": "\nChunk 8 finishing up the test. So if the text is long enough you'll have to sroll down to see the final output."
           }
         }
       },

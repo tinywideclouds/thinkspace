@@ -89,4 +89,7 @@ files:
   - libs/llm/ui/timeline/src/lib/scroll-viewport/scroll-viewport.component.scss
   - libs/llm/ui/timeline/src/lib/scroll-viewport/scroll-viewport.component.ts
   - libs/llm/ui/workbench/src/lib/desk/desk.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/blocks/file-delta-block.component.ts
+  - libs/llm/ui/timeline/src/lib/blocks/model-message-block.component.ts
+  - libs/llm/ui/timeline/src/lib/blocks/user-message-block.component.ts
 last_context: llm_ui_04.md

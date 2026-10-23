@@ -1,23 +1,40 @@
+<!-- 
+  ! DO NOT REMOVE OR HIDE SENTINEL DOM ELEMENTS !
+  This viewport relies on native IntersectionObserver physics. The invisible sentinels at the top and bottom 
+  of this wrapper MUST remain in the DOM to trigger auto-scroll halts and pagination. 
+-->
 <div class="relative w-full h-full flex flex-col overflow-hidden bg-gray-50">
   
-  <!-- Top Sentinel for Pagination -->
-  <div #topSentinel class="h-1 w-full shrink-0"></div>
+  @if (isDebugMode()) {
+    <div class="absolute top-2 right-2 bg-black/80 text-green-400 font-mono text-[10px] p-2 rounded z-50 pointer-events-none flex flex-col gap-1">
+      <div>Top Content Visible: <span [class.text-white]="topContentVisible()">{{ topContentVisible() }}</span></div>
+      <div>Active Prompt Visible: <span [class.text-white]="ceilingAnchorVisible()">{{ ceilingAnchorVisible() }}</span></div>
+      <div>Ceiling Locked: <span [class.text-red-400]="ceilingLocked()">{{ ceilingLocked() }}</span></div>
+    </div>
+  }
 
-  <!-- Main Scroll Area: Overflow anchor auto handles history prepend jumping -->
+  <!-- TOP SENTINEL (Pagination Trigger) -->
+  <div #topSentinel class="w-full shrink-0 transition-all"
+       [ngClass]="isDebugMode() ? 'h-2 bg-blue-500/50 border border-blue-600 z-10 flex items-center justify-center text-[8px] font-bold text-blue-900' : 'h-[1px] opacity-0'">
+    @if (isDebugMode()) { TOP SENTINEL }
+  </div>
+
   <div 
     #scrollContainer
     class="flex-1 overflow-y-auto w-full relative" 
-    style="overflow-anchor: auto;">
+    style="overflow-anchor: none;">
     
     <div class="flex flex-col gap-4 p-6 min-h-full">
       <ng-content></ng-content>
       
-      <!-- Bottom Sentinel for Auto-Scroll Lock -->
-      <div #bottomSentinel class="h-1 w-full shrink-0 mt-2" style="overflow-anchor: auto;"></div>
+      <!-- BOTTOM SENTINEL (Auto-Scroll Lock Trigger) -->
+      <div #bottomSentinel class="w-full shrink-0 mt-2 transition-all"
+           [ngClass]="isDebugMode() ? 'h-2 bg-green-500/50 border border-green-600 z-10 flex items-center justify-center text-[8px] font-bold text-green-900' : 'h-[1px] opacity-0'">
+        @if (isDebugMode()) { BOTTOM SENTINEL }
+      </div>
     </div>
   </div>
 
-  <!-- Floating Unread Pill -->
   @if (!isAtBottom() && unreadIndicatorActive()) {
     <button 
       (click)="scrollToBottom()"

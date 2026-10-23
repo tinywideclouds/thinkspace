@@ -10,6 +10,7 @@ export class TimelineFacade {
   private cognitive = inject(CognitiveStore);
 
   public viewMode = signal<TimelineViewMode>('linear');
+  public isDebugMode = signal<boolean>(true);
   
   public hoveredTag = signal<string | null>(null);
   public selectedTag = signal<string | null>(null);
@@ -22,7 +23,6 @@ export class TimelineFacade {
   public enhancedFeed = computed<ChatItem[]>(() => {
     const feed = this.rawFeed();
     return feed.map((item, index) => {
-      // If it's a user prompt, inherit tags from the subsequent model response
       if (item.source === 'user') {
         const nextItem = feed[index + 1];
         if (nextItem && (nextItem.source === 'model' || nextItem.source === 'system') && nextItem.tags) {
@@ -42,6 +42,10 @@ export class TimelineFacade {
 
   public toggleViewMode(): void {
     this.viewMode.update(m => m === 'linear' ? 'cognitive' : 'linear');
+  }
+
+  public toggleDebugMode(): void {
+    this.isDebugMode.update(m => !m);
   }
 
   public inspectFlow(flowId: string): void {

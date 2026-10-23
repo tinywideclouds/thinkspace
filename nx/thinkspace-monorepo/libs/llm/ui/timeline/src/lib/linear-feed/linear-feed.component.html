@@ -1,48 +1,101 @@
-<llm-scroll-viewport (loadPreviousPage)="connection.loadHistoryPage()">
-  
-  @for (item of facade.workingMemoryFeed(); track item.id) {
-    <div class="w-full transition-all duration-300" style="overflow-anchor: none;">
-      
-      @if (item.source === 'flow_card' && item.flowId) {
-        <div [class.opacity-30]="facade.isItemDimmed(item)" [class.h-2]="facade.isItemCollapsed(item)" class="transition-all duration-300 overflow-hidden">
-          @if (!facade.isItemCollapsed(item)) {
-            <llm-chat-flow-card 
-              [flow]="facade.flowStates().get(item.flowId)" 
-              [summary]="item.content"
-              (inspect)="facade.inspectFlow($event)">
-            </llm-chat-flow-card>
-          }
-        </div>
-      } 
-      
-      @else if (item.source === 'model' || item.source === 'system') {
-        <llm-model-message-block 
-          [source]="item.source" 
-          [content]="item.content"
-          [tags]="item.tags || []"
-          [isDimmed]="facade.isItemDimmed(item)"
-          [isCollapsed]="facade.isItemCollapsed(item)"
-          [activeTag]="facade.hoveredTag() || facade.selectedTag()"
-          (tagHover)="facade.setHoveredTag($event)"
-          (tagClick)="facade.toggleSelectedTag($event)">
-        </llm-model-message-block>
-      } 
-      
-      @else {
-        <!-- User Blocks -->
-        <div 
-          class="transition-all duration-300 overflow-hidden"
-          [ngClass]="{
-            'opacity-30 scale-[0.98]': facade.isItemDimmed(item) && !facade.isItemCollapsed(item),
-            'h-2 opacity-40 py-0 mb-2 bg-blue-100 border-transparent': facade.isItemCollapsed(item)
-          }"
-        >
-          @if (!facade.isItemCollapsed(item)) {
-            <llm-user-message-block [content]="item.content"></llm-user-message-block>
-          }
-        </div>
-      }
-      
-    </div>
+<div class="relative w-full h-full">
+
+  <!-- Debug Indicator -->
+  @if (facade.isDebugMode()) {
+    <button 
+      (click)="facade.toggleDebugMode()"
+      class="absolute top-2 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white font-bold text-[10px] px-3 py-1 rounded-full shadow-md hover:bg-red-700 transition-colors group"
+      title="Visual bumpers are active to debug scroll intersection physics. Click to disable.">
+      [!] SCROLL PHYSICS DEBUG ACTIVE
+      <span class="hidden group-hover:inline ml-2 text-red-200">Click to disable</span>
+    </button>
   }
-</llm-scroll-viewport>
+
+  <llm-scroll-viewport 
+    [ceilingAnchor]="activeAnchorElement()" 
+    [topContentAnchor]="topAnchorElement()"
+    [isDebugMode]="facade.isDebugMode()"
+    (loadPreviousPage)="connection.loadHistoryPage()">
+    
+    <!-- 
+      ! DO NOT REMOVE START ANCHOR !
+      Powers visibility logic for pagination/scroll checks. 
+    -->
+    <div #topAnchor class="w-full shrink-0 transition-all"
+         [ngClass]="facade.isDebugMode() ? 'h-[4em] bg-purple-500/20 border-2 border-dashed border-purple-500 z-10 flex items-center justify-center text-purple-700 text-[10px] font-bold mb-4' : 'h-1 mb-2 opacity-0'">
+      @if (facade.isDebugMode()) { START OF CONTENT BOX }
+    </div>
+
+    @for (item of facade.workingMemoryFeed(); track item.id) {
+      <div class="w-full transition-all duration-300">
+        
+        @if (item.source === 'flow_card' && item.flowId) {
+          <div [class.opacity-30]="facade.isItemDimmed(item)" [class.h-2]="facade.isItemCollapsed(item)" class="transition-all duration-300 overflow-hidden">
+            @if (!facade.isItemCollapsed(item)) {
+              <llm-chat-flow-card 
+                [flow]="facade.flowStates().get(item.flowId)" 
+                [summary]="item.content"
+                (inspect)="facade.inspectFlow($event)">
+              </llm-chat-flow-card>
+            }
+          </div>
+        } 
+        
+        @else if (item.source === 'model' || item.source === 'system') {
+          <llm-model-message-block 
+            [source]="item.source" 
+            [content]="item.content"
+            [tags]="item.tags || []"
+            [isDimmed]="facade.isItemDimmed(item)"
+            [isCollapsed]="facade.isItemCollapsed(item)"
+            [activeTag]="facade.hoveredTag() || facade.selectedTag()"
+            (tagHover)="facade.setHoveredTag($event)"
+            (tagClick)="facade.toggleSelectedTag($event)">
+          </llm-model-message-block>
+        } 
+
+        <!-- Mock representation for file_delta source -->
+        @else if (item.source === 'file_delta') {
+          <div [class.opacity-30]="facade.isItemDimmed(item)" [class.h-2]="facade.isItemCollapsed(item)" class="transition-all duration-300 overflow-hidden">
+            @if (!facade.isItemCollapsed(item)) {
+              <llm-file-delta-block
+                [path]="'src/example.go'"
+                [summary]="item.content"
+                [fullContent]="'package main\n\nfunc main() {\n  // Added logic\n  println(1)\n}'"
+                [highlightLines]="[4, 5]">
+              </llm-file-delta-block>
+            }
+          </div>
+        }
+        
+        @else {
+          <!-- User Blocks -->
+          <div 
+            class="relative transition-all duration-300"
+            [ngClass]="{
+              'opacity-30 scale-[0.98]': facade.isItemDimmed(item) && !facade.isItemCollapsed(item),
+              'h-2 opacity-40 py-0 mb-2 bg-blue-100 border-transparent overflow-hidden': facade.isItemCollapsed(item)
+            }"
+          >
+            @if (!facade.isItemCollapsed(item)) {
+              <llm-user-message-block [content]="item.content"></llm-user-message-block>
+              
+              <!-- 
+                ! DO NOT REMOVE ACTIVE ANCHOR !
+                Triggers native scroll-halting in the Viewport when this prompt reaches the top.
+              -->
+              @if (item.id === activeUserPromptId()) {
+                <div #activeAnchor class="absolute bottom-0 w-full pointer-events-none transition-all" 
+                     [style.height]="contextBoxHeight()"
+                     [ngClass]="facade.isDebugMode() ? 'bg-red-500/20 border-2 border-dashed border-red-500 z-10 flex items-start justify-center pt-1 text-red-700 text-[10px] font-bold' : 'opacity-0'">
+                  @if (facade.isDebugMode()) { ACTIVE PROMPT ANCHOR }
+                </div>
+              }
+            }
+          </div>
+        }
+        
+      </div>
+    }
+  </llm-scroll-viewport>
+</div>
