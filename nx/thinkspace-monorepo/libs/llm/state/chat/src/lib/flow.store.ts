@@ -1,6 +1,6 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { WorkspaceStateService } from './workspace-state.service';
+import { ThinkspaceStateService } from './thinkspace-state.service';
 import { DomainTelemetryEvent } from '@org/llm-core-facade';
 import { firstValueFrom } from 'rxjs';
 import { LogItem, FlowState, FlowAgentState } from './chat.models';
@@ -8,7 +8,7 @@ import { LogItem, FlowState, FlowAgentState } from './chat.models';
 @Injectable({ providedIn: 'root' })
 export class FlowStore {
   private httpClient = inject(HttpClient);
-  private workspaceState = inject(WorkspaceStateService);
+  private workspaceState = inject(ThinkspaceStateService);
 
   public flowStates = signal<Map<string, FlowState>>(new Map());
   public systemLogs = signal<LogItem[]>([]);

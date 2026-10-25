@@ -92,4 +92,11 @@ files:
   - libs/llm/ui/timeline/src/lib/blocks/file-delta-block.component.ts
   - libs/llm/ui/timeline/src/lib/blocks/model-message-block.component.ts
   - libs/llm/ui/timeline/src/lib/blocks/user-message-block.component.ts
+  - libs/llm/ui/timeline/src/lib/blocks/block-router.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/blocks/block-router.component.ts
+  - libs/llm/ui/timeline/src/lib/blocks/file-delta-block.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/blocks/model-message-block.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/blocks/user-message-block.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/scroll-viewport/scroll-viewport.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/timeline.facade.spec.ts
 last_context: llm_ui_04.md

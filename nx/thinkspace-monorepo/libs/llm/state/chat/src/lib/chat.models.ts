@@ -1,11 +1,36 @@
-export interface ChatItem {
+export interface BaseChatItem {
   id: string;
-  source: 'user' | 'model' | 'system' | 'flow_card';
   content: string;
-  flowId?: string;
-  status?: 'running' | 'completed'; 
   tags?: string[];
+  metadata?: Record<string, string>;
 }
+
+export interface UserChatItem extends BaseChatItem {
+  type: 'user';
+}
+
+export interface ModelChatItem extends BaseChatItem {
+  type: 'model' | 'system';
+}
+
+export interface FlowCardChatItem extends BaseChatItem {
+  type: 'flow_card';
+  flowId: string;
+  status: 'running' | 'completed';
+}
+
+export interface FileDeltaChatItem extends BaseChatItem {
+  type: 'file_delta';
+  path: string;
+  previewSnippet: string;
+  fileRef: string;
+}
+
+export type ChatItem = 
+  | UserChatItem 
+  | ModelChatItem 
+  | FlowCardChatItem 
+  | FileDeltaChatItem;
 
 export interface LogItem {
   id: string;

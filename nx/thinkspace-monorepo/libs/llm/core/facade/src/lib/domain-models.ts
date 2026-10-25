@@ -3,7 +3,7 @@ export interface SpaceInfo {
   name: string;
 }
 
-export interface DomainLedgerEvent {
+export interface DomainGraphEvent {
   id: string;
   timestamp: string;
   type: string;
@@ -56,9 +56,10 @@ export type DomainEvent =
   | { type: 'request_review'; branch: string }
   | { type: 'request_transition'; targetDomain: string; reasoning: string }
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
-  | { type: 'sync_history'; recentEvents: DomainLedgerEvent[]; digests: Record<string, DomainDigestMeta>; focus: DomainAttentionFocus; nextCursor: string; hasMore: boolean }
+  | { type: 'sync_history'; recentEvents: DomainGraphEvent[]; digests: Record<string, DomainDigestMeta>; focus: DomainAttentionFocus; nextCursor: string; hasMore: boolean }
   | { type: 'preview_context'; context: DomainPreviewContext }
   | { type: 'agent_stream'; agentId: number; text: string }
+  | { type: 'streamed_graph_event'; event: DomainGraphEvent }
   | DomainTelemetryEvent;
 
 export enum DomainDelegationStrategy {

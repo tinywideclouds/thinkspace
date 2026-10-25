@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { TimelineStore, FlowStore, CognitiveStore, ChatItem } from '@org/llm-state-chat';
+import { TimelineStore, FlowStore, CognitiveStore, ChatItem, WorkspaceStateService } from '@org/llm-state-chat';
 
 export type TimelineViewMode = 'linear' | 'cognitive';
 
@@ -8,6 +8,7 @@ export class TimelineFacade {
   private domainTimeline = inject(TimelineStore);
   private flow = inject(FlowStore);
   private cognitive = inject(CognitiveStore);
+  private workspace = inject(WorkspaceStateService);
 
   public viewMode = signal<TimelineViewMode>('linear');
   public isDebugMode = signal<boolean>(true);
@@ -22,18 +23,38 @@ export class TimelineFacade {
   
   public enhancedFeed = computed<ChatItem[]>(() => {
     const feed = this.rawFeed();
-    return feed.map((item, index) => {
-      if (item.source === 'user') {
-        const nextItem = feed[index + 1];
-        if (nextItem && (nextItem.source === 'model' || nextItem.source === 'system') && nextItem.tags) {
-          return { 
-            ...item, 
-            tags: Array.from(new Set([...(item.tags || []), ...nextItem.tags])) 
-          };
+    const bundledFeed: any[] = [];
+    const attachmentMap = new Map<string, any[]>();
+
+    // Pass 1: Extract attachments linked by parent_id (handling both flat and nested metadata)
+    for (const item of feed) {
+      const parentId = (item as any).parentId || (item as any).metadata?.parent_id;
+      if (parentId) {
+        if (!attachmentMap.has(parentId)) attachmentMap.set(parentId, []);
+        attachmentMap.get(parentId)!.push(item);
+      }
+    }
+
+    // Pass 2: Build the timeline, skipping items that were bundled as attachments
+    for (let i = 0; i < feed.length; i++) {
+      const item = feed[i];
+      const parentId = (item as any).parentId || (item as any).metadata?.parent_id;
+      if (parentId) continue;
+
+      const enrichedItem: any = { ...item, attachments: attachmentMap.get(item.id) || [] };
+
+      // Tag merging logic
+      if (item.type === 'user') {
+        const nextItem = feed[i + 1];
+        if (nextItem && (nextItem.type === 'model' || nextItem.type === 'system') && nextItem.tags) {
+          enrichedItem.tags = Array.from(new Set([...(item.tags || []), ...nextItem.tags]));
         }
       }
-      return item;
-    });
+      
+      bundledFeed.push(enrichedItem);
+    }
+
+    return bundledFeed;
   });
 
   public workingMemoryFeed = computed(() => {
@@ -74,5 +95,9 @@ export class TimelineFacade {
     
     if (!item.tags || item.tags.length === 0) return true;
     return !item.tags.includes(selected);
+  }
+
+  public getFileContent(path: string, ref: string): Promise<string> {
+    return this.workspace.getFileContent(path, ref);
   }
 }

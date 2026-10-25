@@ -1,13 +1,13 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { WorkspaceStateService } from './workspace-state.service';
+import { ThinkspaceStateService } from './thinkspace-state.service';
 import { DomainAttentionFocus, DomainDigestMeta, FileContextMetaData, DomainPreviewContext } from '@org/llm-core-facade';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable({ providedIn: 'root' })
 export class CognitiveStore {
   private httpClient = inject(HttpClient);
-  private workspaceState = inject(WorkspaceStateService);
+  private workspaceState = inject(ThinkspaceStateService);
 
   public activeFocus = signal<DomainAttentionFocus | null>(null);
   public activeDigests = signal<Record<string, DomainDigestMeta>>({});

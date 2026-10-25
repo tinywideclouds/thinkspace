@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
-import { DomainLedgerEvent } from '@org/llm-core-facade';
-import { ChatItem } from './chat.models';
+import { DomainGraphEvent } from '@org/llm-core-facade';
+import { ChatItem, ModelChatItem, FlowCardChatItem, FileDeltaChatItem } from './chat.models';
 
 @Injectable({ providedIn: 'root' })
 export class TimelineStore {
@@ -16,10 +16,10 @@ export class TimelineStore {
     this.isLoadingHistory.set(false);
   }
 
-  public processSyncHistory(recentEvents: DomainLedgerEvent[], nextCursor: string, hasMore: boolean): void {
+  public processSyncHistory(recentEvents: DomainGraphEvent[], nextCursor: string, hasMore: boolean): void {
     const incomingTimeline: ChatItem[] = recentEvents
-      .filter(e => e.type === 'prompt' || e.type === 'model')
-      .map(e => ({ id: e.id, source: e.type === 'model' ? 'model' : 'user', content: e.content }));
+      .filter(e => e.type === 'prompt' || e.type === 'model' || e.type === 'file_delta')
+      .map(e => this.mapDomainEventToChatItem(e));
 
     this.coreChat.update(existing => {
       if (this.isLoadingHistory() && existing.length > 0) {
@@ -33,18 +33,50 @@ export class TimelineStore {
     this.isLoadingHistory.set(false);
   }
 
-  public appendCoreChat(source: ChatItem['source'], content: string): void {
+  public ingestEvent(event: DomainGraphEvent): void {
+    if (event.type !== 'prompt' && event.type !== 'model' && event.type !== 'file_delta') return;
+    
+    const newItem = this.mapDomainEventToChatItem(event);
+    
     this.coreChat.update(history => {
-      const cleanHistory = history.filter(c => !(c.source === 'system' && c.content.includes('Thinking')));
-      return [...cleanHistory, { id: crypto.randomUUID(), source, content }];
+      const cleanHistory = history.filter(c => !(c.type === 'system' && c.content.includes('Thinking')));
+      return [...cleanHistory, newItem];
+    });
+  }
+
+  private mapDomainEventToChatItem(e: DomainGraphEvent): ChatItem {
+    if (e.type === 'file_delta') {
+      return {
+        id: e.id,
+        type: 'file_delta',
+        content: e.content,
+        path: e.metadata['path'] || 'Unknown Path',
+        previewSnippet: e.metadata['previewSnippet'] || '',
+        fileRef: e.metadata['fileRef'] || '',
+        metadata: e.metadata
+      } as FileDeltaChatItem;
+    }
+    
+    return { 
+      id: e.id, 
+      type: e.type === 'model' ? 'model' : 'user', 
+      content: e.content,
+      metadata: e.metadata
+    } as ChatItem;
+  }
+
+  public appendCoreChat(type: 'user' | 'model' | 'system', content: string): void {
+    this.coreChat.update(history => {
+      const cleanHistory = history.filter(c => !(c.type === 'system' && c.content.includes('Thinking')));
+      return [...cleanHistory, { id: crypto.randomUUID(), type, content } as ChatItem];
     });
   }
 
   public appendToLastModelMessage(chunkText: string): void {
     this.coreChat.update(history => {
-      const cleanHistory = history.filter(c => !(c.source === 'system' && c.content.includes('Thinking')));
-      if (cleanHistory.length === 0 || cleanHistory[cleanHistory.length - 1].source !== 'model') {
-        return [...cleanHistory, { id: crypto.randomUUID(), source: 'model', content: chunkText }];
+      const cleanHistory = history.filter(c => !(c.type === 'system' && c.content.includes('Thinking')));
+      if (cleanHistory.length === 0 || cleanHistory[cleanHistory.length - 1].type !== 'model') {
+        return [...cleanHistory, { id: crypto.randomUUID(), type: 'model', content: chunkText } as ModelChatItem];
       }
       const updated = [...cleanHistory];
       updated[updated.length - 1].content += chunkText;
@@ -54,16 +86,16 @@ export class TimelineStore {
 
   public injectFlowCard(flowId: string, summary: string): void {
     this.coreChat.update(history => {
-      const cleanHistory = history.filter(c => !(c.source === 'system' && c.content.includes('Thinking')));
-      return [...cleanHistory, { id: crypto.randomUUID(), source: 'flow_card', content: summary, flowId, status: 'running' }];
+      const cleanHistory = history.filter(c => !(c.type === 'system' && c.content.includes('Thinking')));
+      return [...cleanHistory, { id: crypto.randomUUID(), type: 'flow_card', content: summary, flowId, status: 'running' } as FlowCardChatItem];
     });
   }
 
   public updateFlowCardStatus(flowId: string, status: 'running' | 'completed'): void {
-    this.coreChat.update(history => history.map(item => item.flowId === flowId ? { ...item, status } : item));
+    this.coreChat.update(history => history.map(item => item.type === 'flow_card' && item.flowId === flowId ? { ...item, status } : item));
   }
 
   public clearThinkingIndicators(): void {
-    this.coreChat.update(chat => chat.filter(c => !(c.source === 'system' && c.content.includes('Thinking'))));
+    this.coreChat.update(chat => chat.filter(c => !(c.type === 'system' && c.content.includes('Thinking'))));
   }
 }

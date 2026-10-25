@@ -99,6 +99,43 @@
         }
       }
     ],
+    "linked-file": [
+      {
+        "offsetMs": 200,
+        "payload": {
+          "case": "streamedGraphEvent",
+          "value": {
+            "event": {
+              "id": "mock-model-parent-1",
+              "timestamp": "2026-10-23T12:00:00Z",
+              "type": "model",
+              "content": "I've generated the user service and updated the dependencies.",
+              "metadata": {}
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 1200,
+        "payload": {
+          "case": "streamedGraphEvent",
+          "value": {
+            "event": {
+              "id": "mock-file-event-1",
+              "timestamp": "2026-10-23T12:00:01Z",
+              "type": "file_delta",
+              "content": "Added user service",
+              "metadata": {
+                "parent_id": "mock-model-parent-1",
+                "path": "src/user.go",
+                "previewSnippet": "package main\n\nfunc getUser() {}",
+                "fileRef": "ref-124.go"
+              }
+            }
+          }
+        }
+      }
+    ],
     "slow": [
       {
         "offsetMs": 200,
@@ -215,6 +252,31 @@
           }
         }
       }
+    ],
+    "update-file": [
+      {
+        "offsetMs": 200,
+        "payload": {
+          "case": "streamedGraphEvent",
+          "value": {
+            "event": {
+              "id": "mock-file-event-1",
+              "timestamp": "2026-10-23T12:00:00Z",
+              "type": "file_delta",
+              "content": "Added retry block to main execution",
+              "metadata": {
+                "path": "src/main.go",
+                "previewSnippet": "func main() {\n    // Added retry block\n    fmt.Println(\"Initializing service...\")\n}",
+                "fileRef": "ref-123.go"
+              }
+            }
+          }
+        }
+      }
     ]
+  },
+  "files": {
+    "ref-123.go": "///ref /src/cmd/main.go\r\npackage main\r\n\r\nimport \"fmt\"\r\n\r\nfunc main() {\r\n\t// Added retry block\r\n\tfmt.Println(\"Initializing service...\")\r\n\tstartServer()\r\n}\r\n\r\nfunc startServer() {\r\n\tfmt.Println(\"Server started on :8080\")\r\n}\r\n",
+    "ref-124.go": "///ref /src/cmd/main.go\r\npackage main\r\n\r\nimport \"fmt\"\r\n\r\n// Added retry block\r\nfunc main() {\r\n\t// Added retry block\r\n\tfmt.Println(\"Initializing service...\")\r\n\tstartServer()\r\n}\r\n\r\nfunc startServer() {\r\n\tfmt.Println(\"Server started on :8080\")\r\n}\r\n\r\nfunc retryStartServer(retries int) {\r\n\tfor i := 0; i < retries; i++ {\r\n\t\tfmt.Printf(\"Attempt %d to start server...\\n\", i+1)\r\n\t\tstartServer()\r\n\t\t// Simulate a condition to retry (for demonstration purposes)\r\n\t\tif i < retries-1 {\r\n\t\t\tfmt.Println(\"Server failed to start, retrying...\")\r\n\t\t}\r\n\t}\r\n}\r\n"
   }
 }

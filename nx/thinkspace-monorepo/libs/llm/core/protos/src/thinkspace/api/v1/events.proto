@@ -19,12 +19,20 @@ message SpaceInfo {
   bool is_configured = 3;
 }
 
-message LedgerEvent {
+// The generic core memory block, mirroring `thinkgraph.Event` exactly.
+message GraphEvent {
   string id = 1;
-  string timestamp = 2;
-  string type = 3;
+  // Defines the semantic type of the event (e.g., "prompt", "model", "file_delta", "flow_card")
+  // The frontend uses this to dynamically route to the correct UI block component.
+  string type = 2;
+  string timestamp = 3;
+  // A human-readable summary, or the raw text for standard prompt/model events.
   string content = 4;
-  map<string, string> metadata = 5;
+  // Semantic routing tags (e.g., "database", "ui")
+  repeated string tags = 5;
+  // UI-specific payload variables (e.g., {"path": "src/main.go", "previewSnippet": "..."})
+  map<string, string> metadata = 6;
+  bool tombstoned = 7;
 }
 
 message DigestMeta {
@@ -33,7 +41,6 @@ message DigestMeta {
   bool is_sticky = 3;
 }
 
-// Add this under Shared Types
 message AttentionFocusPayload {
   repeated string primary_focus = 1;
   repeated string related_context = 2;
@@ -41,6 +48,7 @@ message AttentionFocusPayload {
 }
 
 // --- Outbound Payloads (Server -> Client) ---
+
 message ChatStreamPayload {
   string text = 1;
 }
@@ -50,8 +58,13 @@ message AgentStreamPayload {
   string text = 2;
 }
 
+// Real-time delivery of a GraphEvent over the WebSocket before it is batched into a SyncHistoryPayload.
+message StreamedGraphEvent {
+  GraphEvent event = 1;
+}
+
 message SyncHistoryPayload {
-  repeated LedgerEvent recent_events = 1;
+  repeated GraphEvent recent_events = 1;
   map<string, DigestMeta> digests = 2;
   AttentionFocusPayload focus = 3;
   
@@ -109,7 +122,7 @@ message TelemetryEvent {
   string timestamp = 3;     // RFC3339 formatted time string
   string message = 4;       // Human readable context
   string summary = 5;       // Optional overarching task summary
-  string payload_json = 6;  // Arbitrary untyped contextual data
+  string payload_json = 6;  // Arbitrary untyped contextual data (e.g., EnginePayload, ManagerPayload)
 }
 
 message TelemetryEventPayload {
@@ -161,32 +174,7 @@ message TransitionDecisionPayload {
   bool approved = 1;
 }
 
-// --- The Master Envelope ---
-message WSEvent {
-  oneof payload {
-    // Outbound
-    ChatStreamPayload chat_stream = 1;
-    TelemetryEventPayload telemetry_event = 2; 
-    AgentStreamPayload agent_stream = 6;
-    RequestStrategyPayload request_strategy = 8;
-    RequestReviewPayload request_review = 9;
-    AvailableSpacesPayload available_spaces = 10;
-    SyncHistoryPayload sync_history = 15;
-    
-    ThinkBundlePayload think_bundle = 16;
-    PreviewContextPayload preview_context = 18; 
-    RequestTransitionPayload request_transition = 20;
-
-    // Inbound
-    SubmitPromptPayload submit_prompt = 11;
-    SelectStrategyPayload select_strategy = 12;
-    ReviewDecisionPayload review_decision = 13;
-    ApproveContextPayload approve_context = 17;
-    TransitionDecisionPayload transition_decision = 21;
-    LoadHistoryPayload load_history = 22;
-  }
-}
-
+// --- Internal Debug / Core Logic (Optional) ---
 message SystemRulesPayload {
 	string persona = 1;
 	string formatting_constraints = 2;
@@ -221,4 +209,39 @@ message ThinkBundlePayload {
 	MapbookPayload mapbook = 5;
 	TrajectoryPayload trajectory = 6;
 	repeated WorkbenchItemPayload workbench = 7;
+}
+
+// --- The Master Envelope ---
+// WSEvent is strictly an infrastructure routing wrapper. WebSockets transmit raw bytes;
+// this master envelope provides a type-safe `oneof` multiplexer so the receiving client 
+// can easily determine which specific domain payload just arrived over the wire.
+message WSEvent {
+  oneof payload {
+    // Outbound Live Streams (Server -> Client)
+    ChatStreamPayload chat_stream = 1;
+    TelemetryEventPayload telemetry_event = 2; 
+    AgentStreamPayload agent_stream = 6;
+    StreamedGraphEvent streamed_graph_event = 23;
+
+    // Outbound Interactive Requests (Server -> Client)
+    RequestStrategyPayload request_strategy = 8;
+    RequestReviewPayload request_review = 9;
+    RequestTransitionPayload request_transition = 20;
+
+    // Outbound State Syncs (Server -> Client)
+    AvailableSpacesPayload available_spaces = 10;
+    SyncHistoryPayload sync_history = 15;
+    PreviewContextPayload preview_context = 18; 
+    
+    // Internal state dumps
+    ThinkBundlePayload think_bundle = 16;
+
+    // Inbound Commands (Client -> Server)
+    SubmitPromptPayload submit_prompt = 11;
+    SelectStrategyPayload select_strategy = 12;
+    ReviewDecisionPayload review_decision = 13;
+    ApproveContextPayload approve_context = 17;
+    TransitionDecisionPayload transition_decision = 21;
+    LoadHistoryPayload load_history = 22;
+  }
 }

@@ -1,0 +1,21 @@
+[
+  {
+    "offsetMs": 200,
+    "payload": {
+      "case": "streamedGraphEvent",
+      "value": {
+        "event": {
+          "id": "mock-file-event-1",
+          "timestamp": "2026-10-23T12:00:00Z",
+          "type": "file_delta",
+          "content": "Added retry block to main execution",
+          "metadata": {
+            "path": "src/main.go",
+            "previewSnippet": "func main() {\n    // Added retry block\n    fmt.Println(\"Initializing service...\")\n}",
+            "fileRef": "ref-123.go"
+          }
+        }
+      }
+    }
+  }
+]

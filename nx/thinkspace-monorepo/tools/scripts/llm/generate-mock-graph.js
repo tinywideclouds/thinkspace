@@ -8,7 +8,8 @@ const graph = {
   events: [], 
   digests: {}, 
   focus: { primaryFocus: ['ui'], relatedContext: ['angular'], dormantLenses: [] },
-  scenarios: {} 
+  scenarios: {},
+  files: {}
 };
 
 // 1. Parse JSONL Shards
@@ -64,7 +65,21 @@ if (fs.existsSync(scenariosDir)) {
   }
 }
 
+// 4. Parse Mock Files
+const filesDir = path.join(DATA_DIR, 'files');
+if (fs.existsSync(filesDir)) {
+  const fileRefs = fs.readdirSync(filesDir);
+  for (const fileRef of fileRefs) {
+    try {
+      const content = fs.readFileSync(path.join(filesDir, fileRef), 'utf8');
+      graph.files[fileRef] = content;
+    } catch (e) {
+      console.error(`Error parsing file ${fileRef}:`, e);
+    }
+  }
+}
+
 fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
 fs.writeFileSync(OUTPUT_FILE, JSON.stringify(graph, null, 2));
 
-console.log(`✅ Generated mock graph with ${graph.events.length} events, ${Object.keys(graph.digests).length} digests, and ${Object.keys(graph.scenarios).length} scenarios.`);
+console.log(`✅ Generated mock graph with ${graph.events.length} events, ${Object.keys(graph.digests).length} digests, ${Object.keys(graph.scenarios).length} scenarios, and ${Object.keys(graph.files).length} files.`);

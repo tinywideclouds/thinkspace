@@ -1,6 +1,6 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { TransportService } from '@org/llm-core-transport';
-import { WorkspaceStateService } from './workspace-state.service';
+import { ThinkspaceStateService } from './thinkspace-state.service';
 import { TimelineStore } from './timeline.store';
 import { FlowStore } from './flow.store';
 import { CognitiveStore } from './cognitive.store';
@@ -9,7 +9,7 @@ import { LlmFacade, DomainEvent, DomainDelegationStrategy } from '@org/llm-core-
 @Injectable({ providedIn: 'root' })
 export class ChatConnectionService {
   private transport = inject(TransportService);
-  private workspace = inject(WorkspaceStateService);
+  private workspace = inject(ThinkspaceStateService);
   private timeline = inject(TimelineStore);
   private flow = inject(FlowStore);
   private cognitive = inject(CognitiveStore);
@@ -114,6 +114,10 @@ export class ChatConnectionService {
         this.cognitive.activeFocus.set(event.focus);
         if (Object.keys(event.digests).length > 0) this.cognitive.activeDigests.set(event.digests);
         this.timeline.processSyncHistory(event.recentEvents, event.nextCursor, event.hasMore);
+        break;
+
+      case 'streamed_graph_event':
+        this.timeline.ingestEvent(event.event);
         break;
 
       case 'preview_context':

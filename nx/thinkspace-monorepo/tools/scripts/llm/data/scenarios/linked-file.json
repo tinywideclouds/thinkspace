@@ -1,0 +1,37 @@
+[
+  {
+    "offsetMs": 200,
+    "payload": {
+      "case": "streamedGraphEvent",
+      "value": {
+        "event": {
+          "id": "mock-model-parent-1",
+          "timestamp": "2026-10-23T12:00:00Z",
+          "type": "model",
+          "content": "I've generated the user service and updated the dependencies.",
+          "metadata": {}
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 1200,
+    "payload": {
+      "case": "streamedGraphEvent",
+      "value": {
+        "event": {
+          "id": "mock-file-event-1",
+          "timestamp": "2026-10-23T12:00:01Z",
+          "type": "file_delta",
+          "content": "Added user service",
+          "metadata": {
+            "parent_id": "mock-model-parent-1",
+            "path": "src/user.go",
+            "previewSnippet": "package main\n\nfunc getUser() {}",
+            "fileRef": "ref-124.go"
+          }
+        }
+      }
+    }
+  }
+]

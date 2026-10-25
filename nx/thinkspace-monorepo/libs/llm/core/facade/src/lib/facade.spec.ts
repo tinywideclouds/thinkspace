@@ -28,6 +28,34 @@ describe('LlmFacade', () => {
       expect(domainEvent).toEqual({ type: 'agent_stream', agentId: 1, text: 'thinking' });
     });
 
+    it('should map a streamed graph event correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'streamedGraphEvent',
+          value: {
+            event: {
+              id: 'event-1',
+              timestamp: '2026-10-23T12:00:00Z',
+              type: 'file_delta',
+              content: 'test content',
+              metadata: { parent_id: 'model-1' }
+            }
+          }
+        }
+      });
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'streamed_graph_event',
+        event: {
+          id: 'event-1',
+          timestamp: '2026-10-23T12:00:00Z',
+          type: 'file_delta',
+          content: 'test content',
+          metadata: { parent_id: 'model-1' }
+        }
+      });
+    });
+
     it('should map an available spaces event correctly', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {

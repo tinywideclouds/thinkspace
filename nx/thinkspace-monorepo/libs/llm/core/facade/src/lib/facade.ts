@@ -101,6 +101,21 @@ export class LlmFacade {
           payload: parsedPayload
         };
       }
+
+      case 'streamedGraphEvent': {
+        const event = protocolBufferEvent.payload.value.event;
+        if (!event) return null;
+        return {
+          type: 'streamed_graph_event',
+          event: {
+            id: event.id,
+            timestamp: event.timestamp,
+            type: event.type,
+            content: event.content,
+            metadata: event.metadata
+          }
+        };
+      }
       
       default:
         console.warn(`[LlmFacade] Unhandled inbound protocol buffer case: ${protocolBufferEvent.payload.case}`);

@@ -4,7 +4,7 @@ import {
   ChatConnectionService, 
   FlowStore, 
   CognitiveStore,
-  WorkspaceStateService 
+  ThinkspaceStateService 
 } from '@org/llm-state-chat';
 import { 
   ChatInputComponent, 
@@ -49,7 +49,7 @@ export class ChatContainerComponent {
   public connection = inject(ChatConnectionService);
   public flow = inject(FlowStore);
   public cognitive = inject(CognitiveStore);
-  public workspaceState = inject(WorkspaceStateService);
+  public workspaceState = inject(ThinkspaceStateService);
   public timelineFacade = inject(TimelineFacade);
 
   onSpaceSelected(spaceId: string) {

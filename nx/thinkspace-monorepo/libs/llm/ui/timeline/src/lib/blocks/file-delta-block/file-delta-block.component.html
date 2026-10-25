@@ -1,0 +1,57 @@
+<div #blockContainer class="my-2 border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm transition-all duration-300">
+  
+  <!-- Collapsed / Header View -->
+  <div 
+    class="flex justify-between items-center px-4 py-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+    role="button"
+    tabindex="0"
+    (click)="toggleExpand()"
+    (keydown.enter)="toggleExpand()">
+    <div class="flex items-center gap-3">
+      <span class="text-lg">{{ isExpanded() ? '📂' : '📁' }}</span>
+      <div class="flex flex-col">
+        <span class="font-mono text-xs font-bold text-blue-700">{{ path() }}</span>
+        <span class="text-xs text-gray-500">{{ summary() }}</span>
+      </div>
+    </div>
+    <div class="flex gap-2 items-center">
+      @if (isLoading()) {
+        <span class="text-[10px] text-blue-600 font-bold uppercase tracking-widest animate-pulse mr-2">Loading...</span>
+      }
+      <button class="px-3 py-1 bg-white border border-gray-300 rounded text-xs font-bold text-gray-600 hover:text-blue-600 hover:border-blue-300 transition-colors" tabindex="-1">
+        {{ isExpanded() ? 'Collapse' : 'Expand' }}
+      </button>
+    </div>
+  </div>
+
+  <!-- Pre-expand Snippet View -->
+  @if (!isExpanded() && previewSnippet()) {
+    <div class="bg-gray-900 text-gray-400 font-mono text-[10px] px-4 py-2 border-t border-gray-200 opacity-90 overflow-hidden max-h-24 relative cursor-pointer"
+         (click)="toggleExpand()">
+      <pre class="whitespace-pre-wrap m-0">{{ previewSnippet() }}</pre>
+      <div class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-gray-900 to-transparent"></div>
+    </div>
+  }
+
+  <!-- Expanded Zoom View -->
+  @if (isExpanded()) {
+    <div class="border-t border-gray-200 bg-gray-900 text-gray-100 font-mono text-[11px] overflow-x-auto max-h-[60vh] overflow-y-auto">
+      <table class="w-full border-collapse">
+        <tbody>
+          @for (line of displayLines(); track $index) {
+            <tr [class.bg-green-900]="isLineHighlighted($index)" 
+                [class.bg-opacity-40]="isLineHighlighted($index)">
+              <td class="px-2 py-0.5 text-gray-500 select-none text-right border-r border-gray-700 w-12">
+                {{ $index + 1 }}
+              </td>
+              <td class="px-4 py-0.5 whitespace-pre"
+                  [class.text-green-400]="isLineHighlighted($index)">
+                {{ line || ' ' }}
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</div>

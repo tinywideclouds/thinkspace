@@ -8,8 +8,6 @@ files:
   - libs/llm/state/chat/vite.config.mts
   - libs/llm/state/chat/src/index.ts
   - libs/llm/state/chat/src/test-setup.ts
-  - libs/llm/state/chat/src/lib/chat-state.service.spec.ts
-  - libs/llm/state/chat/src/lib/chat-state.service.ts
   - libs/llm/state/chat/src/lib/workspace-state.service.spec.ts
   - libs/llm/state/chat/src/lib/workspace-state.service.ts
   - libs/llm/state/chat/src/lib/chat-connection.service.spec.ts
@@ -20,4 +18,6 @@ files:
   - libs/llm/state/chat/src/lib/flow.store.ts
   - libs/llm/state/chat/src/lib/timeline.store.spec.ts
   - libs/llm/state/chat/src/lib/timeline.store.ts
+  - libs/llm/state/chat/src/lib/thinkspace-state.service.spec.ts
+  - libs/llm/state/chat/src/lib/thinkspace-state.service.ts
 last_context: llm_state_10.md
