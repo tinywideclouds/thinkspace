@@ -28,15 +28,17 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
 
-	chat := &thinkgraph.Chat{ID: "chat-123", SpaceID: "test-space"}
+	chat := &thinkgraph.Chat{ID: "chat-123", SpaceID: "test-space", ActiveBranch: "main"}
 
 	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "First event")
 	event1.Tags = []string{"init"}
 	event1.Timestamp = time.Now().Add(-1 * time.Hour)
+	event1.BranchID = "main"
 
 	event2 := thinkgraph.NewEvent(thinkgraph.EventModel, "Second event")
 	event2.Tags = []string{"response", "init"}
 	event2.Timestamp = time.Now()
+	event2.BranchID = "main"
 
 	if err := graph.AppendEvent(ctx, chat, event1); err != nil {
 		t.Fatalf("Failed to append event 1: %v", err)
@@ -45,7 +47,7 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 		t.Fatalf("Failed to append event 2: %v", err)
 	}
 
-	timeline, err := graph.GetTimeline(ctx, chat)
+	timeline, err := graph.GetBranchTimeline(ctx, chat, "main")
 	if err != nil {
 		t.Fatalf("Failed to get timeline: %v", err)
 	}
@@ -58,18 +60,19 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-page", SpaceID: "test-space"}
+	chat := &thinkgraph.Chat{ID: "chat-page", SpaceID: "test-space", ActiveBranch: "main"}
 
 	var events []thinkgraph.Event
 	for i := 0; i < 5; i++ {
 		ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("Event %d", i))
 		ev.Timestamp = time.Now().Add(time.Duration(i) * time.Minute)
+		ev.BranchID = "main"
 		_ = graph.AppendEvent(ctx, chat, ev)
 		events = append(events, ev)
 	}
 
 	// 1. Fetch latest page without cursor
-	page1, nextCursor, hasMore, err := graph.GetTimelinePage(ctx, chat, "", 2)
+	page1, nextCursor, hasMore, err := graph.GetBranchTimelinePage(ctx, chat, "main", "", 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 1: %v", err)
 	}
@@ -84,7 +87,7 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 	}
 
 	// 2. Fetch older page using cursor
-	page2, nextCursor2, hasMore2, err := graph.GetTimelinePage(ctx, chat, nextCursor, 2)
+	page2, nextCursor2, hasMore2, err := graph.GetBranchTimelinePage(ctx, chat, "main", nextCursor, 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 2: %v", err)
 	}
@@ -99,7 +102,7 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 	}
 
 	// 3. Fetch final page using nextCursor2
-	page3, _, hasMore3, err := graph.GetTimelinePage(ctx, chat, nextCursor2, 2)
+	page3, _, hasMore3, err := graph.GetBranchTimelinePage(ctx, chat, "main", nextCursor2, 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 3: %v", err)
 	}
@@ -117,15 +120,17 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-mutations", SpaceID: "test-space"}
+	chat := &thinkgraph.Chat{ID: "chat-mutations", SpaceID: "test-space", ActiveBranch: "main"}
 
 	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be deleted")
+	event1.BranchID = "main"
 	event2 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be updated")
+	event2.BranchID = "main"
 
 	_ = graph.AppendEvent(ctx, chat, event1)
 	_ = graph.AppendEvent(ctx, chat, event2)
 
-	t1, _ := graph.GetTimeline(ctx, chat)
+	t1, _ := graph.GetBranchTimeline(ctx, chat, "main")
 	if len(t1) != 2 {
 		t.Fatalf("Expected 2 events baseline, got %d", len(t1))
 	}
@@ -139,7 +144,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 		t.Fatalf("Failed to save tombstone mutation: %v", err)
 	}
 
-	t2, _ := graph.GetTimeline(ctx, chat)
+	t2, _ := graph.GetBranchTimeline(ctx, chat, "main")
 	if len(t2) != 1 || t2[0].ID != event2.ID {
 		t.Fatalf("Tombstoned event was not filtered out of timeline")
 	}
@@ -152,7 +157,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	}
 	_ = graph.SaveMutation(ctx, chat, mut2)
 
-	t3, _ := graph.GetTimeline(ctx, chat)
+	t3, _ := graph.GetBranchTimeline(ctx, chat, "main")
 	if t3[0].Content != "Updated content!" {
 		t.Errorf("Mutation update failed, content is: %s", t3[0].Content)
 	}
@@ -164,7 +169,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	}
 	_ = graph.SaveMutation(ctx, chat, mut3)
 
-	t4, _ := graph.GetTimeline(ctx, chat)
+	t4, _ := graph.GetBranchTimeline(ctx, chat, "main")
 	if len(t4) != 2 {
 		t.Fatalf("Failed to restore tombstoned event")
 	}
@@ -173,10 +178,11 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 func TestBadgerGraph_GetLenses(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-lenses", SpaceID: "test-space"}
+	chat := &thinkgraph.Chat{ID: "chat-lenses", SpaceID: "test-space", ActiveBranch: "main"}
 
 	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Query DB")
 	event1.Tags = []string{"database", "backend"}
+	event1.BranchID = "main"
 
 	digest := thinkgraph.DigestMeta{
 		ID:      uuid.NewV7(),
@@ -297,22 +303,27 @@ func TestBadgerGraph_ClearChatGraph_PrefixCollision(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
 
-	chat1 := &thinkgraph.Chat{ID: "chat-1", SpaceID: "test-space"}
-	chat11 := &thinkgraph.Chat{ID: "chat-11", SpaceID: "test-space"}
+	chat1 := &thinkgraph.Chat{ID: "chat-1", SpaceID: "test-space", ActiveBranch: "main"}
+	chat11 := &thinkgraph.Chat{ID: "chat-11", SpaceID: "test-space", ActiveBranch: "main"}
 
-	_ = graph.AppendEvent(ctx, chat1, thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event for chat 1"))
-	_ = graph.AppendEvent(ctx, chat11, thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event for chat 11"))
+	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event for chat 1")
+	ev1.BranchID = "main"
+	ev11 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event for chat 11")
+	ev11.BranchID = "main"
+
+	_ = graph.AppendEvent(ctx, chat1, ev1)
+	_ = graph.AppendEvent(ctx, chat11, ev11)
 
 	if err := graph.ClearChatGraph(ctx, chat1); err != nil {
 		t.Fatalf("ClearChatGraph failed: %v", err)
 	}
 
-	t1, _ := graph.GetTimeline(ctx, chat1)
+	t1, _ := graph.GetBranchTimeline(ctx, chat1, "main")
 	if len(t1) != 0 {
 		t.Errorf("Expected chat-1 to be wiped, got %d events remaining", len(t1))
 	}
 
-	t11, _ := graph.GetTimeline(ctx, chat11)
+	t11, _ := graph.GetBranchTimeline(ctx, chat11, "main")
 	if len(t11) != 1 {
 		t.Errorf("Expected chat-11 to be untouched, got %d events. Prefix collision occurred!", len(t11))
 	}

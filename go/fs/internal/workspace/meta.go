@@ -37,6 +37,12 @@ const (
 	StatusRejected CandidateStatus = "rejected"
 )
 
+// BranchMeta tracks the topology of a specific timeline fork.
+type BranchMeta struct {
+	ParentBranch string `json:"parent_branch"`
+	ForkPoint    string `json:"fork_point"` // Event ID where divergence occurred
+}
+
 // ChatMeta separates the stable directory ID from the mutable display name.
 type ChatMeta struct {
 	ID                 string    `json:"id"`
@@ -44,6 +50,10 @@ type ChatMeta struct {
 	CreatedAt          time.Time `json:"created_at"`
 	ActiveDomain       string    `json:"active_domain"`       // e.g., "concept" or "golang"
 	InitializedDomains []string  `json:"initialized_domains"` // e.g., ["concept", "golang"]
+
+	// Topology Routing
+	ActiveBranch string                `json:"active_branch"`
+	Branches     map[string]BranchMeta `json:"branches"`
 
 	// Memory Sliding Window State
 	DigestionHorizon  uuid.UUID `json:"digestion_horizon,omitempty"`  // Last event successfully digested

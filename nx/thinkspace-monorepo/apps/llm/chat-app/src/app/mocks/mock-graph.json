@@ -136,6 +136,120 @@
         }
       }
     ],
+    "paginate": [
+      {
+        "offsetMs": 0,
+        "latencyMs": 6000,
+        "uiSettings": {
+          "pagination": {
+            "size": 3,
+            "prefetchIndex": 1
+          }
+        }
+      },
+      {
+        "offsetMs": 100,
+        "payload": {
+          "case": "syncHistory",
+          "value": {
+            "recentEvents": [
+              {
+                "id": "hist-1",
+                "type": "model",
+                "timestamp": "2026-10-20T09:00:00Z",
+                "content": "Oldest message way back in history.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-2",
+                "type": "prompt",
+                "timestamp": "2026-10-20T09:05:00Z",
+                "content": "Let's test pagination.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-3",
+                "type": "model",
+                "timestamp": "2026-10-20T09:10:00Z",
+                "content": "I am generating a deep history.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-4",
+                "type": "prompt",
+                "timestamp": "2026-10-20T09:15:00Z",
+                "content": "Keep going.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-5",
+                "type": "model",
+                "timestamp": "2026-10-20T09:20:00Z",
+                "content": "Here is message 5.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-6",
+                "type": "prompt",
+                "timestamp": "2026-10-20T09:25:00Z",
+                "content": "And message 6.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-7",
+                "type": "prompt",
+                "timestamp": "2026-10-20T09:15:00Z",
+                "content": "Keep going.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-8",
+                "type": "model",
+                "timestamp": "2026-10-20T09:20:00Z",
+                "content": "Here is message 8.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-9",
+                "type": "prompt",
+                "timestamp": "2026-10-20T09:25:00Z",
+                "content": "And message 9.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-10",
+                "type": "model",
+                "timestamp": "2026-10-20T09:30:00Z",
+                "content": "Almost at the bottom.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-11",
+                "type": "prompt",
+                "timestamp": "2026-10-20T09:35:00Z",
+                "content": "Show me the recent stuff.",
+                "metadata": {}
+              },
+              {
+                "id": "hist-12",
+                "type": "model",
+                "timestamp": "2026-10-20T09:40:00Z",
+                "content": "This is the message you see on load.",
+                "metadata": {}
+              }
+            ],
+            "digests": {},
+            "focus": {
+              "primaryFocus": [],
+              "relatedContext": [],
+              "dormantLenses": []
+            },
+            "nextCursor": "hist-1",
+            "hasMore": true
+          }
+        }
+      }
+    ],
     "slow": [
       {
         "offsetMs": 200,

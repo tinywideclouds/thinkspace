@@ -15,13 +15,15 @@ func TestEventBus_And_LedgerSubscriber(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	spaceID := "test-space"
 	chatID := "test-thread"
+	branchID := "main"
 
 	ledgerPath := filepath.Join(workspaceRoot, spaceID, "chats", chatID, "ledger")
-	os.MkdirAll(filepath.Join(ledgerPath, "logs"), 0755)
+	os.MkdirAll(filepath.Join(ledgerPath, "logs", branchID), 0755)
 
 	thread := &thinkgraph.Chat{
-		ID:      chatID,
-		SpaceID: spaceID,
+		ID:           chatID,
+		SpaceID:      spaceID,
+		ActiveBranch: branchID,
 	}
 
 	eventBus := thinkgraph.NewEventBus()
@@ -38,12 +40,12 @@ func TestEventBus_And_LedgerSubscriber(t *testing.T) {
 	}
 
 	// Verify shard rollover occurred
-	_, err := os.Stat(filepath.Join(ledgerPath, "logs", "00000.jsonl"))
+	_, err := os.Stat(filepath.Join(ledgerPath, "logs", branchID, "00000.jsonl"))
 	if err != nil {
 		t.Errorf("Expected shard 00000.jsonl to exist")
 	}
 
-	fileData, err := os.ReadFile(filepath.Join(ledgerPath, "logs", "00001.jsonl"))
+	fileData, err := os.ReadFile(filepath.Join(ledgerPath, "logs", branchID, "00001.jsonl"))
 	if err != nil {
 		t.Fatalf("Expected shard 00001.jsonl to exist after rollover: %v", err)
 	}

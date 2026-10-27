@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { TimelineStore, FlowStore, CognitiveStore, ChatItem, WorkspaceStateService } from '@org/llm-state-chat';
+import { TimelineStore, FlowStore, CognitiveStore, ChatItem, WorkspaceStateService, UiSettingsService } from '@org/llm-state-chat';
 
 export type TimelineViewMode = 'linear' | 'cognitive';
 
@@ -9,6 +9,7 @@ export class TimelineFacade {
   private flow = inject(FlowStore);
   private cognitive = inject(CognitiveStore);
   private workspace = inject(WorkspaceStateService);
+  private uiSettings = inject(UiSettingsService);
 
   public viewMode = signal<TimelineViewMode>('linear');
   public isDebugMode = signal<boolean>(true);
@@ -21,12 +22,14 @@ export class TimelineFacade {
   public activeDigests = this.cognitive.activeDigests;
   public activeFocus = this.cognitive.activeFocus;
   
+  public isLoadingHistory = this.domainTimeline.isLoadingHistory;
+  public paginationSettings = this.uiSettings.pagination;
+  
   public enhancedFeed = computed<ChatItem[]>(() => {
     const feed = this.rawFeed();
     const bundledFeed: any[] = [];
     const attachmentMap = new Map<string, any[]>();
 
-    // Pass 1: Extract attachments linked by parent_id (handling both flat and nested metadata)
     for (const item of feed) {
       const parentId = (item as any).parentId || (item as any).metadata?.parent_id;
       if (parentId) {
@@ -35,7 +38,6 @@ export class TimelineFacade {
       }
     }
 
-    // Pass 2: Build the timeline, skipping items that were bundled as attachments
     for (let i = 0; i < feed.length; i++) {
       const item = feed[i];
       const parentId = (item as any).parentId || (item as any).metadata?.parent_id;
@@ -43,7 +45,6 @@ export class TimelineFacade {
 
       const enrichedItem: any = { ...item, attachments: attachmentMap.get(item.id) || [] };
 
-      // Tag merging logic
       if (item.type === 'user') {
         const nextItem = feed[i + 1];
         if (nextItem && (nextItem.type === 'model' || nextItem.type === 'system') && nextItem.tags) {

@@ -12,6 +12,7 @@ interface MockTimelineFacade {
   selectedTag: WritableSignal<string | null>;
   workingMemoryFeed: WritableSignal<ChatItem[]>;
   flowStates: WritableSignal<Map<string, FlowState>>;
+  isLoadingHistory: WritableSignal<boolean>;
   isItemDimmed: Mock<(item: ChatItem) => boolean>;
   isItemCollapsed: Mock<(item: ChatItem) => boolean>;
   setHoveredTag: Mock<(tag: string | null) => void>;
@@ -37,16 +38,11 @@ describe('LinearFeedComponent', () => {
       isDebugMode: signal(false),
       hoveredTag: signal<string | null>(null),
       selectedTag: signal<string | null>(null),
-      workingMemoryFeed: signal([
-        { id: '1', type: 'user', content: 'Test prompt' },
-        { id: '2', type: 'model', content: 'Test response' },
-        { id: '3', type: 'flow_card', content: 'Flow Card Test', flowId: 'f1', status: 'running' }
-      ] as ChatItem[]),
-      flowStates: signal(new Map<string, FlowState>([
-        ['f1', { flowId: 'f1', taskId: 't1', agentCount: 1, completedCount: 0, status: 'running', agents: new Map() } as FlowState]
-      ])),
-      isItemDimmed: vi.fn((item: ChatItem) => false),
-      isItemCollapsed: vi.fn((item: ChatItem) => false),
+      workingMemoryFeed: signal([{ id: '1', type: 'model', content: 'test' } as ChatItem]),
+      flowStates: signal(new Map()),
+      isLoadingHistory: signal(false),
+      isItemDimmed: vi.fn(() => false),
+      isItemCollapsed: vi.fn(() => false),
       setHoveredTag: vi.fn(),
       toggleSelectedTag: vi.fn(),
       inspectFlow: vi.fn(),
@@ -77,7 +73,51 @@ describe('LinearFeedComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should correctly identify the active user prompt', () => {
-    expect(component.activeUserPromptId()).toBe('1');
+  it('should display simple back-to-bottom arrow when in manual scroll state but no new messages exist', async () => {
+    const viewport = component.viewport();
+    if (viewport) {
+      viewport.scrollState.set('manual');
+    }
+    
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.hasNewMessages()).toBe(false);
+    
+    const button = fixture.nativeElement.querySelector('button.absolute.bottom-6');
+    expect(button.textContent.trim()).toBe('↓');
+    expect(button.className).toContain('bg-white');
+  });
+
+  it('should upgrade to New Messages pill if feed length increases while in manual state', async () => {
+    const viewport = component.viewport();
+    
+    if (viewport) viewport.scrollState.set('auto');
+    fixture.detectChanges();
+    
+    if (viewport) viewport.scrollState.set('manual');
+    fixture.detectChanges();
+
+    mockFacade.workingMemoryFeed.set([
+      { id: '1', type: 'model', content: 'test' } as ChatItem,
+      { id: '2', type: 'model', content: 'new message' } as ChatItem
+    ]);
+    
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.hasNewMessages()).toBe(true);
+    
+    const button = fixture.nativeElement.querySelector('button.absolute.bottom-6');
+    expect(button.textContent.trim()).toContain('New Messages');
+    expect(button.className).toContain('bg-blue-600');
+  });
+
+  it('should display the loading spinner when history is being fetched', () => {
+    mockFacade.isLoadingHistory.set(true);
+    fixture.detectChanges();
+
+    const loaderText = fixture.nativeElement.textContent;
+    expect(loaderText).toContain('Loading History...');
   });
 });

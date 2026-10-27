@@ -16,6 +16,9 @@ type InboundEvent struct {
 	ApproveContext     *ApproveContextPayload
 	TransitionDecision *TransitionDecisionPayload
 	LoadHistory        *LoadHistoryPayload
+	ForkChat           *ForkChatPayload
+	InlineEdit         *InlineEditPayload
+	SwitchBranch       *SwitchBranchPayload
 }
 
 type SubmitPromptPayload struct {
@@ -48,4 +51,23 @@ type LoadHistoryPayload struct {
 	ChatID  string
 	Cursor  string
 	Limit   int
+}
+
+type ForkChatPayload struct {
+	SpaceID       string
+	ChatID        string
+	TargetEventID string
+}
+
+type InlineEditPayload struct {
+	SpaceID       string
+	ChatID        string
+	TargetEventID string
+	NewText       string
+}
+
+type SwitchBranchPayload struct {
+	SpaceID      string
+	ChatID       string
+	TargetBranch string
 }

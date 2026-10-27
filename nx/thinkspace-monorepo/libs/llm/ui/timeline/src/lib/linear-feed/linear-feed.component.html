@@ -11,26 +11,30 @@
   }
 
   <llm-scroll-viewport 
-    [ceilingAnchor]="activeAnchorElement()" 
-    [topContentAnchor]="topAnchorElement()"
+    #viewport
+    [prefetchAnchor]="prefetchAnchorElement()"
     [isDebugMode]="facade.isDebugMode()"
     (loadPreviousPage)="connection.loadHistoryPage()">
-    
-    <div #topAnchor class="w-full shrink-0 transition-all"
-         [ngClass]="facade.isDebugMode() ? 'h-[4em] bg-purple-500/20 border-2 border-dashed border-purple-500 z-10 flex items-center justify-center text-purple-700 text-[10px] font-bold mb-4' : 'h-1 mb-2 opacity-0'">
-      @if (facade.isDebugMode()) { START OF CONTENT BOX }
-    </div>
+
+    @if (facade.isLoadingHistory()) {
+      <llm-skeleton-block></llm-skeleton-block>
+    }
 
     @for (item of facade.workingMemoryFeed(); track item.id) {
-      <llm-block-router [chatItem]="item">
-        @if (item.id === activeUserPromptId()) {
-          <div #activeAnchor class="absolute bottom-0 w-full pointer-events-none transition-all" 
-               [style.height]="contextBoxHeight()"
-               [ngClass]="facade.isDebugMode() ? 'bg-red-500/20 border-2 border-dashed border-red-500 z-10 flex items-start justify-center pt-1 text-red-700 text-[10px] font-bold' : 'opacity-0'">
-            @if (facade.isDebugMode()) { ACTIVE PROMPT ANCHOR }
-          </div>
-        }
-      </llm-block-router>
+      <llm-block-router [chatItem]="item"></llm-block-router>
     }
   </llm-scroll-viewport>
+
+  @if (viewport.scrollState() === 'manual') {
+    <button 
+      (click)="viewport.scrollToBottom('smooth')"
+      class="absolute bottom-6 right-1/2 translate-x-1/2 px-4 py-2 text-xs font-bold uppercase tracking-widest rounded-full shadow-lg transition-all z-50 flex items-center justify-center gap-2 border"
+      [ngClass]="hasNewMessages() ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:text-gray-900'">
+      @if (hasNewMessages()) {
+        New Messages ↓
+      } @else {
+        ↓
+      }
+    </button>
+  }
 </div>

@@ -3,6 +3,7 @@ export interface BaseChatItem {
   content: string;
   tags?: string[];
   metadata?: Record<string, string>;
+  edges?: Record<string, string>; // The new generic topological mapping (e.g., amended_by, forked_from)
 }
 
 export interface UserChatItem extends BaseChatItem {

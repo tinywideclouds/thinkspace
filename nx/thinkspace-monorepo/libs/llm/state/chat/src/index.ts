@@ -5,3 +5,4 @@ export * from './lib/flow.store';
 export * from './lib/cognitive.store';
 export * from './lib/chat-connection.service';
 export * from './lib/workspace-state.service';
+export * from './lib/ui-settings.service';

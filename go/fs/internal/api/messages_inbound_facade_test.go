@@ -180,6 +180,79 @@ func TestUnmarshalInbound_LoadHistory(t *testing.T) {
 	}
 }
 
+func TestUnmarshalInbound_ForkChat(t *testing.T) {
+	payload := []byte(`{
+		"forkChat": {
+			"spaceId": "golang",
+			"chatId": "chat-123",
+			"targetEventId": "event-uuid"
+		}
+	}`)
+
+	inbound, err := api.UnmarshalInbound(payload)
+	if err != nil {
+		t.Fatalf("unexpected error unmarshaling: %v", err)
+	}
+
+	if inbound.Type != "fork_chat" {
+		t.Errorf("expected 'fork_chat', got '%s'", inbound.Type)
+	}
+	if inbound.ForkChat.SpaceID != "golang" {
+		t.Errorf("expected spaceId 'golang', got '%s'", inbound.ForkChat.SpaceID)
+	}
+	if inbound.ForkChat.TargetEventID != "event-uuid" {
+		t.Errorf("expected targetEventId 'event-uuid', got '%s'", inbound.ForkChat.TargetEventID)
+	}
+}
+
+func TestUnmarshalInbound_InlineEdit(t *testing.T) {
+	payload := []byte(`{
+		"inlineEdit": {
+			"spaceId": "golang",
+			"chatId": "chat-123",
+			"targetEventId": "event-uuid",
+			"newText": "corrected text"
+		}
+	}`)
+
+	inbound, err := api.UnmarshalInbound(payload)
+	if err != nil {
+		t.Fatalf("unexpected error unmarshaling: %v", err)
+	}
+
+	if inbound.Type != "inline_edit" {
+		t.Errorf("expected 'inline_edit', got '%s'", inbound.Type)
+	}
+	if inbound.InlineEdit.TargetEventID != "event-uuid" {
+		t.Errorf("expected targetEventId 'event-uuid', got '%s'", inbound.InlineEdit.TargetEventID)
+	}
+	if inbound.InlineEdit.NewText != "corrected text" {
+		t.Errorf("expected newText 'corrected text', got '%s'", inbound.InlineEdit.NewText)
+	}
+}
+
+func TestUnmarshalInbound_SwitchBranch(t *testing.T) {
+	payload := []byte(`{
+		"switchBranch": {
+			"spaceId": "golang",
+			"chatId": "chat-123",
+			"targetBranch": "branch-b"
+		}
+	}`)
+
+	inbound, err := api.UnmarshalInbound(payload)
+	if err != nil {
+		t.Fatalf("unexpected error unmarshaling: %v", err)
+	}
+
+	if inbound.Type != "switch_branch" {
+		t.Errorf("expected 'switch_branch', got '%s'", inbound.Type)
+	}
+	if inbound.SwitchBranch.TargetBranch != "branch-b" {
+		t.Errorf("expected targetBranch 'branch-b', got '%s'", inbound.SwitchBranch.TargetBranch)
+	}
+}
+
 func TestInvalidInbound(t *testing.T) {
 	_, err := api.UnmarshalInbound([]byte(`{"unknownPayload": {}}`))
 	if err == nil {

@@ -92,9 +92,9 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}
 
 		// Fetch the raw events from graph to get their UUIDs
-		timeline, err := graphDB.GetTimeline(ctx, chatSession)
+		timeline, err := graphDB.GetBranchTimeline(ctx, chatSession, chatSession.ActiveBranch)
 		if err != nil {
-			t.Fatalf("GetTimeline failed: %v", err)
+			t.Fatalf("GetBranchTimeline failed: %v", err)
 		}
 		if len(timeline) != 2 {
 			t.Fatalf("Expected 2 events in graph, got %d", len(timeline))
@@ -149,9 +149,9 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		if err := graphDB.ClearChatGraph(ctx, chatSession); err != nil {
 			t.Fatalf("ClearChatGraph failed: %v", err)
 		}
-		timeline, err := graphDB.GetTimeline(ctx, chatSession)
+		timeline, err := graphDB.GetBranchTimeline(ctx, chatSession, chatSession.ActiveBranch)
 		if err != nil {
-			t.Fatalf("GetTimeline after clear failed: %v", err)
+			t.Fatalf("GetBranchTimeline after clear failed: %v", err)
 		}
 		if len(timeline) != 0 {
 			t.Fatalf("Failed to wipe graph: %d events remain", len(timeline))
@@ -164,9 +164,9 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}
 
 		// 3. Verify Timeline Integrity
-		restoredTimeline, err := graphDB.GetTimeline(ctx, chatSession)
+		restoredTimeline, err := graphDB.GetBranchTimeline(ctx, chatSession, chatSession.ActiveBranch)
 		if err != nil {
-			t.Fatalf("GetTimeline after rehydration failed: %v", err)
+			t.Fatalf("GetBranchTimeline after rehydration failed: %v", err)
 		}
 		if len(restoredTimeline) != 2 {
 			t.Fatalf("Expected 2 events restored, got %d", len(restoredTimeline))

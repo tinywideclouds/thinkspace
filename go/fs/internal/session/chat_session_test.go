@@ -120,7 +120,7 @@ func (f *csTestFlow) Next(state flows.FlowState) flows.FlowDirective {
 func scaffoldTestChat(workspaceRoot, spaceID, chatID string) {
 	metaPath := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
 	_ = os.MkdirAll(metaPath, 0755)
-	_ = os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`"}`), 0644)
+	_ = os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
 }
 
 func setupSessionTest(t *testing.T, chatID string) (*session.ChatSession, *workspace.ServiceManager, *csTestModelClient, string) {
@@ -173,8 +173,8 @@ func TestChatSession_RunTurn_Sequencing(t *testing.T) {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
 
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
-	timeline, err := svcManager.GraphStore().GetTimeline(ctx, chat)
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID, ActiveBranch: "main"}
+	timeline, err := svcManager.GraphStore().GetBranchTimeline(ctx, chat, "main")
 	if err != nil {
 		t.Fatalf("Failed to fetch timeline: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestChatSession_SpaceContextAssembly(t *testing.T) {
 	chatID := "chat-context"
 	chatSession, svcManager, client, spaceID := setupSessionTest(t, chatID)
 
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID, ActiveBranch: "main"}
 	_ = svcManager.GraphStore().SaveSpaceContext(ctx, chat, thinkgraph.SpaceContext{
 		ID:      uuid.NewV7(),
 		Content: "Always use PostgreSQL.",
@@ -234,6 +234,7 @@ func TestChatSession_SpaceContextAssembly(t *testing.T) {
 
 	ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Build database")
 	ev.Tags = []string{"database"}
+	ev.BranchID = "main"
 	_ = svcManager.GraphStore().AppendEvent(ctx, chat, ev)
 
 	client.responses = []llm.StreamChunk{{Text: "Ok"}}

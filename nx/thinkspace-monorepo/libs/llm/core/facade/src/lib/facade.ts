@@ -4,7 +4,7 @@ import {
   WSEventSchema,
   DelegationStrategy 
 } from '@org/llm-core-protos';
-import { DomainEvent, DomainDelegationStrategy, DomainDigestMeta } from './domain-models';
+import { DomainEvent, DomainDelegationStrategy, DomainDigestMeta, DomainBranchTopology } from './domain-models';
 
 export class LlmFacade {
   static toDomain(protocolBufferEvent: WSEvent): DomainEvent | null {
@@ -38,16 +38,18 @@ export class LlmFacade {
       case 'syncHistory':
         return {
           type: 'sync_history',
-          recentEvents: protocolBufferEvent.payload.value.recentEvents.map(e => ({
-            id: e.id,
-            timestamp: e.timestamp,
-            type: e.type,
-            content: e.content,
-            metadata: e.metadata
+          recentEvents: protocolBufferEvent.payload.value.recentEvents.map(event => ({
+            id: event.id,
+            timestamp: event.timestamp,
+            type: event.type,
+            content: event.content,
+            metadata: event.metadata,
+            edges: event.edges,
+            branchId: event.branchId
           })),
-          digests: Object.entries(protocolBufferEvent.payload.value.digests).reduce((acc, [key, val]) => {
-            acc[key] = { id: val.id, summary: val.summary, isSticky: val.isSticky };
-            return acc;
+          digests: Object.entries(protocolBufferEvent.payload.value.digests).reduce((accumulator, [key, digest]) => {
+            accumulator[key] = { id: digest.id, summary: digest.summary, isSticky: digest.isSticky };
+            return accumulator;
           }, {} as Record<string, DomainDigestMeta>),
           focus: {
             primaryFocus: protocolBufferEvent.payload.value.focus?.primaryFocus || [],
@@ -55,7 +57,12 @@ export class LlmFacade {
             dormantLenses: protocolBufferEvent.payload.value.focus?.dormantLenses || []
           },
           nextCursor: protocolBufferEvent.payload.value.nextCursor,
-          hasMore: protocolBufferEvent.payload.value.hasMore
+          hasMore: protocolBufferEvent.payload.value.hasMore,
+          activeBranch: protocolBufferEvent.payload.value.activeBranch,
+          branches: Object.entries(protocolBufferEvent.payload.value.branches).reduce((accumulator, [key, topology]) => {
+            accumulator[key] = { parentBranch: topology.parentBranch, forkPoint: topology.forkPoint };
+            return accumulator;
+          }, {} as Record<string, DomainBranchTopology>)
         };
 
       case 'previewContext':
@@ -67,10 +74,10 @@ export class LlmFacade {
             managerSystemPrompt: protocolBufferEvent.payload.value.managerSystemPrompt,
             stickyDigests: protocolBufferEvent.payload.value.stickyDigests,
             recentHistory: protocolBufferEvent.payload.value.recentHistory,
-            fileContexts: protocolBufferEvent.payload.value.fileContexts.map(fc => ({
-              path: fc.path,
-              level: fc.level,
-              tokenCount: fc.tokenCount
+            fileContexts: protocolBufferEvent.payload.value.fileContexts.map(context => ({
+              path: context.path,
+              level: context.level,
+              tokenCount: context.tokenCount
             })),
             focus: {
               primaryFocus: protocolBufferEvent.payload.value.focus?.primaryFocus || [],
@@ -81,23 +88,23 @@ export class LlmFacade {
         };
 
       case 'telemetryEvent': {
-        const te = protocolBufferEvent.payload.value;
+        const telemetry = protocolBufferEvent.payload.value;
         let parsedPayload = {};
-        if (te.event?.payloadJson) {
+        if (telemetry.event?.payloadJson) {
           try {
-            parsedPayload = JSON.parse(te.event.payloadJson);
-          } catch (e) {
-            console.warn(`[LlmFacade] Failed to parse telemetry payload_json:`, e);
+            parsedPayload = JSON.parse(telemetry.event.payloadJson);
+          } catch (error) {
+            console.warn(`[LlmFacade] Failed to parse telemetry payload_json:`, error);
           }
         }
         return {
           type: 'telemetry_event',
-          channel: te.channel,
-          id: te.event?.id || '',
-          eventType: te.event?.type || '',
-          timestamp: te.event?.timestamp || '',
-          message: te.event?.message || '',
-          summary: te.event?.summary || '',
+          channel: telemetry.channel,
+          id: telemetry.event?.id || '',
+          eventType: telemetry.event?.type || '',
+          timestamp: telemetry.event?.timestamp || '',
+          message: telemetry.event?.message || '',
+          summary: telemetry.event?.summary || '',
           payload: parsedPayload
         };
       }
@@ -112,7 +119,9 @@ export class LlmFacade {
             timestamp: event.timestamp,
             type: event.type,
             content: event.content,
-            metadata: event.metadata
+            metadata: event.metadata,
+            edges: event.edges,
+            branchId: event.branchId
           }
         };
       }
@@ -156,6 +165,24 @@ export class LlmFacade {
   static createTransitionDecision(approved: boolean): WSEvent {
     return create(WSEventSchema, {
       payload: { case: 'transitionDecision', value: { approved } }
+    });
+  }
+
+  static createForkChat(spaceId: string, chatId: string, targetEventId: string): WSEvent {
+    return create(WSEventSchema, {
+      payload: { case: 'forkChat', value: { spaceId, chatId, targetEventId } }
+    });
+  }
+
+  static createInlineEdit(spaceId: string, chatId: string, targetEventId: string, newText: string): WSEvent {
+    return create(WSEventSchema, {
+      payload: { case: 'inlineEdit', value: { spaceId, chatId, targetEventId, newText } }
+    });
+  }
+
+  static createSwitchBranch(spaceId: string, chatId: string, targetBranch: string): WSEvent {
+    return create(WSEventSchema, {
+      payload: { case: 'switchBranch', value: { spaceId, chatId, targetBranch } }
     });
   }
 }

@@ -13,6 +13,7 @@ type TrajectoryRequest struct {
 	RecentEvents []Event
 	Catalyst     *Event
 	Focus        AttentionFocus
+	Amendments   map[string]Event // Pre-fetched corrections mapping TargetEventID -> AmendingEvent
 }
 
 type TrajectoryBuilder struct{}
@@ -22,7 +23,7 @@ func NewTrajectoryBuilder() *TrajectoryBuilder {
 }
 
 func (a *TrajectoryBuilder) Build(ctx context.Context, req TrajectoryRequest) (cognition.Trajectory, error) {
-	var traj cognition.Trajectory
+	var trajectory cognition.Trajectory
 
 	var metadata strings.Builder
 	metadata.WriteString("[CONTEXT HORIZON METADATA]\n")
@@ -37,15 +38,15 @@ func (a *TrajectoryBuilder) Build(ctx context.Context, req TrajectoryRequest) (c
 		metadata.WriteString(fmt.Sprintf("Dormant Memories Available via query_lens: %s\n", strings.Join(req.Focus.DormantLenses, ", ")))
 	}
 
-	traj.LongTermMemory = append(traj.LongTermMemory, metadata.String())
+	trajectory.LongTermMemory = append(trajectory.LongTermMemory, metadata.String())
 
 	for _, sc := range req.Manifest.SpaceContexts {
-		traj.LongTermMemory = append(traj.LongTermMemory, sc.Content)
+		trajectory.LongTermMemory = append(trajectory.LongTermMemory, sc.Content)
 	}
 
 	for _, d := range req.Manifest.Digests {
 		if d.Promoted {
-			traj.LongTermMemory = append(traj.LongTermMemory, d.Summary)
+			trajectory.LongTermMemory = append(trajectory.LongTermMemory, d.Summary)
 		}
 	}
 
@@ -54,9 +55,17 @@ func (a *TrajectoryBuilder) Build(ctx context.Context, req TrajectoryRequest) (c
 		if ev.Type == EventModel {
 			role = "model"
 		}
-		traj.WorkingMemory = append(traj.WorkingMemory, cognition.TrajectoryEvent{
+		
+		content := ev.Content
+		if amendingID, ok := ev.Metadata["amended_by"]; ok && req.Amendments != nil {
+			if correction, exists := req.Amendments[amendingID]; exists {
+				content = fmt.Sprintf("%s\n\n[System Note: This prompt was later amended to: %s]", content, correction.Content)
+			}
+		}
+
+		trajectory.WorkingMemory = append(trajectory.WorkingMemory, cognition.TrajectoryEvent{
 			Role:    role,
-			Content: ev.Content,
+			Content: content,
 		})
 	}
 
@@ -65,11 +74,19 @@ func (a *TrajectoryBuilder) Build(ctx context.Context, req TrajectoryRequest) (c
 		if req.Catalyst.Type == EventModel {
 			role = "model"
 		}
-		traj.Catalyst = cognition.TrajectoryEvent{
+		
+		content := req.Catalyst.Content
+		if amendingID, ok := req.Catalyst.Metadata["amended_by"]; ok && req.Amendments != nil {
+			if correction, exists := req.Amendments[amendingID]; exists {
+				content = fmt.Sprintf("%s\n\n[System Note: This prompt was later amended to: %s]", content, correction.Content)
+			}
+		}
+
+		trajectory.Catalyst = cognition.TrajectoryEvent{
 			Role:    role,
-			Content: req.Catalyst.Content,
+			Content: content,
 		}
 	}
 
-	return traj, nil
+	return trajectory, nil
 }

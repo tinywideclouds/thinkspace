@@ -15,9 +15,6 @@ describe('FileDeltaBlockComponent', () => {
       getFileContent: vi.fn().mockResolvedValue('console.log("Full file fetched!");')
     };
 
-    // Stub scrollIntoView which is not implemented in JSDOM
-    window.HTMLElement.prototype.scrollIntoView = vi.fn();
-
     await TestBed.configureTestingModule({
       imports: [FileDeltaBlockComponent],
       providers: [
@@ -44,19 +41,16 @@ describe('FileDeltaBlockComponent', () => {
     expect(compiled.textContent).toContain('console.log("Preview");');
   });
 
-  it('should fetch full content, expand, and trigger scrollIntoView when header is clicked', fakeAsync(() => {
-    const scrollSpy = vi.spyOn(component.containerRef().nativeElement, 'scrollIntoView');
-    
+  it('should fetch full content and expand when header is clicked', fakeAsync(() => {
     const header = fixture.nativeElement.querySelector('div[role="button"]');
     header.click();
     
     expect(component.isExpanded()).toBe(true);
     expect(component.isLoading()).toBe(true);
     
-    tick(50); // Account for the setTimeout scroll tick
+    tick();
     fixture.detectChanges();
     
-    expect(scrollSpy).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
     expect(component.isLoading()).toBe(false);
     expect(component.fullContent()).toBe('console.log("Full file fetched!");');
     expect(mockFacade.getFileContent).toHaveBeenCalledWith('src/main.ts', 'hash123');
@@ -70,7 +64,7 @@ describe('FileDeltaBlockComponent', () => {
     expect(component.isExpanded()).toBe(true);
     expect(component.isLoading()).toBe(true);
 
-    tick(50);
+    tick();
     fixture.detectChanges();
 
     expect(component.isLoading()).toBe(false);

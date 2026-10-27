@@ -33,6 +33,8 @@ message GraphEvent {
   // UI-specific payload variables (e.g., {"path": "src/main.go", "previewSnippet": "..."})
   map<string, string> metadata = 6;
   bool tombstoned = 7;
+  string branch_id = 8;
+  map<string, string> edges = 9; // Generic topological routing links
 }
 
 message DigestMeta {
@@ -45,6 +47,11 @@ message AttentionFocusPayload {
   repeated string primary_focus = 1;
   repeated string related_context = 2;
   repeated string dormant_lenses = 3;
+}
+
+message BranchTopology {
+  string parent_branch = 1;
+  string fork_point = 2;
 }
 
 // --- Outbound Payloads (Server -> Client) ---
@@ -71,6 +78,10 @@ message SyncHistoryPayload {
   // Pagination additions
   string next_cursor = 4;
   bool has_more = 5;
+
+  // Topology additions
+  string active_branch = 6;
+  map<string, BranchTopology> branches = 7;
 }
 
 message LoadHistoryPayload {
@@ -174,6 +185,26 @@ message TransitionDecisionPayload {
   bool approved = 1;
 }
 
+// --- New Branching & Editing Payloads (Client -> Server) ---
+message ForkChatPayload {
+  string space_id = 1;
+  string chat_id = 2;
+  string target_event_id = 3;
+}
+
+message InlineEditPayload {
+  string space_id = 1;
+  string chat_id = 2;
+  string target_event_id = 3;
+  string new_text = 4;
+}
+
+message SwitchBranchPayload {
+  string space_id = 1;
+  string chat_id = 2;
+  string target_branch = 3;
+}
+
 // --- Internal Debug / Core Logic (Optional) ---
 message SystemRulesPayload {
 	string persona = 1;
@@ -243,5 +274,10 @@ message WSEvent {
     ApproveContextPayload approve_context = 17;
     TransitionDecisionPayload transition_decision = 21;
     LoadHistoryPayload load_history = 22;
+
+    // Branch/Edit Commands
+    ForkChatPayload fork_chat = 24;
+    InlineEditPayload inline_edit = 25;
+    SwitchBranchPayload switch_branch = 26;
   }
 }

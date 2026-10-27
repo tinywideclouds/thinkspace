@@ -63,8 +63,13 @@ func (l *LedgerSubscriber) OnEvent(ctx context.Context, c *Chat, event Event) er
 		return nil
 	}
 
+	branchID := c.ActiveBranch
+	if branchID == "" {
+		branchID = "main"
+	}
+
 	ledgerDir := filepath.Join(l.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger")
-	manifest, err := LoadOrRebuildManifest(ledgerDir)
+	manifest, err := LoadOrRebuildManifest(ledgerDir, branchID)
 	if err != nil {
 		return fmt.Errorf("loading manifest: %w", err)
 	}
@@ -76,12 +81,14 @@ func (l *LedgerSubscriber) OnEvent(ctx context.Context, c *Chat, event Event) er
 		manifest.EventCount = 0
 	}
 
+	event.BranchID = branchID
+
 	b, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshaling event: %w", err)
 	}
 
-	logsDir := filepath.Join(ledgerDir, "logs")
+	logsDir := filepath.Join(ledgerDir, "logs", branchID)
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
 		return fmt.Errorf("creating logs directory: %w", err)
 	}
@@ -99,5 +106,5 @@ func (l *LedgerSubscriber) OnEvent(ctx context.Context, c *Chat, event Event) er
 
 	manifest.EventCount++
 	manifest.TotalEvents++
-	return manifest.Save(ledgerDir)
+	return manifest.Save(ledgerDir, branchID)
 }

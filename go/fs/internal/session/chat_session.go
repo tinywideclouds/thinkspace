@@ -90,12 +90,23 @@ func (s *ChatSession) flushMeta() error {
 	})
 }
 
-func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, error) {
-	chatObj := &thinkgraph.Chat{ID: s.ChatID, SpaceID: s.SpaceID}
-
+func (s *ChatSession) buildTopology() map[string]thinkgraph.BranchTopology {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+	topo := make(map[string]thinkgraph.BranchTopology)
+	for k, v := range s.Meta.Branches {
+		topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
+	}
+	return topo
+}
+
+func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, error) {
+	s.mu.RLock()
+	activeBranch := s.Meta.ActiveBranch
 	domain := s.Meta.ActiveDomain
 	s.mu.RUnlock()
+
+	chatObj := &thinkgraph.Chat{ID: s.ChatID, SpaceID: s.SpaceID, ActiveBranch: activeBranch}
 
 	thinkState, _ := s.registry.GetDomain(domain)
 	_, graphData, err := s.assembleBundle(ctx, chatObj, thinkState)
@@ -103,7 +114,11 @@ func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, 
 }
 
 func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInterface, emitter telemetry.Emitter) error {
-	chatObj := &thinkgraph.Chat{ID: s.ChatID, SpaceID: s.SpaceID}
+	s.mu.RLock()
+	activeBranch := s.Meta.ActiveBranch
+	s.mu.RUnlock()
+
+	chatObj := &thinkgraph.Chat{ID: s.ChatID, SpaceID: s.SpaceID, ActiveBranch: activeBranch}
 
 	if promptText != "" {
 		if err := s.workspaceService.LogUserPrompt(ctx, chatObj, promptText); err != nil {
@@ -219,6 +234,7 @@ func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInt
 
 func (s *ChatSession) assembleBundle(ctx context.Context, chatObj *thinkgraph.Chat, thinkState spaces.ThinkState) (cognition.ThinkBundle, *thinkgraph.GraphData, error) {
 	graphStore := s.workspaceManager.GraphStore()
+	traversalEngine := thinkgraph.NewTraversalEngine(graphStore)
 	var volatileEvents []thinkgraph.Event
 	primaryTags := make(map[string]bool)
 	relatedTags := make(map[string]bool)
@@ -232,7 +248,7 @@ func (s *ChatSession) assembleBundle(ctx context.Context, chatObj *thinkgraph.Ch
 	digestionHorizon := s.Meta.DigestionHorizon
 	s.mu.RUnlock()
 
-	err := graphStore.WalkTimelineReverse(ctx, chatObj, func(ev thinkgraph.Event) bool {
+	err := traversalEngine.WalkTimelineReverse(ctx, chatObj, s.buildTopology(), func(ev thinkgraph.Event) bool {
 		if ev.ID == digestionHorizon {
 			return false
 		}
@@ -399,7 +415,8 @@ func (s *ChatSession) buildToolRegistry(thinkState spaces.ThinkState) []llm.Tool
 
 func (s *ChatSession) evaluateAndTriggerDigestion(ctx context.Context, chatObj *thinkgraph.Chat, memoryConfig spaces.MemoryConfig) {
 	graphStore := s.workspaceManager.GraphStore()
-	timeline, err := graphStore.GetTimeline(ctx, chatObj)
+	traversalEngine := thinkgraph.NewTraversalEngine(graphStore)
+	timeline, err := traversalEngine.GetFullTimeline(ctx, chatObj, s.buildTopology())
 	if err != nil || len(timeline) == 0 {
 		return
 	}

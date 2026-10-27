@@ -155,7 +155,17 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	meta, _ := api.manager.GetChatMeta(spaceID, chatID)
+	activeBranch := "main"
+	topo := make(map[string]thinkgraph.BranchTopology)
+	if meta.ActiveBranch != "" {
+		activeBranch = meta.ActiveBranch
+		for k, v := range meta.Branches {
+			topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
+		}
+	}
+
+	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID, ActiveBranch: activeBranch}
 	var events []thinkgraph.Event
 	var err error
 
@@ -170,7 +180,8 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 		cursor := r.URL.Query().Get("cursor")
 
 		var timeline []thinkgraph.Event
-		timeline, err = api.manager.GraphStore().GetTimeline(r.Context(), chat)
+		engine := thinkgraph.NewTraversalEngine(api.manager.GraphStore())
+		timeline, err = engine.GetFullTimeline(r.Context(), chat, topo)
 
 		if err == nil {
 			endIdx := len(timeline)

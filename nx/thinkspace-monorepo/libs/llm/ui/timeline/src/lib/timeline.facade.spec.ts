@@ -7,6 +7,7 @@ import { DomainAttentionFocus, DomainDigestMeta } from '@org/llm-core-facade';
 
 interface MockTimelineStore {
   coreChat: WritableSignal<ChatItem[]>;
+  isLoadingHistory: WritableSignal<boolean>;
 }
 
 interface MockFlowStore {
@@ -32,7 +33,8 @@ describe('TimelineFacade', () => {
 
   beforeEach(() => {
     mockTimeline = {
-      coreChat: signal([])
+      coreChat: signal([]),
+      isLoadingHistory: signal(false)
     };
 
     mockFlow = {

@@ -9,6 +9,8 @@ export interface DomainGraphEvent {
   type: string;
   content: string;
   metadata: Record<string, string>;
+  edges: Record<string, string>;
+  branchId?: string;
 }
 
 export interface DomainDigestMeta {
@@ -50,13 +52,27 @@ export interface DomainTelemetryEvent {
   payload: any;
 }
 
+export interface DomainBranchTopology {
+  parentBranch: string;
+  forkPoint: string;
+}
+
 export type DomainEvent =
   | { type: 'chat_stream'; text: string }
   | { type: 'request_strategy'; active: boolean }
   | { type: 'request_review'; branch: string }
   | { type: 'request_transition'; targetDomain: string; reasoning: string }
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
-  | { type: 'sync_history'; recentEvents: DomainGraphEvent[]; digests: Record<string, DomainDigestMeta>; focus: DomainAttentionFocus; nextCursor: string; hasMore: boolean }
+  | { 
+      type: 'sync_history'; 
+      recentEvents: DomainGraphEvent[]; 
+      digests: Record<string, DomainDigestMeta>; 
+      focus: DomainAttentionFocus; 
+      nextCursor: string; 
+      hasMore: boolean;
+      activeBranch: string;
+      branches: Record<string, DomainBranchTopology>;
+    }
   | { type: 'preview_context'; context: DomainPreviewContext }
   | { type: 'agent_stream'; agentId: number; text: string }
   | { type: 'streamed_graph_event'; event: DomainGraphEvent }

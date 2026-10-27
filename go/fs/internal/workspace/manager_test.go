@@ -85,6 +85,12 @@ func TestServiceManager_ChatManagement(t *testing.T) {
 	if explicitMeta.Name != "Architecture Discussion" {
 		t.Errorf("Expected explicit name, got %s", explicitMeta.Name)
 	}
+	if explicitMeta.ActiveBranch != "main" {
+		t.Errorf("Expected ActiveBranch 'main', got %s", explicitMeta.ActiveBranch)
+	}
+	if _, ok := explicitMeta.Branches["main"]; !ok {
+		t.Errorf("Expected 'main' branch in branches map")
+	}
 
 	autoMeta1, err := manager.CreateChat(ctx, spaceID, "")
 	if err != nil {

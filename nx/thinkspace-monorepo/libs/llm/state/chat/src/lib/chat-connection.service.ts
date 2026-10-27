@@ -4,6 +4,7 @@ import { ThinkspaceStateService } from './thinkspace-state.service';
 import { TimelineStore } from './timeline.store';
 import { FlowStore } from './flow.store';
 import { CognitiveStore } from './cognitive.store';
+import { UiSettingsService } from './ui-settings.service';
 import { LlmFacade, DomainEvent, DomainDelegationStrategy } from '@org/llm-core-facade';
 
 @Injectable({ providedIn: 'root' })
@@ -13,6 +14,7 @@ export class ChatConnectionService {
   private timeline = inject(TimelineStore);
   private flow = inject(FlowStore);
   private cognitive = inject(CognitiveStore);
+  private uiSettings = inject(UiSettingsService);
 
   public connected = signal<boolean>(false);
 
@@ -45,8 +47,6 @@ export class ChatConnectionService {
     this.cognitive.clearSession();
   }
 
-  // --- Outbound Actions (Dispatched by UI) ---
-
   public submitPrompt(text: string): void {
     const spaceId = this.workspace.activeSpaceId();
     const chatId = this.workspace.activeChatId();
@@ -69,7 +69,12 @@ export class ChatConnectionService {
     if (!spaceId || !chatId) return;
 
     this.timeline.isLoadingHistory.set(true);
-    this.transport.send(LlmFacade.createLoadHistory(spaceId, chatId, this.timeline.nextCursor(), 20));
+    this.transport.send(LlmFacade.createLoadHistory(
+      spaceId, 
+      chatId, 
+      this.timeline.nextCursor(), 
+      this.uiSettings.pagination().size
+    ));
   }
 
   public submitContextApproval(approved: boolean, paths: string[] = [], indices: number[] = []): void {
@@ -106,14 +111,46 @@ export class ChatConnectionService {
     this.transport.send(LlmFacade.createTransitionDecision(approved));
   }
 
-  // --- Inbound Routing ---
+  // --- Branching & Editing Commands ---
+
+  public forkChat(targetEventId: string): void {
+    const spaceId = this.workspace.activeSpaceId();
+    const chatId = this.workspace.activeChatId();
+    if (!spaceId || !chatId) return;
+
+    this.transport.send(LlmFacade.createForkChat(spaceId, chatId, targetEventId));
+  }
+
+  public inlineEdit(targetEventId: string, newText: string): void {
+    const spaceId = this.workspace.activeSpaceId();
+    const chatId = this.workspace.activeChatId();
+    if (!spaceId || !chatId) return;
+
+    this.transport.send(LlmFacade.createInlineEdit(spaceId, chatId, targetEventId, newText));
+  }
+
+  public switchBranch(targetBranch: string): void {
+    const spaceId = this.workspace.activeSpaceId();
+    const chatId = this.workspace.activeChatId();
+    if (!spaceId || !chatId) return;
+
+    // Eagerly clear timeline and set loading state to avoid UI stutter/ghosting during the transition
+    this.timeline.coreChat.set([]);
+    this.timeline.isLoadingHistory.set(true);
+
+    this.transport.send(LlmFacade.createSwitchBranch(spaceId, chatId, targetBranch));
+  }
 
   private routeIncomingEvent(event: DomainEvent): void {
     switch (event.type) {
       case 'sync_history':
         this.cognitive.activeFocus.set(event.focus);
         if (Object.keys(event.digests).length > 0) this.cognitive.activeDigests.set(event.digests);
-        this.timeline.processSyncHistory(event.recentEvents, event.nextCursor, event.hasMore);
+        
+        // Pass the new topology data into the timeline store
+        if (event.activeBranch && event.branches) {
+          this.timeline.processSyncHistory(event.recentEvents, event.nextCursor, event.hasMore, event.activeBranch, event.branches);
+        }
         break;
 
       case 'streamed_graph_event':

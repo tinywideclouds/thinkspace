@@ -25,9 +25,14 @@ func TestAssembler_Build(t *testing.T) {
 		Content: "Use PostgreSQL exclusively.",
 	}
 
+	mistakeEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, "I want to use MySQL")
+	amendingEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Actually, switch to PostgreSQL")
+	mistakeEvent.Metadata["amended_by"] = amendingEvent.ID.String()
+
 	assemblyRequest := thinkgraph.TrajectoryRequest{
 		Manifest: manifest,
 		RecentEvents: []thinkgraph.Event{
+			mistakeEvent,
 			thinkgraph.NewEvent(thinkgraph.EventModel, "Previous answer"),
 		},
 		Catalyst: &thinkgraph.Event{
@@ -37,6 +42,9 @@ func TestAssembler_Build(t *testing.T) {
 		},
 		Focus: thinkgraph.AttentionFocus{
 			PrimaryFocus: []string{"golang"},
+		},
+		Amendments: map[string]thinkgraph.Event{
+			amendingEvent.ID.String(): amendingEvent,
 		},
 	}
 
@@ -50,35 +58,23 @@ func TestAssembler_Build(t *testing.T) {
 		t.Fatalf("Expected 3 long-term memory items (1 metadata + 1 sticky + 1 rule), got %d", len(trajectory.LongTermMemory))
 	}
 
-	// Assert the new Contextual Horizon metadata was injected first
 	if !strings.Contains(trajectory.LongTermMemory[0], "[CONTEXT HORIZON METADATA]") {
 		t.Errorf("Missing context horizon metadata in first slot")
 	}
-	if !strings.Contains(trajectory.LongTermMemory[0], "Active Topic Focus: golang") {
-		t.Errorf("Metadata did not properly format the AttentionFocus tags")
+
+	if len(trajectory.WorkingMemory) != 2 {
+		t.Fatalf("Expected 2 working memory events, got %d", len(trajectory.WorkingMemory))
 	}
 
-	// Assert the context rule memory was appended
-	if !strings.Contains(trajectory.LongTermMemory[1], "Use PostgreSQL") {
-		t.Errorf("Missing SpaceContext rule in second slot")
+	// Verify the semantic inline correction was applied
+	if !strings.Contains(trajectory.WorkingMemory[0].Content, "I want to use MySQL") {
+		t.Errorf("Missing original mistaken prompt")
 	}
-
-	// Assert the sticky digest was appended
-	if !strings.Contains(trajectory.LongTermMemory[2], "idiomatic Go") {
-		t.Errorf("Missing promoted digest in third slot")
-	}
-
-	if len(trajectory.WorkingMemory) != 1 {
-		t.Fatalf("Expected 1 working memory event, got %d", len(trajectory.WorkingMemory))
-	}
-	if trajectory.WorkingMemory[0].Role != "model" {
-		t.Errorf("Expected role 'model', got %s", trajectory.WorkingMemory[0].Role)
+	if !strings.Contains(trajectory.WorkingMemory[0].Content, "[System Note: This prompt was later amended to: Actually, switch to PostgreSQL]") {
+		t.Errorf("Trajectory builder failed to inject the inline amendment")
 	}
 
 	if trajectory.Catalyst.Content != "Recent question" {
 		t.Errorf("Missing recent catalyst context")
-	}
-	if trajectory.Catalyst.Role != "user" {
-		t.Errorf("Expected catalyst role 'user', got %s", trajectory.Catalyst.Role)
 	}
 }

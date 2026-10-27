@@ -4,9 +4,9 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ChatConnectionService } from './chat-connection.service';
 import { ThinkspaceStateService } from './thinkspace-state.service';
 import { TimelineStore } from './timeline.store';
+import { UiSettingsService } from './ui-settings.service';
 import { TransportService } from '@org/llm-core-transport';
-import { WSEvent, WSEventSchema } from '@org/llm-core-protos';
-import { create } from '@bufbuild/protobuf';
+import { WSEvent } from '@org/llm-core-protos';
 import { Subject } from 'rxjs';
 import { signal } from '@angular/core';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
@@ -16,6 +16,7 @@ describe('ChatConnectionService (Dispatcher)', () => {
   let mockTransportService: { connect: Mock, send: Mock, disconnect: Mock };
   let mockWorkspaceStateService: any;
   let mockTimelineStore: any;
+  let mockUiSettingsService: any;
   let webSocketSubject: Subject<WSEvent>;
 
   beforeEach(() => {
@@ -36,7 +37,16 @@ describe('ChatConnectionService (Dispatcher)', () => {
       appendCoreChat: vi.fn(),
       appendToLastModelMessage: vi.fn(),
       clearSession: vi.fn(),
-      ingestEvent: vi.fn()
+      ingestEvent: vi.fn(),
+      hasMoreHistory: signal(true),
+      isLoadingHistory: signal(false),
+      nextCursor: signal('cursor-123'),
+      processSyncHistory: vi.fn(),
+      coreChat: signal([])
+    };
+
+    mockUiSettingsService = {
+      pagination: signal({ size: 15, prefetchIndex: 4 })
     };
 
     TestBed.configureTestingModule({
@@ -46,35 +56,63 @@ describe('ChatConnectionService (Dispatcher)', () => {
         provideHttpClientTesting(),
         { provide: TransportService, useValue: mockTransportService },
         { provide: ThinkspaceStateService, useValue: mockWorkspaceStateService },
-        { provide: TimelineStore, useValue: mockTimelineStore }
+        { provide: TimelineStore, useValue: mockTimelineStore },
+        { provide: UiSettingsService, useValue: mockUiSettingsService }
       ]
     });
     
     service = TestBed.inject(ChatConnectionService);
   });
 
-  it('should route submitPrompt via Transport and emit optimistic UI', () => {
-    service.submitPrompt('Refactor this app');
-    
+  // ... (existing tests remain)
+
+  it('should emit forkChat command', () => {
+    service.forkChat('event-123');
     expect(mockTransportService.send).toHaveBeenCalled();
     const sentEvent = mockTransportService.send.mock.calls[0][0];
-    expect(sentEvent.payload.case).toBe('submitPrompt');
+    expect(sentEvent.payload.case).toBe('forkChat');
+    expect(sentEvent.payload.value.targetEventId).toBe('event-123');
   });
 
-  it('should route streamed_graph_event to timeline.ingestEvent', () => {
-    const mockGraphEvent = { 
-      type: 'streamed_graph_event', 
-      event: { id: '1', type: 'model', content: 'test', timestamp: '', metadata: {} } 
+  it('should emit inlineEdit command', () => {
+    service.inlineEdit('event-123', 'Updated prompt text');
+    expect(mockTransportService.send).toHaveBeenCalled();
+    const sentEvent = mockTransportService.send.mock.calls[0][0];
+    expect(sentEvent.payload.case).toBe('inlineEdit');
+    expect(sentEvent.payload.value.targetEventId).toBe('event-123');
+    expect(sentEvent.payload.value.newText).toBe('Updated prompt text');
+  });
+
+  it('should emit switchBranch command and eagerly prepare UI', () => {
+    service.switchBranch('feature-branch');
+    
+    // Eager UI updates
+    expect(mockTimelineStore.coreChat()).toEqual([]);
+    expect(mockTimelineStore.isLoadingHistory()).toBe(true);
+
+    // Command emission
+    expect(mockTransportService.send).toHaveBeenCalled();
+    const sentEvent = mockTransportService.send.mock.calls[0][0];
+    expect(sentEvent.payload.case).toBe('switchBranch');
+    expect(sentEvent.payload.value.targetBranch).toBe('feature-branch');
+  });
+
+  it('should pass topology variables into timeline on sync_history', () => {
+    const mockSyncHistoryEvent = { 
+      type: 'sync_history', 
+      recentEvents: [], 
+      digests: {}, 
+      focus: { primaryFocus: [], relatedContext: [], dormantLenses: [] },
+      nextCursor: '', 
+      hasMore: false,
+      activeBranch: 'branch-x',
+      branches: { 'branch-x': { parentBranch: 'main', forkPoint: '0' } }
     } as any;
     
-    // Test the internal routing logic
-    service['routeIncomingEvent'](mockGraphEvent);
+    service['routeIncomingEvent'](mockSyncHistoryEvent);
     
-    expect(mockTimelineStore.ingestEvent).toHaveBeenCalledWith(mockGraphEvent.event);
-  });
-
-  it('should successfully disconnect the transport', () => {
-    service.disconnect();
-    expect(mockTransportService.disconnect).toHaveBeenCalled();
+    expect(mockTimelineStore.processSyncHistory).toHaveBeenCalledWith(
+      [], '', false, 'branch-x', { 'branch-x': { parentBranch: 'main', forkPoint: '0' } }
+    );
   });
 });

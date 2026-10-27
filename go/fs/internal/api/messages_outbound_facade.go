@@ -11,14 +11,17 @@ import (
 )
 
 func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests []thinkgraph.DigestMeta, focus thinkgraph.AttentionFocus, nextCursor string, hasMore bool) ([]byte, error) {
-	var pbEvents []*pb.LedgerEvent
+	var pbEvents []*pb.GraphEvent
 	for _, e := range recentEvents {
-		pbEvents = append(pbEvents, &pb.LedgerEvent{
-			Id:        e.ID.String(),
-			Timestamp: e.Timestamp.Format(time.RFC3339),
-			Type:      string(e.Type),
-			Content:   e.Content,
-			Metadata:  e.Metadata,
+		pbEvents = append(pbEvents, &pb.GraphEvent{
+			Id:         e.ID.String(),
+			Timestamp:  e.Timestamp.Format(time.RFC3339),
+			Type:       string(e.Type),
+			Content:    e.Content,
+			Metadata:   e.Metadata,
+			Tags:       e.Tags,
+			Tombstoned: e.Tombstoned,
+			BranchId:   e.BranchID,
 		})
 	}
 

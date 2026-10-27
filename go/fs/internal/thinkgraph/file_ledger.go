@@ -23,8 +23,13 @@ func NewFileLedger(maxEvents int, workspaceRoot string) *FileLedger {
 }
 
 func (l *FileLedger) AppendEvent(ctx context.Context, c *Chat, event Event) error {
+	branchID := c.ActiveBranch
+	if branchID == "" {
+		branchID = "main"
+	}
+
 	ledgerDir := filepath.Join(l.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger")
-	manifest, err := LoadOrRebuildManifest(ledgerDir)
+	manifest, err := LoadOrRebuildManifest(ledgerDir, branchID)
 	if err != nil {
 		return fmt.Errorf("loading manifest: %w", err)
 	}
@@ -36,12 +41,15 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *Chat, event Event) erro
 		manifest.EventCount = 0
 	}
 
+	// Ensure the event inherits the correct branch physically in case the struct missed it
+	event.BranchID = branchID
+
 	b, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshaling event: %w", err)
 	}
 
-	logsDir := filepath.Join(ledgerDir, "logs")
+	logsDir := filepath.Join(ledgerDir, "logs", branchID)
 	_ = os.MkdirAll(logsDir, 0755)
 
 	shardPath := filepath.Join(logsDir, manifest.ActiveShard)
@@ -57,7 +65,7 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *Chat, event Event) erro
 
 	manifest.EventCount++
 	manifest.TotalEvents++
-	return manifest.Save(ledgerDir)
+	return manifest.Save(ledgerDir, branchID)
 }
 
 func (l *FileLedger) SaveDigest(ctx context.Context, c *Chat, digest DigestMeta) error {

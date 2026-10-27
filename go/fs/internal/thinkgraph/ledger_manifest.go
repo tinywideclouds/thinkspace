@@ -16,8 +16,14 @@ type LedgerManifest struct {
 	TotalEvents int    `json:"total_events"`
 }
 
-func LoadOrRebuildManifest(ledgerDirectory string) (*LedgerManifest, error) {
-	manifestPath := filepath.Join(ledgerDirectory, "manifest.json")
+func LoadOrRebuildManifest(ledgerDirectory string, branchID string) (*LedgerManifest, error) {
+	if branchID == "" {
+		branchID = "main"
+	}
+	branchDir := filepath.Join(ledgerDirectory, "logs", branchID)
+	_ = os.MkdirAll(branchDir, 0755)
+
+	manifestPath := filepath.Join(branchDir, "manifest.json")
 	data, err := os.ReadFile(manifestPath)
 	if err == nil {
 		var m LedgerManifest
@@ -25,17 +31,20 @@ func LoadOrRebuildManifest(ledgerDirectory string) (*LedgerManifest, error) {
 			return &m, nil
 		}
 	}
-	return RebuildManifest(ledgerDirectory)
+	return RebuildManifest(ledgerDirectory, branchID)
 }
 
-func RebuildManifest(ledgerDirectory string) (*LedgerManifest, error) {
-	logsDir := filepath.Join(ledgerDirectory, "logs")
-	entries, err := os.ReadDir(logsDir)
+func RebuildManifest(ledgerDirectory string, branchID string) (*LedgerManifest, error) {
+	if branchID == "" {
+		branchID = "main"
+	}
+	branchDir := filepath.Join(ledgerDirectory, "logs", branchID)
+	entries, err := os.ReadDir(branchDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &LedgerManifest{ActiveShard: "00000.jsonl", EventCount: 0, TotalEvents: 0}, nil
 		}
-		return nil, fmt.Errorf("reading logs directory: %w", err)
+		return nil, fmt.Errorf("reading logs branch directory: %w", err)
 	}
 
 	var shards []string
@@ -56,7 +65,7 @@ func RebuildManifest(ledgerDirectory string) (*LedgerManifest, error) {
 	eventCount := 0
 
 	for _, shard := range shards {
-		file, err := os.Open(filepath.Join(logsDir, shard))
+		file, err := os.Open(filepath.Join(branchDir, shard))
 		if err != nil {
 			continue
 		}
@@ -75,14 +84,20 @@ func RebuildManifest(ledgerDirectory string) (*LedgerManifest, error) {
 	}
 
 	m := &LedgerManifest{ActiveShard: activeShard, EventCount: eventCount, TotalEvents: totalCount}
-	_ = m.Save(ledgerDirectory)
+	_ = m.Save(ledgerDirectory, branchID)
 	return m, nil
 }
 
-func (m *LedgerManifest) Save(ledgerDirectory string) error {
+func (m *LedgerManifest) Save(ledgerDirectory string, branchID string) error {
+	if branchID == "" {
+		branchID = "main"
+	}
+	branchDir := filepath.Join(ledgerDirectory, "logs", branchID)
+	_ = os.MkdirAll(branchDir, 0755)
+
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(ledgerDirectory, "manifest.json"), data, 0644)
+	return os.WriteFile(filepath.Join(branchDir, "manifest.json"), data, 0644)
 }

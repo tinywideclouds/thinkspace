@@ -55,8 +55,9 @@ func (s *Service) Graph() thinkgraph.GraphRepository {
 
 func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*thinkgraph.Chat, error) {
 	chat := &thinkgraph.Chat{
-		ID:      chatID,
-		SpaceID: spaceID,
+		ID:           chatID,
+		SpaceID:      spaceID,
+		ActiveBranch: "main",
 	}
 
 	chatDir := filepath.Join(s.workspaceRoot, spaceID, "chats", chatID)
@@ -101,7 +102,7 @@ func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*
 			return nil, ErrGraphMismatch
 		}
 	} else {
-		_, _ = thinkgraph.LoadOrRebuildManifest(ledgerPath)
+		_, _ = thinkgraph.LoadOrRebuildManifest(ledgerPath, "main")
 	}
 
 	return chat, nil

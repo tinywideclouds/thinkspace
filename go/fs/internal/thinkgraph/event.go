@@ -38,6 +38,7 @@ type Event struct {
 	Tags       []string          `json:"tags,omitempty"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
 	Tombstoned bool              `json:"tombstoned"`
+	BranchID   string            `json:"branch_id,omitempty"` // Associates the event with its fork topology
 }
 
 func NewEvent(eventType, content string) Event {

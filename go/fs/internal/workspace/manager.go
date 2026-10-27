@@ -194,9 +194,16 @@ func (m *ServiceManager) CreateChat(ctx context.Context, spaceID string, request
 
 	id := uuid.NewV7().String()
 	meta := ChatMeta{
-		ID:        id,
-		Name:      name,
-		CreatedAt: time.Now().UTC(),
+		ID:           id,
+		Name:         name,
+		CreatedAt:    time.Now().UTC(),
+		ActiveBranch: "main",
+		Branches: map[string]BranchMeta{
+			"main": {
+				ParentBranch: "",
+				ForkPoint:    "",
+			},
+		},
 	}
 
 	chatDir := filepath.Join(m.baseRoot, spaceID, "chats", id)

@@ -12,6 +12,16 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
+export type ScrollState = 'auto' | 'manual';
+
+const DEBUG_PREFETCH_CLASSES = [
+  'ring-4',
+  'ring-orange-500',
+  'ring-dashed',
+  'bg-orange-500/10',
+  'relative'
+];
+
 @Component({
   selector: 'llm-scroll-viewport',
   standalone: true,
@@ -20,105 +30,113 @@ import { CommonModule } from '@angular/common';
 })
 export class ScrollViewportComponent {
   public containerRef = viewChild.required<ElementRef<HTMLDivElement>>('scrollContainer');
-  public topSentinelRef = viewChild.required<ElementRef<HTMLDivElement>>('topSentinel');
   public bottomSentinelRef = viewChild.required<ElementRef<HTMLDivElement>>('bottomSentinel');
 
-  public ceilingAnchor = input<Element | null>(null);
   public topContentAnchor = input<Element | null>(null);
+  public prefetchAnchor = input<Element | null>(null);
   public isDebugMode = input<boolean>(false);
   
   public loadPreviousPage = output<void>();
+  public scrolledToBottom = output<void>();
 
-  public isAtBottom = signal<boolean>(true);
-  public unreadIndicatorActive = signal<boolean>(false);
-  
   public topContentVisible = signal<boolean>(false);
-  public ceilingAnchorVisible = signal<boolean>(false);
-  public ceilingLocked = signal<boolean>(false);
+  public scrollState = signal<ScrollState>('auto');
 
   private destroyRef = inject(DestroyRef);
-  private dynamicObserver: IntersectionObserver | null = null;
+  private debugObserver: IntersectionObserver | null = null;
+  private prefetchObserver: IntersectionObserver | null = null;
+  private previousPrefetchElement: Element | null = null;
 
   constructor() {
+    // Dynamic top content debug observer
     effect(() => {
       const topAnchor = this.topContentAnchor();
-      const ceiling = this.ceilingAnchor();
       const container = this.containerRef()?.nativeElement;
 
       if (!container) return;
 
-      if (!this.dynamicObserver) {
-        this.dynamicObserver = new IntersectionObserver((entries) => {
+      if (!this.debugObserver) {
+        this.debugObserver = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
             if (entry.target === this.topContentAnchor()) {
               this.topContentVisible.set(entry.isIntersecting);
-            }
-            if (entry.target === this.ceilingAnchor()) {
-              this.ceilingAnchorVisible.set(entry.isIntersecting);
-              
-              const rootTop = entry.rootBounds?.top ?? 0;
-              if (entry.boundingClientRect.top <= rootTop) {
-                this.ceilingLocked.set(true);
-              } else {
-                this.ceilingLocked.set(false);
-              }
             }
           });
         }, { root: container, threshold: [0, 0.1, 0.5, 0.9, 1] });
       }
 
-      this.dynamicObserver.disconnect();
-      if (topAnchor) this.dynamicObserver.observe(topAnchor);
-      if (ceiling) this.dynamicObserver.observe(ceiling);
+      this.debugObserver.disconnect();
+      if (topAnchor) this.debugObserver.observe(topAnchor);
+    });
+
+    // Dynamic prefetch trigger & false-color debug renderer
+    effect(() => {
+      const anchor = this.prefetchAnchor();
+      const container = this.containerRef()?.nativeElement;
+      const debugActive = this.isDebugMode();
+
+      // Clean up previous debug classes
+      if (this.previousPrefetchElement) {
+        this.previousPrefetchElement.classList.remove(...DEBUG_PREFETCH_CLASSES);
+        this.previousPrefetchElement = null;
+      }
+
+      // Apply debug false-color styling to the active prefetch element
+      if (debugActive && anchor) {
+        anchor.classList.add(...DEBUG_PREFETCH_CLASSES);
+        this.previousPrefetchElement = anchor;
+      }
+
+      if (!container) return;
+
+      if (!this.prefetchObserver) {
+        this.prefetchObserver = new IntersectionObserver(([entry]) => {
+          if (entry.isIntersecting) {
+            this.loadPreviousPage.emit();
+          }
+        }, { root: container, threshold: 0.1 });
+      }
+
+      this.prefetchObserver.disconnect();
+      if (anchor) this.prefetchObserver.observe(anchor);
     });
 
     afterNextRender(() => {
-      this.scrollToBottom();
+      this.scrollToBottom('instant');
       this.setupObservers();
     });
   }
 
-  public scrollToBottom(): void {
+  public scrollToBottom(behavior: ScrollBehavior = 'smooth'): void {
     const container = this.containerRef().nativeElement;
-    container.scrollTop = container.scrollHeight;
-    this.isAtBottom.set(true);
-    this.ceilingLocked.set(false);
-    this.unreadIndicatorActive.set(false);
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    this.scrollState.set('auto');
+  }
+
+  private enforceTailLock(): void {
+    if (this.scrollState() === 'auto') {
+      const container = this.containerRef().nativeElement;
+      container.scrollTop = container.scrollHeight;
+    }
   }
 
   private setupObservers(): void {
     const container = this.containerRef().nativeElement;
 
-    const topObserver = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        this.loadPreviousPage.emit();
-      }
-    }, { root: container, threshold: 0.1 });
-    topObserver.observe(this.topSentinelRef().nativeElement);
-
     const bottomObserver = new IntersectionObserver(([entry]) => {
-      this.isAtBottom.set(entry.isIntersecting);
       if (entry.isIntersecting) {
-        this.unreadIndicatorActive.set(false); 
+        this.scrollState.set('auto');
+        this.scrolledToBottom.emit();
+      } else {
+        this.scrollState.set('manual');
       }
     }, { root: container, threshold: 0.1 });
     bottomObserver.observe(this.bottomSentinelRef().nativeElement);
 
     const mutationObserver = new MutationObserver((mutations) => {
       const domChanged = mutations.some(m => m.addedNodes.length > 0 || m.type === 'characterData');
-      
       if (domChanged) {
-        if (!this.isAtBottom()) {
-          this.unreadIndicatorActive.set(true);
-          return;
-        }
-
-        if (this.ceilingLocked()) {
-          this.unreadIndicatorActive.set(true);
-          return;
-        }
-        
-        container.scrollTop = container.scrollHeight;
+        this.enforceTailLock();
       }
     });
 
@@ -129,9 +147,12 @@ export class ScrollViewportComponent {
     });
 
     this.destroyRef.onDestroy(() => {
-      topObserver.disconnect();
+      if (this.previousPrefetchElement) {
+        this.previousPrefetchElement.classList.remove(...DEBUG_PREFETCH_CLASSES);
+      }
       bottomObserver.disconnect();
-      if (this.dynamicObserver) this.dynamicObserver.disconnect();
+      if (this.debugObserver) this.debugObserver.disconnect();
+      if (this.prefetchObserver) this.prefetchObserver.disconnect();
       mutationObserver.disconnect();
     });
   }

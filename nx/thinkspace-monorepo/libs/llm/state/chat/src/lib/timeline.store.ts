@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import { DomainGraphEvent } from '@org/llm-core-facade';
+import { DomainGraphEvent, DomainBranchTopology } from '@org/llm-core-facade';
 import { ChatItem, ModelChatItem, FlowCardChatItem, FileDeltaChatItem } from './chat.models';
 
 @Injectable({ providedIn: 'root' })
@@ -8,15 +8,30 @@ export class TimelineStore {
   public hasMoreHistory = signal<boolean>(false);
   public nextCursor = signal<string>('');
   public isLoadingHistory = signal<boolean>(false);
+  public totalHistoryMessages = signal<number>(0);
+
+  // Topology Signals
+  public activeBranch = signal<string>('main');
+  public branches = signal<Record<string, DomainBranchTopology>>({});
 
   public clearSession(): void {
     this.coreChat.set([]);
     this.hasMoreHistory.set(false);
     this.nextCursor.set('');
     this.isLoadingHistory.set(false);
+    this.totalHistoryMessages.set(0);
+    this.activeBranch.set('main');
+    this.branches.set({});
   }
 
-  public processSyncHistory(recentEvents: DomainGraphEvent[], nextCursor: string, hasMore: boolean): void {
+  public processSyncHistory(
+    recentEvents: DomainGraphEvent[], 
+    nextCursor: string, 
+    hasMore: boolean, 
+    activeBranch: string,
+    branches: Record<string, DomainBranchTopology>,
+    totalMessages = 0
+  ): void {
     const incomingTimeline: ChatItem[] = recentEvents
       .filter(e => e.type === 'prompt' || e.type === 'model' || e.type === 'file_delta')
       .map(e => this.mapDomainEventToChatItem(e));
@@ -30,10 +45,17 @@ export class TimelineStore {
 
     this.nextCursor.set(nextCursor);
     this.hasMoreHistory.set(hasMore);
+    this.totalHistoryMessages.set(totalMessages);
     this.isLoadingHistory.set(false);
+    
+    this.activeBranch.set(activeBranch);
+    this.branches.set(branches);
   }
 
   public ingestEvent(event: DomainGraphEvent): void {
+    // Strict Filtering: Ignore live events that belong to a background branch
+    if (event.branchId && event.branchId !== this.activeBranch()) return;
+
     if (event.type !== 'prompt' && event.type !== 'model' && event.type !== 'file_delta') return;
     
     const newItem = this.mapDomainEventToChatItem(event);
@@ -53,7 +75,8 @@ export class TimelineStore {
         path: e.metadata['path'] || 'Unknown Path',
         previewSnippet: e.metadata['previewSnippet'] || '',
         fileRef: e.metadata['fileRef'] || '',
-        metadata: e.metadata
+        metadata: e.metadata,
+        edges: e.edges
       } as FileDeltaChatItem;
     }
     
@@ -61,7 +84,8 @@ export class TimelineStore {
       id: e.id, 
       type: e.type === 'model' ? 'model' : 'user', 
       content: e.content,
-      metadata: e.metadata
+      metadata: e.metadata,
+      edges: e.edges
     } as ChatItem;
   }
 

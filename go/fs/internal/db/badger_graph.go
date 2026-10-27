@@ -65,7 +65,13 @@ func scanPrefix[T any](txn *badger.Txn, prefix []byte, filter func(T) bool) ([]T
 
 func (g *BadgerGraph) AppendEvent(ctx context.Context, c *thinkgraph.Chat, event thinkgraph.Event) error {
 	nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, event.ID.String())
-	timelineKey := fmt.Appendf(nil, "%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, event.Timestamp.UnixNano(), event.ID.String())
+
+	branchID := event.BranchID
+	if branchID == "" {
+		branchID = "main"
+	}
+
+	timelineKey := fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, event.Timestamp.UnixNano(), event.ID.String())
 
 	nodeData, err := json.Marshal(event)
 	if err != nil {
@@ -234,9 +240,9 @@ func (g *BadgerGraph) ClearChatGraph(ctx context.Context, c *thinkgraph.Chat) er
 	})
 }
 
-func (g *BadgerGraph) GetTimeline(ctx context.Context, c *thinkgraph.Chat) ([]thinkgraph.Event, error) {
+func (g *BadgerGraph) GetBranchTimeline(ctx context.Context, c *thinkgraph.Chat, branchID string) ([]thinkgraph.Event, error) {
 	var events []thinkgraph.Event
-	prefix := fmt.Appendf(nil, "%s:%s:%s:", nsTimeline, c.SpaceID, c.ID)
+	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.SpaceID, c.ID, branchID)
 
 	err := g.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
@@ -244,12 +250,12 @@ func (g *BadgerGraph) GetTimeline(ctx context.Context, c *thinkgraph.Chat) ([]th
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			keyStr := string(it.Item().Key())
 			parts := strings.Split(keyStr, ":")
-			if len(parts) < 6 {
+			if len(parts) < 7 {
 				continue
 			}
-			uuidStr := parts[5]
+			eventID := parts[6]
 
-			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, uuidStr)
+			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, eventID)
 			if nodeItem, err := txn.Get(nodeKey); err == nil {
 				_ = nodeItem.Value(func(val []byte) error {
 					var ev thinkgraph.Event
@@ -265,12 +271,12 @@ func (g *BadgerGraph) GetTimeline(ctx context.Context, c *thinkgraph.Chat) ([]th
 	return events, err
 }
 
-func (g *BadgerGraph) GetTimelinePage(ctx context.Context, c *thinkgraph.Chat, cursor string, limit int) ([]thinkgraph.Event, string, bool, error) {
+func (g *BadgerGraph) GetBranchTimelinePage(ctx context.Context, c *thinkgraph.Chat, branchID string, cursor string, limit int) ([]thinkgraph.Event, string, bool, error) {
 	var events []thinkgraph.Event
 	var hasMore bool
 	var nextCursor string
 
-	prefix := fmt.Appendf(nil, "%s:%s:%s:", nsTimeline, c.SpaceID, c.ID)
+	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.SpaceID, c.ID, branchID)
 
 	err := g.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -289,7 +295,7 @@ func (g *BadgerGraph) GetTimelinePage(ctx context.Context, c *thinkgraph.Chat, c
 			_ = item.Value(func(val []byte) error {
 				return json.Unmarshal(val, &ev)
 			})
-			seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, ev.Timestamp.UnixNano(), ev.ID.String())
+			seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, ev.Timestamp.UnixNano(), ev.ID.String())
 		} else {
 			seekPrefix = append(prefix, 0xFF)
 		}
@@ -298,22 +304,18 @@ func (g *BadgerGraph) GetTimelinePage(ctx context.Context, c *thinkgraph.Chat, c
 		for it.Seek(seekPrefix); it.ValidForPrefix(prefix); it.Next() {
 			keyStr := string(it.Item().Key())
 			parts := strings.Split(keyStr, ":")
-			if len(parts) < 6 {
+			if len(parts) < 7 {
 				continue
 			}
-			uuidStr := parts[5]
-
-			if cursor != "" && uuidStr == cursor && count == 0 {
-				continue
-			}
+			eventID := parts[6]
 
 			if count >= limit {
 				hasMore = true
-				nextCursor = uuidStr
+				nextCursor = eventID
 				break
 			}
 
-			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, uuidStr)
+			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, eventID)
 			if nodeItem, err := txn.Get(nodeKey); err == nil {
 				_ = nodeItem.Value(func(val []byte) error {
 					var ev thinkgraph.Event
@@ -331,8 +333,8 @@ func (g *BadgerGraph) GetTimelinePage(ctx context.Context, c *thinkgraph.Chat, c
 	return events, nextCursor, hasMore, err
 }
 
-func (g *BadgerGraph) WalkTimelineReverse(ctx context.Context, c *thinkgraph.Chat, fn func(thinkgraph.Event) bool) error {
-	prefix := fmt.Appendf(nil, "%s:%s:%s:", nsTimeline, c.SpaceID, c.ID)
+func (g *BadgerGraph) WalkBranchReverse(ctx context.Context, c *thinkgraph.Chat, branchID string, startCursor string, fn func(thinkgraph.Event) bool) error {
+	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.SpaceID, c.ID, branchID)
 
 	return g.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -340,16 +342,30 @@ func (g *BadgerGraph) WalkTimelineReverse(ctx context.Context, c *thinkgraph.Cha
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		seekPrefix := append(prefix, 0xFF)
+		var seekPrefix []byte
+		if startCursor != "" {
+			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, startCursor)
+			item, err := txn.Get(nodeKey)
+			if err == nil {
+				var ev thinkgraph.Event
+				_ = item.Value(func(val []byte) error { return json.Unmarshal(val, &ev) })
+				seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, ev.Timestamp.UnixNano(), ev.ID.String())
+			} else {
+				seekPrefix = append(prefix, 0xFF)
+			}
+		} else {
+			seekPrefix = append(prefix, 0xFF)
+		}
+
 		for it.Seek(seekPrefix); it.ValidForPrefix(prefix); it.Next() {
 			keyStr := string(it.Item().Key())
 			parts := strings.Split(keyStr, ":")
-			if len(parts) < 6 {
+			if len(parts) < 7 {
 				continue
 			}
-			uuidStr := parts[5]
+			eventID := parts[6]
 
-			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, uuidStr)
+			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, eventID)
 			if nodeItem, err := txn.Get(nodeKey); err == nil {
 				var ev thinkgraph.Event
 				_ = nodeItem.Value(func(val []byte) error {
@@ -380,9 +396,9 @@ func (g *BadgerGraph) GetLenses(ctx context.Context, c *thinkgraph.Chat, tag str
 			if len(parts) < 6 {
 				continue
 			}
-			uuidStr := parts[5]
+			eventID := parts[5]
 
-			if item, err := txn.Get(fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, uuidStr)); err == nil {
+			if item, err := txn.Get(fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, eventID)); err == nil {
 				_ = item.Value(func(val []byte) error {
 					var ev thinkgraph.Event
 					if json.Unmarshal(val, &ev) == nil && !ev.Tombstoned {
@@ -393,7 +409,7 @@ func (g *BadgerGraph) GetLenses(ctx context.Context, c *thinkgraph.Chat, tag str
 				continue
 			}
 
-			if item, err := txn.Get(fmt.Appendf(nil, "%s:%s:%s:%s", nsDigest, c.SpaceID, c.ID, uuidStr)); err == nil {
+			if item, err := txn.Get(fmt.Appendf(nil, "%s:%s:%s:%s", nsDigest, c.SpaceID, c.ID, eventID)); err == nil {
 				_ = item.Value(func(val []byte) error {
 					var d thinkgraph.DigestMeta
 					if json.Unmarshal(val, &d) == nil && !d.Tombstoned {
@@ -404,7 +420,7 @@ func (g *BadgerGraph) GetLenses(ctx context.Context, c *thinkgraph.Chat, tag str
 				continue
 			}
 
-			if item, err := txn.Get(fmt.Appendf(nil, "%s:%s:%s:%s", nsSpaceContext, c.SpaceID, c.ID, uuidStr)); err == nil {
+			if item, err := txn.Get(fmt.Appendf(nil, "%s:%s:%s:%s", nsSpaceContext, c.SpaceID, c.ID, eventID)); err == nil {
 				_ = item.Value(func(val []byte) error {
 					var sc thinkgraph.SpaceContext
 					if json.Unmarshal(val, &sc) == nil && !sc.Tombstoned {

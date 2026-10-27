@@ -20,4 +20,6 @@ files:
   - libs/llm/state/chat/src/lib/timeline.store.ts
   - libs/llm/state/chat/src/lib/thinkspace-state.service.spec.ts
   - libs/llm/state/chat/src/lib/thinkspace-state.service.ts
+  - libs/llm/state/chat/src/lib/ui-settings.service.spec.ts
+  - libs/llm/state/chat/src/lib/ui-settings.service.ts
 last_context: llm_state_10.md

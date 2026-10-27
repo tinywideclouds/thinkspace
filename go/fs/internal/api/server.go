@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
+	"uuid"
 
 	"github.com/coder/websocket"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
@@ -207,14 +209,33 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		case "load_history":
 			payload := inbound.LoadHistory
-			chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID}
+
+			s.sessionMu.Lock()
+			activeBranch := "main"
+			if s.activeSession != nil && s.activeSession.ChatID == payload.ChatID {
+				activeBranch = s.activeSession.Meta.ActiveBranch
+			}
+			s.sessionMu.Unlock()
+
+			chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID, ActiveBranch: activeBranch}
 
 			limit := payload.Limit
 			if limit <= 0 {
 				limit = 50
 			}
 
-			events, nextCursor, hasMore, err := s.manager.GraphStore().GetTimelinePage(ctx, chatObj, payload.Cursor, limit)
+			// Use the Traversal Engine to allow seamless cross-branch pagination
+			engine := thinkgraph.NewTraversalEngine(s.manager.GraphStore())
+			topo := make(map[string]thinkgraph.BranchTopology)
+			s.sessionMu.Lock()
+			if s.activeSession != nil {
+				for k, v := range s.activeSession.Meta.Branches {
+					topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
+				}
+			}
+			s.sessionMu.Unlock()
+
+			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatObj, payload.Cursor, limit, topo)
 			if err != nil {
 				s.logger.Error("Failed to fetch timeline page", "error", err)
 				continue
@@ -223,6 +244,83 @@ func (s *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore); err == nil {
 				ui.SendSyncHistory(syncData)
 			}
+
+		case "fork_chat":
+			payload := inbound.ForkChat
+			s.sessionMu.Lock()
+			if s.activeSession != nil && s.activeSession.ChatID == payload.ChatID {
+				newBranchID := "branch-" + uuid.New().String()[:8]
+
+				s.activeSession.Meta.Branches[newBranchID] = workspace.BranchMeta{
+					ParentBranch: s.activeSession.Meta.ActiveBranch,
+					ForkPoint:    payload.TargetEventID,
+				}
+				s.activeSession.Meta.ActiveBranch = newBranchID
+
+				_ = s.manager.UpdateChatMeta(payload.SpaceID, payload.ChatID, func(m *workspace.ChatMeta) {
+					m.Branches[newBranchID] = s.activeSession.Meta.Branches[newBranchID]
+					m.ActiveBranch = newBranchID
+				})
+
+				chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID, ActiveBranch: newBranchID}
+				engine := thinkgraph.NewTraversalEngine(s.manager.GraphStore())
+				topo := make(map[string]thinkgraph.BranchTopology)
+				for k, v := range s.activeSession.Meta.Branches {
+					topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
+				}
+
+				events, nextCursor, hasMore, _ := engine.GetTimelinePage(ctx, chatObj, "", 50, topo)
+				if syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore); err == nil {
+					ui.SendSyncHistory(syncData)
+				}
+			}
+			s.sessionMu.Unlock()
+
+		case "inline_edit":
+			payload := inbound.InlineEdit
+			s.sessionMu.Lock()
+			if s.activeSession != nil && s.activeSession.ChatID == payload.ChatID {
+				chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID, ActiveBranch: s.activeSession.Meta.ActiveBranch}
+
+				newEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, payload.NewText)
+				newEvent.Metadata["amends"] = payload.TargetEventID
+				_ = s.manager.GetService(payload.SpaceID).LogUserMessage(ctx, chatObj, payload.NewText) // Using LogUserMessage ensures it goes through the bus to both Badger and Ledger
+
+				// Apply mutation to old event to create the forward link
+				if targetUUID, err := uuid.Parse(payload.TargetEventID); err == nil {
+					mut := thinkgraph.MutationEvent{
+						TargetID:  targetUUID,
+						Type:      thinkgraph.MutationUpdate, // Handled implicitly as an update by the UI/Rehydrator depending on implementation payload semantics
+						Timestamp: time.Now().UTC(),
+						Payload:   payload.NewText,
+					}
+					_ = s.manager.GetService(payload.SpaceID).SaveMutation(ctx, chatObj, mut)
+				}
+			}
+			s.sessionMu.Unlock()
+
+		case "switch_branch":
+			payload := inbound.SwitchBranch
+			s.sessionMu.Lock()
+			if s.activeSession != nil && s.activeSession.ChatID == payload.ChatID {
+				s.activeSession.Meta.ActiveBranch = payload.TargetBranch
+				_ = s.manager.UpdateChatMeta(payload.SpaceID, payload.ChatID, func(m *workspace.ChatMeta) {
+					m.ActiveBranch = payload.TargetBranch
+				})
+
+				chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID, ActiveBranch: payload.TargetBranch}
+				engine := thinkgraph.NewTraversalEngine(s.manager.GraphStore())
+				topo := make(map[string]thinkgraph.BranchTopology)
+				for k, v := range s.activeSession.Meta.Branches {
+					topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
+				}
+
+				events, nextCursor, hasMore, _ := engine.GetTimelinePage(ctx, chatObj, "", 50, topo)
+				if syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore); err == nil {
+					ui.SendSyncHistory(syncData)
+				}
+			}
+			s.sessionMu.Unlock()
 
 		case "select_strategy":
 			ui.PushStrategy(inbound.SelectStrategy.StrategyID)

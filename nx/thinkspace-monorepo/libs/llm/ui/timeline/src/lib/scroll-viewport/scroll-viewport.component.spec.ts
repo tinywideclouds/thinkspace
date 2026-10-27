@@ -9,7 +9,7 @@ import { By } from '@angular/platform-browser';
   imports: [ScrollViewportComponent],
   template: `
     <div style="height: 500px; width: 400px;">
-      <llm-scroll-viewport [ceilingAnchor]="mockAnchor()" (loadPreviousPage)="onLoadPrevious()">
+      <llm-scroll-viewport [topContentAnchor]="mockAnchor()" [prefetchAnchor]="prefetchMockAnchor()" (loadPreviousPage)="onLoadPrevious()">
         <div class="mock-message" style="height: 100px;">Message 1</div>
         <div class="mock-message" style="height: 100px;">Message 2</div>
         <div class="mock-message" style="height: 1000px;">Massive Message 3</div>
@@ -19,12 +19,12 @@ import { By } from '@angular/platform-browser';
 })
 class TestHostComponent {
   public mockAnchor = signal<HTMLElement | null>(null);
+  public prefetchMockAnchor = signal<HTMLElement | null>(null);
   public onLoadPrevious = vi.fn();
 }
 
 describe('ScrollViewportComponent', () => {
   let hostFixture: ComponentFixture<TestHostComponent>;
-  let hostComponent: TestHostComponent;
   let viewportComponent: ScrollViewportComponent;
 
   beforeEach(async () => {
@@ -33,7 +33,6 @@ describe('ScrollViewportComponent', () => {
     }).compileComponents();
 
     hostFixture = TestBed.createComponent(TestHostComponent);
-    hostComponent = hostFixture.componentInstance;
     
     const viewportDebug = hostFixture.debugElement.query(By.directive(ScrollViewportComponent));
     viewportComponent = viewportDebug.componentInstance;
@@ -42,54 +41,34 @@ describe('ScrollViewportComponent', () => {
     await hostFixture.whenStable();
   });
 
-  it('should create the component and its sentinels', () => {
+  it('should create the component and its bottom sentinel', () => {
     expect(viewportComponent).toBeTruthy();
     expect(viewportComponent.containerRef()).toBeTruthy();
-    expect(viewportComponent.topSentinelRef()).toBeTruthy();
     expect(viewportComponent.bottomSentinelRef()).toBeTruthy();
   });
 
-  it('should expose a scrollToBottom method that clears the unread indicator', () => {
-    viewportComponent.unreadIndicatorActive.set(true);
-    expect(viewportComponent.unreadIndicatorActive()).toBe(true);
+  it('should expose a scrollToBottom method and emit scrolledToBottom, updating scroll state to auto', () => {
+    const emitSpy = vi.spyOn(viewportComponent.scrolledToBottom, 'emit');
+    
+    viewportComponent.scrollState.set('manual');
+    viewportComponent.scrollToBottom('instant');
 
-    viewportComponent.scrollToBottom();
-
-    expect(viewportComponent.unreadIndicatorActive()).toBe(false);
+    expect(viewportComponent.scrollState()).toBe('auto');
+    expect(emitSpy).toHaveBeenCalled();
   });
 
-  it('should conditionally render the New Messages pill', () => {
-    const getPill = () => hostFixture.nativeElement.querySelector('button');
+  it('should only maintain tail if scroll state is auto', () => {
+    viewportComponent.scrollState.set('manual');
+    const container = viewportComponent.containerRef().nativeElement;
+    container.scrollTop = 0;
 
-    viewportComponent.isAtBottom.set(true);
-    viewportComponent.unreadIndicatorActive.set(false);
-    hostFixture.detectChanges();
-    expect(getPill()).toBeNull();
-
-    viewportComponent.isAtBottom.set(false);
-    viewportComponent.unreadIndicatorActive.set(false);
-    hostFixture.detectChanges();
-    expect(getPill()).toBeNull();
-
-    viewportComponent.isAtBottom.set(false);
-    viewportComponent.unreadIndicatorActive.set(true);
-    hostFixture.detectChanges();
+    viewportComponent['enforceTailLock']();
     
-    const pill = getPill();
-    expect(pill).toBeTruthy();
-    expect(pill?.textContent).toContain('New Messages ↓');
-  });
+    expect(container.scrollTop).toBe(0);
 
-  it('should trigger scrollToBottom when the pill is clicked', () => {
-    const scrollToBottomSpy = vi.spyOn(viewportComponent, 'scrollToBottom');
+    viewportComponent.scrollState.set('auto');
+    viewportComponent['enforceTailLock']();
     
-    viewportComponent.isAtBottom.set(false);
-    viewportComponent.unreadIndicatorActive.set(true);
-    hostFixture.detectChanges();
-
-    const pill = hostFixture.nativeElement.querySelector('button');
-    pill.click();
-
-    expect(scrollToBottomSpy).toHaveBeenCalled();
+    expect(container.scrollTop).toBe(container.scrollHeight);
   });
 });

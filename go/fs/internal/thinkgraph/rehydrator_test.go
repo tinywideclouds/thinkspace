@@ -18,15 +18,17 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 	workspaceRoot := tempDir
 	spaceID := "test-space"
 	chatID := "chat-rehydrate"
+	branchID := "main"
 
 	chat := &thinkgraph.Chat{
-		ID:      chatID,
-		SpaceID: spaceID,
+		ID:           chatID,
+		SpaceID:      spaceID,
+		ActiveBranch: branchID,
 	}
 
 	// 1. Scaffold physical disk
 	ledgerPath := filepath.Join(workspaceRoot, spaceID, "chats", chatID, "ledger")
-	logsDir := filepath.Join(ledgerPath, "logs")
+	logsDir := filepath.Join(ledgerPath, "logs", branchID)
 	digestsDir := filepath.Join(ledgerPath, "digests")
 	os.MkdirAll(logsDir, 0755)
 	os.MkdirAll(digestsDir, 0755)
@@ -52,17 +54,17 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 	rehydrator := thinkgraph.NewRehydrator(graph, workspaceRoot)
 
 	// Scenario A: Cold Boot / Hard Mismatch
-	status, diskMan, graphMan, err := rehydrator.CheckSync(context.Background(), chat)
+	status, diskManifest, graphManifest, err := rehydrator.CheckSync(context.Background(), chat)
 	if err != nil {
 		t.Fatalf("CheckSync failed: %v", err)
 	}
 	if status != thinkgraph.SyncStatusMismatch {
 		t.Fatalf("Expected Mismatch on cold boot, got %s", status)
 	}
-	if diskMan.TotalEvents != 5 {
-		t.Errorf("Expected disk manifest to reflect 5 events, got %d", diskMan.TotalEvents)
+	if diskManifest.TotalEvents != 5 {
+		t.Errorf("Expected disk manifest to reflect 5 events, got %d", diskManifest.TotalEvents)
 	}
-	if graphMan != nil {
+	if graphManifest != nil {
 		t.Errorf("Expected nil graph manifest on cold boot")
 	}
 
@@ -72,16 +74,16 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		t.Fatalf("Rebuild failed: %v", err)
 	}
 
-	status, _, graphMan, _ = rehydrator.CheckSync(context.Background(), chat)
+	status, _, graphManifest, _ = rehydrator.CheckSync(context.Background(), chat)
 	if status != thinkgraph.SyncStatusOK {
 		t.Fatalf("Expected OK after rebuild, got %s", status)
 	}
-	if graphMan.TotalEvents != 5 {
-		t.Errorf("Expected badger to hold 5 events, got %d", graphMan.TotalEvents)
+	if graphManifest.TotalEvents != 5 {
+		t.Errorf("Expected badger to hold 5 events, got %d", graphManifest.TotalEvents)
 	}
 
 	// Verify timeline integrity after rebuild
-	timeline, _ := graph.GetTimeline(context.Background(), chat)
+	timeline, _ := graph.GetBranchTimeline(context.Background(), chat, branchID)
 	if len(timeline) != 5 {
 		t.Fatalf("Expected timeline to have 5 events, got %d", len(timeline))
 	}
@@ -101,18 +103,18 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		time.Sleep(1 * time.Millisecond)
 	}
 
-	status, diskMan, graphMan, _ = rehydrator.CheckSync(context.Background(), chat)
+	status, diskManifest, graphManifest, _ = rehydrator.CheckSync(context.Background(), chat)
 	if status != thinkgraph.SyncStatusBehind {
 		t.Fatalf("Expected Behind status after disk advance, got %s", status)
 	}
 
-	err = rehydrator.FastForward(context.Background(), chat, graphMan, diskMan)
+	err = rehydrator.FastForward(context.Background(), chat, graphManifest, diskManifest)
 	if err != nil {
 		t.Fatalf("FastForward failed: %v", err)
 	}
 
 	// Verify timeline integrity after fast forward
-	ffTimeline, _ := graph.GetTimeline(context.Background(), chat)
+	ffTimeline, _ := graph.GetBranchTimeline(context.Background(), chat, branchID)
 	if len(ffTimeline) != 9 {
 		t.Fatalf("Expected timeline to have 9 events, got %d", len(ffTimeline))
 	}
@@ -120,7 +122,7 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 
 func TestRehydrator_MutationReplay(t *testing.T) {
 	tempDir := t.TempDir()
-	chat := &thinkgraph.Chat{ID: "chat-mut", SpaceID: "space"}
+	chat := &thinkgraph.Chat{ID: "chat-mut", SpaceID: "space", ActiveBranch: "main"}
 
 	ledger := thinkgraph.NewFileLedger(1000, tempDir)
 
@@ -142,7 +144,7 @@ func TestRehydrator_MutationReplay(t *testing.T) {
 	rehydrator := thinkgraph.NewRehydrator(graph, tempDir)
 	_ = rehydrator.Rebuild(context.Background(), chat)
 
-	t1, _ := graph.GetTimeline(context.Background(), chat)
+	t1, _ := graph.GetBranchTimeline(context.Background(), chat, "main")
 	if len(t1) != 1 {
 		t.Fatalf("Expected 1 event, got %d", len(t1))
 	}

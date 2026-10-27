@@ -153,6 +153,8 @@ type GraphEvent struct {
 	// UI-specific payload variables (e.g., {"path": "src/main.go", "previewSnippet": "..."})
 	Metadata      map[string]string `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Tombstoned    bool              `protobuf:"varint,7,opt,name=tombstoned,proto3" json:"tombstoned,omitempty"`
+	BranchId      string            `protobuf:"bytes,8,opt,name=branch_id,json=branchId,proto3" json:"branch_id,omitempty"`
+	Edges         map[string]string `protobuf:"bytes,9,rep,name=edges,proto3" json:"edges,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Generic topological routing links
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -234,6 +236,20 @@ func (x *GraphEvent) GetTombstoned() bool {
 		return x.Tombstoned
 	}
 	return false
+}
+
+func (x *GraphEvent) GetBranchId() string {
+	if x != nil {
+		return x.BranchId
+	}
+	return ""
+}
+
+func (x *GraphEvent) GetEdges() map[string]string {
+	if x != nil {
+		return x.Edges
+	}
+	return nil
 }
 
 type DigestMeta struct {
@@ -356,6 +372,58 @@ func (x *AttentionFocusPayload) GetDormantLenses() []string {
 	return nil
 }
 
+type BranchTopology struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ParentBranch  string                 `protobuf:"bytes,1,opt,name=parent_branch,json=parentBranch,proto3" json:"parent_branch,omitempty"`
+	ForkPoint     string                 `protobuf:"bytes,2,opt,name=fork_point,json=forkPoint,proto3" json:"fork_point,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BranchTopology) Reset() {
+	*x = BranchTopology{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BranchTopology) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BranchTopology) ProtoMessage() {}
+
+func (x *BranchTopology) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BranchTopology.ProtoReflect.Descriptor instead.
+func (*BranchTopology) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *BranchTopology) GetParentBranch() string {
+	if x != nil {
+		return x.ParentBranch
+	}
+	return ""
+}
+
+func (x *BranchTopology) GetForkPoint() string {
+	if x != nil {
+		return x.ForkPoint
+	}
+	return ""
+}
+
 type ChatStreamPayload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
@@ -365,7 +433,7 @@ type ChatStreamPayload struct {
 
 func (x *ChatStreamPayload) Reset() {
 	*x = ChatStreamPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[4]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -377,7 +445,7 @@ func (x *ChatStreamPayload) String() string {
 func (*ChatStreamPayload) ProtoMessage() {}
 
 func (x *ChatStreamPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[4]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -390,7 +458,7 @@ func (x *ChatStreamPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatStreamPayload.ProtoReflect.Descriptor instead.
 func (*ChatStreamPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{4}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ChatStreamPayload) GetText() string {
@@ -410,7 +478,7 @@ type AgentStreamPayload struct {
 
 func (x *AgentStreamPayload) Reset() {
 	*x = AgentStreamPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[5]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -422,7 +490,7 @@ func (x *AgentStreamPayload) String() string {
 func (*AgentStreamPayload) ProtoMessage() {}
 
 func (x *AgentStreamPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[5]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -435,7 +503,7 @@ func (x *AgentStreamPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStreamPayload.ProtoReflect.Descriptor instead.
 func (*AgentStreamPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{5}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AgentStreamPayload) GetAgentId() int32 {
@@ -462,7 +530,7 @@ type StreamedGraphEvent struct {
 
 func (x *StreamedGraphEvent) Reset() {
 	*x = StreamedGraphEvent{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[6]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -474,7 +542,7 @@ func (x *StreamedGraphEvent) String() string {
 func (*StreamedGraphEvent) ProtoMessage() {}
 
 func (x *StreamedGraphEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[6]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -487,7 +555,7 @@ func (x *StreamedGraphEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamedGraphEvent.ProtoReflect.Descriptor instead.
 func (*StreamedGraphEvent) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{6}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *StreamedGraphEvent) GetEvent() *GraphEvent {
@@ -503,15 +571,18 @@ type SyncHistoryPayload struct {
 	Digests      map[string]*DigestMeta `protobuf:"bytes,2,rep,name=digests,proto3" json:"digests,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Focus        *AttentionFocusPayload `protobuf:"bytes,3,opt,name=focus,proto3" json:"focus,omitempty"`
 	// Pagination additions
-	NextCursor    string `protobuf:"bytes,4,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
-	HasMore       bool   `protobuf:"varint,5,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	NextCursor string `protobuf:"bytes,4,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	HasMore    bool   `protobuf:"varint,5,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	// Topology additions
+	ActiveBranch  string                     `protobuf:"bytes,6,opt,name=active_branch,json=activeBranch,proto3" json:"active_branch,omitempty"`
+	Branches      map[string]*BranchTopology `protobuf:"bytes,7,rep,name=branches,proto3" json:"branches,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SyncHistoryPayload) Reset() {
 	*x = SyncHistoryPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[7]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -523,7 +594,7 @@ func (x *SyncHistoryPayload) String() string {
 func (*SyncHistoryPayload) ProtoMessage() {}
 
 func (x *SyncHistoryPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[7]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -536,7 +607,7 @@ func (x *SyncHistoryPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncHistoryPayload.ProtoReflect.Descriptor instead.
 func (*SyncHistoryPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{7}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SyncHistoryPayload) GetRecentEvents() []*GraphEvent {
@@ -574,6 +645,20 @@ func (x *SyncHistoryPayload) GetHasMore() bool {
 	return false
 }
 
+func (x *SyncHistoryPayload) GetActiveBranch() string {
+	if x != nil {
+		return x.ActiveBranch
+	}
+	return ""
+}
+
+func (x *SyncHistoryPayload) GetBranches() map[string]*BranchTopology {
+	if x != nil {
+		return x.Branches
+	}
+	return nil
+}
+
 type LoadHistoryPayload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SpaceId       string                 `protobuf:"bytes,1,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
@@ -586,7 +671,7 @@ type LoadHistoryPayload struct {
 
 func (x *LoadHistoryPayload) Reset() {
 	*x = LoadHistoryPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[8]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -598,7 +683,7 @@ func (x *LoadHistoryPayload) String() string {
 func (*LoadHistoryPayload) ProtoMessage() {}
 
 func (x *LoadHistoryPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[8]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -611,7 +696,7 @@ func (x *LoadHistoryPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LoadHistoryPayload.ProtoReflect.Descriptor instead.
 func (*LoadHistoryPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{8}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *LoadHistoryPayload) GetSpaceId() string {
@@ -652,7 +737,7 @@ type RequestStrategyPayload struct {
 
 func (x *RequestStrategyPayload) Reset() {
 	*x = RequestStrategyPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[9]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -664,7 +749,7 @@ func (x *RequestStrategyPayload) String() string {
 func (*RequestStrategyPayload) ProtoMessage() {}
 
 func (x *RequestStrategyPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[9]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -677,7 +762,7 @@ func (x *RequestStrategyPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestStrategyPayload.ProtoReflect.Descriptor instead.
 func (*RequestStrategyPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{9}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RequestStrategyPayload) GetActive() bool {
@@ -696,7 +781,7 @@ type RequestReviewPayload struct {
 
 func (x *RequestReviewPayload) Reset() {
 	*x = RequestReviewPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[10]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -708,7 +793,7 @@ func (x *RequestReviewPayload) String() string {
 func (*RequestReviewPayload) ProtoMessage() {}
 
 func (x *RequestReviewPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[10]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -721,7 +806,7 @@ func (x *RequestReviewPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestReviewPayload.ProtoReflect.Descriptor instead.
 func (*RequestReviewPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{10}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RequestReviewPayload) GetBranch() string {
@@ -741,7 +826,7 @@ type RequestTransitionPayload struct {
 
 func (x *RequestTransitionPayload) Reset() {
 	*x = RequestTransitionPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[11]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -753,7 +838,7 @@ func (x *RequestTransitionPayload) String() string {
 func (*RequestTransitionPayload) ProtoMessage() {}
 
 func (x *RequestTransitionPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[11]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -766,7 +851,7 @@ func (x *RequestTransitionPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestTransitionPayload.ProtoReflect.Descriptor instead.
 func (*RequestTransitionPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{11}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RequestTransitionPayload) GetTargetDomain() string {
@@ -792,7 +877,7 @@ type AvailableSpacesPayload struct {
 
 func (x *AvailableSpacesPayload) Reset() {
 	*x = AvailableSpacesPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[12]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -804,7 +889,7 @@ func (x *AvailableSpacesPayload) String() string {
 func (*AvailableSpacesPayload) ProtoMessage() {}
 
 func (x *AvailableSpacesPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[12]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -817,7 +902,7 @@ func (x *AvailableSpacesPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AvailableSpacesPayload.ProtoReflect.Descriptor instead.
 func (*AvailableSpacesPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{12}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *AvailableSpacesPayload) GetSpaces() []*SpaceInfo {
@@ -843,7 +928,7 @@ type PreviewContextPayload struct {
 
 func (x *PreviewContextPayload) Reset() {
 	*x = PreviewContextPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[13]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -855,7 +940,7 @@ func (x *PreviewContextPayload) String() string {
 func (*PreviewContextPayload) ProtoMessage() {}
 
 func (x *PreviewContextPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[13]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -868,7 +953,7 @@ func (x *PreviewContextPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PreviewContextPayload.ProtoReflect.Descriptor instead.
 func (*PreviewContextPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{13}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PreviewContextPayload) GetSpaceId() string {
@@ -938,7 +1023,7 @@ type FileContextMetaData struct {
 
 func (x *FileContextMetaData) Reset() {
 	*x = FileContextMetaData{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[14]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -950,7 +1035,7 @@ func (x *FileContextMetaData) String() string {
 func (*FileContextMetaData) ProtoMessage() {}
 
 func (x *FileContextMetaData) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[14]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -963,7 +1048,7 @@ func (x *FileContextMetaData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileContextMetaData.ProtoReflect.Descriptor instead.
 func (*FileContextMetaData) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{14}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FileContextMetaData) GetPath() string {
@@ -1002,7 +1087,7 @@ type TelemetryEvent struct {
 
 func (x *TelemetryEvent) Reset() {
 	*x = TelemetryEvent{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[15]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1014,7 +1099,7 @@ func (x *TelemetryEvent) String() string {
 func (*TelemetryEvent) ProtoMessage() {}
 
 func (x *TelemetryEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[15]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1027,7 +1112,7 @@ func (x *TelemetryEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TelemetryEvent.ProtoReflect.Descriptor instead.
 func (*TelemetryEvent) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{15}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *TelemetryEvent) GetId() string {
@@ -1082,7 +1167,7 @@ type TelemetryEventPayload struct {
 
 func (x *TelemetryEventPayload) Reset() {
 	*x = TelemetryEventPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[16]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1094,7 +1179,7 @@ func (x *TelemetryEventPayload) String() string {
 func (*TelemetryEventPayload) ProtoMessage() {}
 
 func (x *TelemetryEventPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[16]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1107,7 +1192,7 @@ func (x *TelemetryEventPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TelemetryEventPayload.ProtoReflect.Descriptor instead.
 func (*TelemetryEventPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{16}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *TelemetryEventPayload) GetChannel() string {
@@ -1142,7 +1227,7 @@ type FanOutPayload struct {
 
 func (x *FanOutPayload) Reset() {
 	*x = FanOutPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[17]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1154,7 +1239,7 @@ func (x *FanOutPayload) String() string {
 func (*FanOutPayload) ProtoMessage() {}
 
 func (x *FanOutPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[17]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1167,7 +1252,7 @@ func (x *FanOutPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FanOutPayload.ProtoReflect.Descriptor instead.
 func (*FanOutPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{17}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *FanOutPayload) GetFlowId() string {
@@ -1243,7 +1328,7 @@ type ManagerPayload struct {
 
 func (x *ManagerPayload) Reset() {
 	*x = ManagerPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[18]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1255,7 +1340,7 @@ func (x *ManagerPayload) String() string {
 func (*ManagerPayload) ProtoMessage() {}
 
 func (x *ManagerPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[18]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1268,7 +1353,7 @@ func (x *ManagerPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManagerPayload.ProtoReflect.Descriptor instead.
 func (*ManagerPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{18}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ManagerPayload) GetBranch() string {
@@ -1297,7 +1382,7 @@ type SubmitPromptPayload struct {
 
 func (x *SubmitPromptPayload) Reset() {
 	*x = SubmitPromptPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[19]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1309,7 +1394,7 @@ func (x *SubmitPromptPayload) String() string {
 func (*SubmitPromptPayload) ProtoMessage() {}
 
 func (x *SubmitPromptPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[19]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1322,7 +1407,7 @@ func (x *SubmitPromptPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPromptPayload.ProtoReflect.Descriptor instead.
 func (*SubmitPromptPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{19}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SubmitPromptPayload) GetText() string {
@@ -1355,7 +1440,7 @@ type SelectStrategyPayload struct {
 
 func (x *SelectStrategyPayload) Reset() {
 	*x = SelectStrategyPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[20]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1367,7 +1452,7 @@ func (x *SelectStrategyPayload) String() string {
 func (*SelectStrategyPayload) ProtoMessage() {}
 
 func (x *SelectStrategyPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[20]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1380,7 +1465,7 @@ func (x *SelectStrategyPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelectStrategyPayload.ProtoReflect.Descriptor instead.
 func (*SelectStrategyPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{20}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SelectStrategyPayload) GetStrategyId() DelegationStrategy {
@@ -1400,7 +1485,7 @@ type ReviewDecisionPayload struct {
 
 func (x *ReviewDecisionPayload) Reset() {
 	*x = ReviewDecisionPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[21]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1412,7 +1497,7 @@ func (x *ReviewDecisionPayload) String() string {
 func (*ReviewDecisionPayload) ProtoMessage() {}
 
 func (x *ReviewDecisionPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[21]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1425,7 +1510,7 @@ func (x *ReviewDecisionPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewDecisionPayload.ProtoReflect.Descriptor instead.
 func (*ReviewDecisionPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{21}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *ReviewDecisionPayload) GetBranch() string {
@@ -1453,7 +1538,7 @@ type ApproveContextPayload struct {
 
 func (x *ApproveContextPayload) Reset() {
 	*x = ApproveContextPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[22]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1465,7 +1550,7 @@ func (x *ApproveContextPayload) String() string {
 func (*ApproveContextPayload) ProtoMessage() {}
 
 func (x *ApproveContextPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[22]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1478,7 +1563,7 @@ func (x *ApproveContextPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApproveContextPayload.ProtoReflect.Descriptor instead.
 func (*ApproveContextPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{22}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ApproveContextPayload) GetApproved() bool {
@@ -1511,7 +1596,7 @@ type TransitionDecisionPayload struct {
 
 func (x *TransitionDecisionPayload) Reset() {
 	*x = TransitionDecisionPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[23]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1523,7 +1608,7 @@ func (x *TransitionDecisionPayload) String() string {
 func (*TransitionDecisionPayload) ProtoMessage() {}
 
 func (x *TransitionDecisionPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[23]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1536,7 +1621,7 @@ func (x *TransitionDecisionPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransitionDecisionPayload.ProtoReflect.Descriptor instead.
 func (*TransitionDecisionPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{23}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *TransitionDecisionPayload) GetApproved() bool {
@@ -1544,6 +1629,195 @@ func (x *TransitionDecisionPayload) GetApproved() bool {
 		return x.Approved
 	}
 	return false
+}
+
+// --- New Branching & Editing Payloads (Client -> Server) ---
+type ForkChatPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SpaceId       string                 `protobuf:"bytes,1,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	ChatId        string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	TargetEventId string                 `protobuf:"bytes,3,opt,name=target_event_id,json=targetEventId,proto3" json:"target_event_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForkChatPayload) Reset() {
+	*x = ForkChatPayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForkChatPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForkChatPayload) ProtoMessage() {}
+
+func (x *ForkChatPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForkChatPayload.ProtoReflect.Descriptor instead.
+func (*ForkChatPayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ForkChatPayload) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *ForkChatPayload) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *ForkChatPayload) GetTargetEventId() string {
+	if x != nil {
+		return x.TargetEventId
+	}
+	return ""
+}
+
+type InlineEditPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SpaceId       string                 `protobuf:"bytes,1,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	ChatId        string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	TargetEventId string                 `protobuf:"bytes,3,opt,name=target_event_id,json=targetEventId,proto3" json:"target_event_id,omitempty"`
+	NewText       string                 `protobuf:"bytes,4,opt,name=new_text,json=newText,proto3" json:"new_text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InlineEditPayload) Reset() {
+	*x = InlineEditPayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InlineEditPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InlineEditPayload) ProtoMessage() {}
+
+func (x *InlineEditPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InlineEditPayload.ProtoReflect.Descriptor instead.
+func (*InlineEditPayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *InlineEditPayload) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *InlineEditPayload) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *InlineEditPayload) GetTargetEventId() string {
+	if x != nil {
+		return x.TargetEventId
+	}
+	return ""
+}
+
+func (x *InlineEditPayload) GetNewText() string {
+	if x != nil {
+		return x.NewText
+	}
+	return ""
+}
+
+type SwitchBranchPayload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SpaceId       string                 `protobuf:"bytes,1,opt,name=space_id,json=spaceId,proto3" json:"space_id,omitempty"`
+	ChatId        string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
+	TargetBranch  string                 `protobuf:"bytes,3,opt,name=target_branch,json=targetBranch,proto3" json:"target_branch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SwitchBranchPayload) Reset() {
+	*x = SwitchBranchPayload{}
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SwitchBranchPayload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SwitchBranchPayload) ProtoMessage() {}
+
+func (x *SwitchBranchPayload) ProtoReflect() protoreflect.Message {
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SwitchBranchPayload.ProtoReflect.Descriptor instead.
+func (*SwitchBranchPayload) Descriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *SwitchBranchPayload) GetSpaceId() string {
+	if x != nil {
+		return x.SpaceId
+	}
+	return ""
+}
+
+func (x *SwitchBranchPayload) GetChatId() string {
+	if x != nil {
+		return x.ChatId
+	}
+	return ""
+}
+
+func (x *SwitchBranchPayload) GetTargetBranch() string {
+	if x != nil {
+		return x.TargetBranch
+	}
+	return ""
 }
 
 // --- Internal Debug / Core Logic (Optional) ---
@@ -1557,7 +1831,7 @@ type SystemRulesPayload struct {
 
 func (x *SystemRulesPayload) Reset() {
 	*x = SystemRulesPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[24]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1569,7 +1843,7 @@ func (x *SystemRulesPayload) String() string {
 func (*SystemRulesPayload) ProtoMessage() {}
 
 func (x *SystemRulesPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[24]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1582,7 +1856,7 @@ func (x *SystemRulesPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemRulesPayload.ProtoReflect.Descriptor instead.
 func (*SystemRulesPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{24}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SystemRulesPayload) GetPersona() string {
@@ -1608,7 +1882,7 @@ type MapbookPayload struct {
 
 func (x *MapbookPayload) Reset() {
 	*x = MapbookPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[25]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1620,7 +1894,7 @@ func (x *MapbookPayload) String() string {
 func (*MapbookPayload) ProtoMessage() {}
 
 func (x *MapbookPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[25]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1633,7 +1907,7 @@ func (x *MapbookPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MapbookPayload.ProtoReflect.Descriptor instead.
 func (*MapbookPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{25}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *MapbookPayload) GetMaps() map[string]string {
@@ -1653,7 +1927,7 @@ type TrajectoryEventPayload struct {
 
 func (x *TrajectoryEventPayload) Reset() {
 	*x = TrajectoryEventPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[26]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1665,7 +1939,7 @@ func (x *TrajectoryEventPayload) String() string {
 func (*TrajectoryEventPayload) ProtoMessage() {}
 
 func (x *TrajectoryEventPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[26]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1678,7 +1952,7 @@ func (x *TrajectoryEventPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrajectoryEventPayload.ProtoReflect.Descriptor instead.
 func (*TrajectoryEventPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{26}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *TrajectoryEventPayload) GetRole() string {
@@ -1706,7 +1980,7 @@ type TrajectoryPayload struct {
 
 func (x *TrajectoryPayload) Reset() {
 	*x = TrajectoryPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[27]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1718,7 +1992,7 @@ func (x *TrajectoryPayload) String() string {
 func (*TrajectoryPayload) ProtoMessage() {}
 
 func (x *TrajectoryPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[27]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1731,7 +2005,7 @@ func (x *TrajectoryPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrajectoryPayload.ProtoReflect.Descriptor instead.
 func (*TrajectoryPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{27}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *TrajectoryPayload) GetLongTermMemory() []string {
@@ -1766,7 +2040,7 @@ type WorkbenchItemPayload struct {
 
 func (x *WorkbenchItemPayload) Reset() {
 	*x = WorkbenchItemPayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[28]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1778,7 +2052,7 @@ func (x *WorkbenchItemPayload) String() string {
 func (*WorkbenchItemPayload) ProtoMessage() {}
 
 func (x *WorkbenchItemPayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[28]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1791,7 +2065,7 @@ func (x *WorkbenchItemPayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkbenchItemPayload.ProtoReflect.Descriptor instead.
 func (*WorkbenchItemPayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{28}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *WorkbenchItemPayload) GetPath() string {
@@ -1830,7 +2104,7 @@ type ThinkBundlePayload struct {
 
 func (x *ThinkBundlePayload) Reset() {
 	*x = ThinkBundlePayload{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[29]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1842,7 +2116,7 @@ func (x *ThinkBundlePayload) String() string {
 func (*ThinkBundlePayload) ProtoMessage() {}
 
 func (x *ThinkBundlePayload) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[29]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1855,7 +2129,7 @@ func (x *ThinkBundlePayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ThinkBundlePayload.ProtoReflect.Descriptor instead.
 func (*ThinkBundlePayload) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{29}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ThinkBundlePayload) GetSpaceId() string {
@@ -1932,6 +2206,9 @@ type WSEvent struct {
 	//	*WSEvent_ApproveContext
 	//	*WSEvent_TransitionDecision
 	//	*WSEvent_LoadHistory
+	//	*WSEvent_ForkChat
+	//	*WSEvent_InlineEdit
+	//	*WSEvent_SwitchBranch
 	Payload       isWSEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1939,7 +2216,7 @@ type WSEvent struct {
 
 func (x *WSEvent) Reset() {
 	*x = WSEvent{}
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[30]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1951,7 +2228,7 @@ func (x *WSEvent) String() string {
 func (*WSEvent) ProtoMessage() {}
 
 func (x *WSEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[30]
+	mi := &file_src_thinkspace_api_v1_events_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1964,7 +2241,7 @@ func (x *WSEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WSEvent.ProtoReflect.Descriptor instead.
 func (*WSEvent) Descriptor() ([]byte, []int) {
-	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{30}
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *WSEvent) GetPayload() isWSEvent_Payload {
@@ -2127,6 +2404,33 @@ func (x *WSEvent) GetLoadHistory() *LoadHistoryPayload {
 	return nil
 }
 
+func (x *WSEvent) GetForkChat() *ForkChatPayload {
+	if x != nil {
+		if x, ok := x.Payload.(*WSEvent_ForkChat); ok {
+			return x.ForkChat
+		}
+	}
+	return nil
+}
+
+func (x *WSEvent) GetInlineEdit() *InlineEditPayload {
+	if x != nil {
+		if x, ok := x.Payload.(*WSEvent_InlineEdit); ok {
+			return x.InlineEdit
+		}
+	}
+	return nil
+}
+
+func (x *WSEvent) GetSwitchBranch() *SwitchBranchPayload {
+	if x != nil {
+		if x, ok := x.Payload.(*WSEvent_SwitchBranch); ok {
+			return x.SwitchBranch
+		}
+	}
+	return nil
+}
+
 type isWSEvent_Payload interface {
 	isWSEvent_Payload()
 }
@@ -2204,6 +2508,19 @@ type WSEvent_LoadHistory struct {
 	LoadHistory *LoadHistoryPayload `protobuf:"bytes,22,opt,name=load_history,json=loadHistory,proto3,oneof"`
 }
 
+type WSEvent_ForkChat struct {
+	// Branch/Edit Commands
+	ForkChat *ForkChatPayload `protobuf:"bytes,24,opt,name=fork_chat,json=forkChat,proto3,oneof"`
+}
+
+type WSEvent_InlineEdit struct {
+	InlineEdit *InlineEditPayload `protobuf:"bytes,25,opt,name=inline_edit,json=inlineEdit,proto3,oneof"`
+}
+
+type WSEvent_SwitchBranch struct {
+	SwitchBranch *SwitchBranchPayload `protobuf:"bytes,26,opt,name=switch_branch,json=switchBranch,proto3,oneof"`
+}
+
 func (*WSEvent_ChatStream) isWSEvent_Payload() {}
 
 func (*WSEvent_TelemetryEvent) isWSEvent_Payload() {}
@@ -2238,6 +2555,12 @@ func (*WSEvent_TransitionDecision) isWSEvent_Payload() {}
 
 func (*WSEvent_LoadHistory) isWSEvent_Payload() {}
 
+func (*WSEvent_ForkChat) isWSEvent_Payload() {}
+
+func (*WSEvent_InlineEdit) isWSEvent_Payload() {}
+
+func (*WSEvent_SwitchBranch) isWSEvent_Payload() {}
+
 var File_src_thinkspace_api_v1_events_proto protoreflect.FileDescriptor
 
 const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
@@ -2246,7 +2569,7 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\tSpaceInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12#\n" +
-	"\ris_configured\x18\x03 \x01(\bR\fisConfigured\"\xa2\x02\n" +
+	"\ris_configured\x18\x03 \x01(\bR\fisConfigured\"\xb9\x03\n" +
 	"\n" +
 	"GraphEvent\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -2257,8 +2580,14 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\bmetadata\x18\x06 \x03(\v2+.thinkspace.api.v1.GraphEvent.MetadataEntryR\bmetadata\x12\x1e\n" +
 	"\n" +
 	"tombstoned\x18\a \x01(\bR\n" +
-	"tombstoned\x1a;\n" +
+	"tombstoned\x12\x1b\n" +
+	"\tbranch_id\x18\b \x01(\tR\bbranchId\x12>\n" +
+	"\x05edges\x18\t \x03(\v2(.thinkspace.api.v1.GraphEvent.EdgesEntryR\x05edges\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a8\n" +
+	"\n" +
+	"EdgesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"S\n" +
 	"\n" +
@@ -2269,24 +2598,33 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x15AttentionFocusPayload\x12#\n" +
 	"\rprimary_focus\x18\x01 \x03(\tR\fprimaryFocus\x12'\n" +
 	"\x0frelated_context\x18\x02 \x03(\tR\x0erelatedContext\x12%\n" +
-	"\x0edormant_lenses\x18\x03 \x03(\tR\rdormantLenses\"'\n" +
+	"\x0edormant_lenses\x18\x03 \x03(\tR\rdormantLenses\"T\n" +
+	"\x0eBranchTopology\x12#\n" +
+	"\rparent_branch\x18\x01 \x01(\tR\fparentBranch\x12\x1d\n" +
+	"\n" +
+	"fork_point\x18\x02 \x01(\tR\tforkPoint\"'\n" +
 	"\x11ChatStreamPayload\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"C\n" +
 	"\x12AgentStreamPayload\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\x05R\aagentId\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\"I\n" +
 	"\x12StreamedGraphEvent\x123\n" +
-	"\x05event\x18\x01 \x01(\v2\x1d.thinkspace.api.v1.GraphEventR\x05event\"\xfd\x02\n" +
+	"\x05event\x18\x01 \x01(\v2\x1d.thinkspace.api.v1.GraphEventR\x05event\"\xd3\x04\n" +
 	"\x12SyncHistoryPayload\x12B\n" +
 	"\rrecent_events\x18\x01 \x03(\v2\x1d.thinkspace.api.v1.GraphEventR\frecentEvents\x12L\n" +
 	"\adigests\x18\x02 \x03(\v22.thinkspace.api.v1.SyncHistoryPayload.DigestsEntryR\adigests\x12>\n" +
 	"\x05focus\x18\x03 \x01(\v2(.thinkspace.api.v1.AttentionFocusPayloadR\x05focus\x12\x1f\n" +
 	"\vnext_cursor\x18\x04 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x05 \x01(\bR\ahasMore\x1aY\n" +
+	"\bhas_more\x18\x05 \x01(\bR\ahasMore\x12#\n" +
+	"\ractive_branch\x18\x06 \x01(\tR\factiveBranch\x12O\n" +
+	"\bbranches\x18\a \x03(\v23.thinkspace.api.v1.SyncHistoryPayload.BranchesEntryR\bbranches\x1aY\n" +
 	"\fDigestsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
-	"\x05value\x18\x02 \x01(\v2\x1d.thinkspace.api.v1.DigestMetaR\x05value:\x028\x01\"v\n" +
+	"\x05value\x18\x02 \x01(\v2\x1d.thinkspace.api.v1.DigestMetaR\x05value:\x028\x01\x1a^\n" +
+	"\rBranchesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
+	"\x05value\x18\x02 \x01(\v2!.thinkspace.api.v1.BranchTopologyR\x05value:\x028\x01\"v\n" +
 	"\x12LoadHistoryPayload\x12\x19\n" +
 	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x17\n" +
 	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12\x16\n" +
@@ -2356,7 +2694,20 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x13retained_file_paths\x18\x02 \x03(\tR\x11retainedFilePaths\x128\n" +
 	"\x18retained_history_indices\x18\x03 \x03(\x05R\x16retainedHistoryIndices\"7\n" +
 	"\x19TransitionDecisionPayload\x12\x1a\n" +
-	"\bapproved\x18\x01 \x01(\bR\bapproved\"e\n" +
+	"\bapproved\x18\x01 \x01(\bR\bapproved\"m\n" +
+	"\x0fForkChatPayload\x12\x19\n" +
+	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x17\n" +
+	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12&\n" +
+	"\x0ftarget_event_id\x18\x03 \x01(\tR\rtargetEventId\"\x8a\x01\n" +
+	"\x11InlineEditPayload\x12\x19\n" +
+	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x17\n" +
+	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12&\n" +
+	"\x0ftarget_event_id\x18\x03 \x01(\tR\rtargetEventId\x12\x19\n" +
+	"\bnew_text\x18\x04 \x01(\tR\anewText\"n\n" +
+	"\x13SwitchBranchPayload\x12\x19\n" +
+	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x17\n" +
+	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12#\n" +
+	"\rtarget_branch\x18\x03 \x01(\tR\ftargetBranch\"e\n" +
 	"\x12SystemRulesPayload\x12\x18\n" +
 	"\apersona\x18\x01 \x01(\tR\apersona\x125\n" +
 	"\x16formatting_constraints\x18\x02 \x01(\tR\x15formattingConstraints\"\x8a\x01\n" +
@@ -2387,7 +2738,7 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"trajectory\x18\x06 \x01(\v2$.thinkspace.api.v1.TrajectoryPayloadR\n" +
 	"trajectory\x12E\n" +
-	"\tworkbench\x18\a \x03(\v2'.thinkspace.api.v1.WorkbenchItemPayloadR\tworkbench\"\xa1\v\n" +
+	"\tworkbench\x18\a \x03(\v2'.thinkspace.api.v1.WorkbenchItemPayloadR\tworkbench\"\xfc\f\n" +
 	"\aWSEvent\x12G\n" +
 	"\vchat_stream\x18\x01 \x01(\v2$.thinkspace.api.v1.ChatStreamPayloadH\x00R\n" +
 	"chatStream\x12S\n" +
@@ -2407,7 +2758,11 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x0freview_decision\x18\r \x01(\v2(.thinkspace.api.v1.ReviewDecisionPayloadH\x00R\x0ereviewDecision\x12S\n" +
 	"\x0fapprove_context\x18\x11 \x01(\v2(.thinkspace.api.v1.ApproveContextPayloadH\x00R\x0eapproveContext\x12_\n" +
 	"\x13transition_decision\x18\x15 \x01(\v2,.thinkspace.api.v1.TransitionDecisionPayloadH\x00R\x12transitionDecision\x12J\n" +
-	"\fload_history\x18\x16 \x01(\v2%.thinkspace.api.v1.LoadHistoryPayloadH\x00R\vloadHistoryB\t\n" +
+	"\fload_history\x18\x16 \x01(\v2%.thinkspace.api.v1.LoadHistoryPayloadH\x00R\vloadHistory\x12A\n" +
+	"\tfork_chat\x18\x18 \x01(\v2\".thinkspace.api.v1.ForkChatPayloadH\x00R\bforkChat\x12G\n" +
+	"\vinline_edit\x18\x19 \x01(\v2$.thinkspace.api.v1.InlineEditPayloadH\x00R\n" +
+	"inlineEdit\x12M\n" +
+	"\rswitch_branch\x18\x1a \x01(\v2&.thinkspace.api.v1.SwitchBranchPayloadH\x00R\fswitchBranchB\t\n" +
 	"\apayload*\xb7\x01\n" +
 	"\x12DelegationStrategy\x12#\n" +
 	"\x1fDELEGATION_STRATEGY_UNSPECIFIED\x10\x00\x12\x1c\n" +
@@ -2429,85 +2784,97 @@ func file_src_thinkspace_api_v1_events_proto_rawDescGZIP() []byte {
 }
 
 var file_src_thinkspace_api_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_src_thinkspace_api_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_src_thinkspace_api_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_src_thinkspace_api_v1_events_proto_goTypes = []any{
 	(DelegationStrategy)(0),           // 0: thinkspace.api.v1.DelegationStrategy
 	(*SpaceInfo)(nil),                 // 1: thinkspace.api.v1.SpaceInfo
 	(*GraphEvent)(nil),                // 2: thinkspace.api.v1.GraphEvent
 	(*DigestMeta)(nil),                // 3: thinkspace.api.v1.DigestMeta
 	(*AttentionFocusPayload)(nil),     // 4: thinkspace.api.v1.AttentionFocusPayload
-	(*ChatStreamPayload)(nil),         // 5: thinkspace.api.v1.ChatStreamPayload
-	(*AgentStreamPayload)(nil),        // 6: thinkspace.api.v1.AgentStreamPayload
-	(*StreamedGraphEvent)(nil),        // 7: thinkspace.api.v1.StreamedGraphEvent
-	(*SyncHistoryPayload)(nil),        // 8: thinkspace.api.v1.SyncHistoryPayload
-	(*LoadHistoryPayload)(nil),        // 9: thinkspace.api.v1.LoadHistoryPayload
-	(*RequestStrategyPayload)(nil),    // 10: thinkspace.api.v1.RequestStrategyPayload
-	(*RequestReviewPayload)(nil),      // 11: thinkspace.api.v1.RequestReviewPayload
-	(*RequestTransitionPayload)(nil),  // 12: thinkspace.api.v1.RequestTransitionPayload
-	(*AvailableSpacesPayload)(nil),    // 13: thinkspace.api.v1.AvailableSpacesPayload
-	(*PreviewContextPayload)(nil),     // 14: thinkspace.api.v1.PreviewContextPayload
-	(*FileContextMetaData)(nil),       // 15: thinkspace.api.v1.FileContextMetaData
-	(*TelemetryEvent)(nil),            // 16: thinkspace.api.v1.TelemetryEvent
-	(*TelemetryEventPayload)(nil),     // 17: thinkspace.api.v1.TelemetryEventPayload
-	(*FanOutPayload)(nil),             // 18: thinkspace.api.v1.FanOutPayload
-	(*ManagerPayload)(nil),            // 19: thinkspace.api.v1.ManagerPayload
-	(*SubmitPromptPayload)(nil),       // 20: thinkspace.api.v1.SubmitPromptPayload
-	(*SelectStrategyPayload)(nil),     // 21: thinkspace.api.v1.SelectStrategyPayload
-	(*ReviewDecisionPayload)(nil),     // 22: thinkspace.api.v1.ReviewDecisionPayload
-	(*ApproveContextPayload)(nil),     // 23: thinkspace.api.v1.ApproveContextPayload
-	(*TransitionDecisionPayload)(nil), // 24: thinkspace.api.v1.TransitionDecisionPayload
-	(*SystemRulesPayload)(nil),        // 25: thinkspace.api.v1.SystemRulesPayload
-	(*MapbookPayload)(nil),            // 26: thinkspace.api.v1.MapbookPayload
-	(*TrajectoryEventPayload)(nil),    // 27: thinkspace.api.v1.TrajectoryEventPayload
-	(*TrajectoryPayload)(nil),         // 28: thinkspace.api.v1.TrajectoryPayload
-	(*WorkbenchItemPayload)(nil),      // 29: thinkspace.api.v1.WorkbenchItemPayload
-	(*ThinkBundlePayload)(nil),        // 30: thinkspace.api.v1.ThinkBundlePayload
-	(*WSEvent)(nil),                   // 31: thinkspace.api.v1.WSEvent
-	nil,                               // 32: thinkspace.api.v1.GraphEvent.MetadataEntry
-	nil,                               // 33: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry
-	nil,                               // 34: thinkspace.api.v1.MapbookPayload.MapsEntry
+	(*BranchTopology)(nil),            // 5: thinkspace.api.v1.BranchTopology
+	(*ChatStreamPayload)(nil),         // 6: thinkspace.api.v1.ChatStreamPayload
+	(*AgentStreamPayload)(nil),        // 7: thinkspace.api.v1.AgentStreamPayload
+	(*StreamedGraphEvent)(nil),        // 8: thinkspace.api.v1.StreamedGraphEvent
+	(*SyncHistoryPayload)(nil),        // 9: thinkspace.api.v1.SyncHistoryPayload
+	(*LoadHistoryPayload)(nil),        // 10: thinkspace.api.v1.LoadHistoryPayload
+	(*RequestStrategyPayload)(nil),    // 11: thinkspace.api.v1.RequestStrategyPayload
+	(*RequestReviewPayload)(nil),      // 12: thinkspace.api.v1.RequestReviewPayload
+	(*RequestTransitionPayload)(nil),  // 13: thinkspace.api.v1.RequestTransitionPayload
+	(*AvailableSpacesPayload)(nil),    // 14: thinkspace.api.v1.AvailableSpacesPayload
+	(*PreviewContextPayload)(nil),     // 15: thinkspace.api.v1.PreviewContextPayload
+	(*FileContextMetaData)(nil),       // 16: thinkspace.api.v1.FileContextMetaData
+	(*TelemetryEvent)(nil),            // 17: thinkspace.api.v1.TelemetryEvent
+	(*TelemetryEventPayload)(nil),     // 18: thinkspace.api.v1.TelemetryEventPayload
+	(*FanOutPayload)(nil),             // 19: thinkspace.api.v1.FanOutPayload
+	(*ManagerPayload)(nil),            // 20: thinkspace.api.v1.ManagerPayload
+	(*SubmitPromptPayload)(nil),       // 21: thinkspace.api.v1.SubmitPromptPayload
+	(*SelectStrategyPayload)(nil),     // 22: thinkspace.api.v1.SelectStrategyPayload
+	(*ReviewDecisionPayload)(nil),     // 23: thinkspace.api.v1.ReviewDecisionPayload
+	(*ApproveContextPayload)(nil),     // 24: thinkspace.api.v1.ApproveContextPayload
+	(*TransitionDecisionPayload)(nil), // 25: thinkspace.api.v1.TransitionDecisionPayload
+	(*ForkChatPayload)(nil),           // 26: thinkspace.api.v1.ForkChatPayload
+	(*InlineEditPayload)(nil),         // 27: thinkspace.api.v1.InlineEditPayload
+	(*SwitchBranchPayload)(nil),       // 28: thinkspace.api.v1.SwitchBranchPayload
+	(*SystemRulesPayload)(nil),        // 29: thinkspace.api.v1.SystemRulesPayload
+	(*MapbookPayload)(nil),            // 30: thinkspace.api.v1.MapbookPayload
+	(*TrajectoryEventPayload)(nil),    // 31: thinkspace.api.v1.TrajectoryEventPayload
+	(*TrajectoryPayload)(nil),         // 32: thinkspace.api.v1.TrajectoryPayload
+	(*WorkbenchItemPayload)(nil),      // 33: thinkspace.api.v1.WorkbenchItemPayload
+	(*ThinkBundlePayload)(nil),        // 34: thinkspace.api.v1.ThinkBundlePayload
+	(*WSEvent)(nil),                   // 35: thinkspace.api.v1.WSEvent
+	nil,                               // 36: thinkspace.api.v1.GraphEvent.MetadataEntry
+	nil,                               // 37: thinkspace.api.v1.GraphEvent.EdgesEntry
+	nil,                               // 38: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry
+	nil,                               // 39: thinkspace.api.v1.SyncHistoryPayload.BranchesEntry
+	nil,                               // 40: thinkspace.api.v1.MapbookPayload.MapsEntry
 }
 var file_src_thinkspace_api_v1_events_proto_depIdxs = []int32{
-	32, // 0: thinkspace.api.v1.GraphEvent.metadata:type_name -> thinkspace.api.v1.GraphEvent.MetadataEntry
-	2,  // 1: thinkspace.api.v1.StreamedGraphEvent.event:type_name -> thinkspace.api.v1.GraphEvent
-	2,  // 2: thinkspace.api.v1.SyncHistoryPayload.recent_events:type_name -> thinkspace.api.v1.GraphEvent
-	33, // 3: thinkspace.api.v1.SyncHistoryPayload.digests:type_name -> thinkspace.api.v1.SyncHistoryPayload.DigestsEntry
-	4,  // 4: thinkspace.api.v1.SyncHistoryPayload.focus:type_name -> thinkspace.api.v1.AttentionFocusPayload
-	1,  // 5: thinkspace.api.v1.AvailableSpacesPayload.spaces:type_name -> thinkspace.api.v1.SpaceInfo
-	15, // 6: thinkspace.api.v1.PreviewContextPayload.file_contexts:type_name -> thinkspace.api.v1.FileContextMetaData
-	4,  // 7: thinkspace.api.v1.PreviewContextPayload.focus:type_name -> thinkspace.api.v1.AttentionFocusPayload
-	16, // 8: thinkspace.api.v1.TelemetryEventPayload.event:type_name -> thinkspace.api.v1.TelemetryEvent
-	0,  // 9: thinkspace.api.v1.SelectStrategyPayload.strategy_id:type_name -> thinkspace.api.v1.DelegationStrategy
-	34, // 10: thinkspace.api.v1.MapbookPayload.maps:type_name -> thinkspace.api.v1.MapbookPayload.MapsEntry
-	27, // 11: thinkspace.api.v1.TrajectoryPayload.working_memory:type_name -> thinkspace.api.v1.TrajectoryEventPayload
-	27, // 12: thinkspace.api.v1.TrajectoryPayload.catalyst:type_name -> thinkspace.api.v1.TrajectoryEventPayload
-	25, // 13: thinkspace.api.v1.ThinkBundlePayload.rules:type_name -> thinkspace.api.v1.SystemRulesPayload
-	26, // 14: thinkspace.api.v1.ThinkBundlePayload.mapbook:type_name -> thinkspace.api.v1.MapbookPayload
-	28, // 15: thinkspace.api.v1.ThinkBundlePayload.trajectory:type_name -> thinkspace.api.v1.TrajectoryPayload
-	29, // 16: thinkspace.api.v1.ThinkBundlePayload.workbench:type_name -> thinkspace.api.v1.WorkbenchItemPayload
-	5,  // 17: thinkspace.api.v1.WSEvent.chat_stream:type_name -> thinkspace.api.v1.ChatStreamPayload
-	17, // 18: thinkspace.api.v1.WSEvent.telemetry_event:type_name -> thinkspace.api.v1.TelemetryEventPayload
-	6,  // 19: thinkspace.api.v1.WSEvent.agent_stream:type_name -> thinkspace.api.v1.AgentStreamPayload
-	7,  // 20: thinkspace.api.v1.WSEvent.streamed_graph_event:type_name -> thinkspace.api.v1.StreamedGraphEvent
-	10, // 21: thinkspace.api.v1.WSEvent.request_strategy:type_name -> thinkspace.api.v1.RequestStrategyPayload
-	11, // 22: thinkspace.api.v1.WSEvent.request_review:type_name -> thinkspace.api.v1.RequestReviewPayload
-	12, // 23: thinkspace.api.v1.WSEvent.request_transition:type_name -> thinkspace.api.v1.RequestTransitionPayload
-	13, // 24: thinkspace.api.v1.WSEvent.available_spaces:type_name -> thinkspace.api.v1.AvailableSpacesPayload
-	8,  // 25: thinkspace.api.v1.WSEvent.sync_history:type_name -> thinkspace.api.v1.SyncHistoryPayload
-	14, // 26: thinkspace.api.v1.WSEvent.preview_context:type_name -> thinkspace.api.v1.PreviewContextPayload
-	30, // 27: thinkspace.api.v1.WSEvent.think_bundle:type_name -> thinkspace.api.v1.ThinkBundlePayload
-	20, // 28: thinkspace.api.v1.WSEvent.submit_prompt:type_name -> thinkspace.api.v1.SubmitPromptPayload
-	21, // 29: thinkspace.api.v1.WSEvent.select_strategy:type_name -> thinkspace.api.v1.SelectStrategyPayload
-	22, // 30: thinkspace.api.v1.WSEvent.review_decision:type_name -> thinkspace.api.v1.ReviewDecisionPayload
-	23, // 31: thinkspace.api.v1.WSEvent.approve_context:type_name -> thinkspace.api.v1.ApproveContextPayload
-	24, // 32: thinkspace.api.v1.WSEvent.transition_decision:type_name -> thinkspace.api.v1.TransitionDecisionPayload
-	9,  // 33: thinkspace.api.v1.WSEvent.load_history:type_name -> thinkspace.api.v1.LoadHistoryPayload
-	3,  // 34: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry.value:type_name -> thinkspace.api.v1.DigestMeta
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	36, // 0: thinkspace.api.v1.GraphEvent.metadata:type_name -> thinkspace.api.v1.GraphEvent.MetadataEntry
+	37, // 1: thinkspace.api.v1.GraphEvent.edges:type_name -> thinkspace.api.v1.GraphEvent.EdgesEntry
+	2,  // 2: thinkspace.api.v1.StreamedGraphEvent.event:type_name -> thinkspace.api.v1.GraphEvent
+	2,  // 3: thinkspace.api.v1.SyncHistoryPayload.recent_events:type_name -> thinkspace.api.v1.GraphEvent
+	38, // 4: thinkspace.api.v1.SyncHistoryPayload.digests:type_name -> thinkspace.api.v1.SyncHistoryPayload.DigestsEntry
+	4,  // 5: thinkspace.api.v1.SyncHistoryPayload.focus:type_name -> thinkspace.api.v1.AttentionFocusPayload
+	39, // 6: thinkspace.api.v1.SyncHistoryPayload.branches:type_name -> thinkspace.api.v1.SyncHistoryPayload.BranchesEntry
+	1,  // 7: thinkspace.api.v1.AvailableSpacesPayload.spaces:type_name -> thinkspace.api.v1.SpaceInfo
+	16, // 8: thinkspace.api.v1.PreviewContextPayload.file_contexts:type_name -> thinkspace.api.v1.FileContextMetaData
+	4,  // 9: thinkspace.api.v1.PreviewContextPayload.focus:type_name -> thinkspace.api.v1.AttentionFocusPayload
+	17, // 10: thinkspace.api.v1.TelemetryEventPayload.event:type_name -> thinkspace.api.v1.TelemetryEvent
+	0,  // 11: thinkspace.api.v1.SelectStrategyPayload.strategy_id:type_name -> thinkspace.api.v1.DelegationStrategy
+	40, // 12: thinkspace.api.v1.MapbookPayload.maps:type_name -> thinkspace.api.v1.MapbookPayload.MapsEntry
+	31, // 13: thinkspace.api.v1.TrajectoryPayload.working_memory:type_name -> thinkspace.api.v1.TrajectoryEventPayload
+	31, // 14: thinkspace.api.v1.TrajectoryPayload.catalyst:type_name -> thinkspace.api.v1.TrajectoryEventPayload
+	29, // 15: thinkspace.api.v1.ThinkBundlePayload.rules:type_name -> thinkspace.api.v1.SystemRulesPayload
+	30, // 16: thinkspace.api.v1.ThinkBundlePayload.mapbook:type_name -> thinkspace.api.v1.MapbookPayload
+	32, // 17: thinkspace.api.v1.ThinkBundlePayload.trajectory:type_name -> thinkspace.api.v1.TrajectoryPayload
+	33, // 18: thinkspace.api.v1.ThinkBundlePayload.workbench:type_name -> thinkspace.api.v1.WorkbenchItemPayload
+	6,  // 19: thinkspace.api.v1.WSEvent.chat_stream:type_name -> thinkspace.api.v1.ChatStreamPayload
+	18, // 20: thinkspace.api.v1.WSEvent.telemetry_event:type_name -> thinkspace.api.v1.TelemetryEventPayload
+	7,  // 21: thinkspace.api.v1.WSEvent.agent_stream:type_name -> thinkspace.api.v1.AgentStreamPayload
+	8,  // 22: thinkspace.api.v1.WSEvent.streamed_graph_event:type_name -> thinkspace.api.v1.StreamedGraphEvent
+	11, // 23: thinkspace.api.v1.WSEvent.request_strategy:type_name -> thinkspace.api.v1.RequestStrategyPayload
+	12, // 24: thinkspace.api.v1.WSEvent.request_review:type_name -> thinkspace.api.v1.RequestReviewPayload
+	13, // 25: thinkspace.api.v1.WSEvent.request_transition:type_name -> thinkspace.api.v1.RequestTransitionPayload
+	14, // 26: thinkspace.api.v1.WSEvent.available_spaces:type_name -> thinkspace.api.v1.AvailableSpacesPayload
+	9,  // 27: thinkspace.api.v1.WSEvent.sync_history:type_name -> thinkspace.api.v1.SyncHistoryPayload
+	15, // 28: thinkspace.api.v1.WSEvent.preview_context:type_name -> thinkspace.api.v1.PreviewContextPayload
+	34, // 29: thinkspace.api.v1.WSEvent.think_bundle:type_name -> thinkspace.api.v1.ThinkBundlePayload
+	21, // 30: thinkspace.api.v1.WSEvent.submit_prompt:type_name -> thinkspace.api.v1.SubmitPromptPayload
+	22, // 31: thinkspace.api.v1.WSEvent.select_strategy:type_name -> thinkspace.api.v1.SelectStrategyPayload
+	23, // 32: thinkspace.api.v1.WSEvent.review_decision:type_name -> thinkspace.api.v1.ReviewDecisionPayload
+	24, // 33: thinkspace.api.v1.WSEvent.approve_context:type_name -> thinkspace.api.v1.ApproveContextPayload
+	25, // 34: thinkspace.api.v1.WSEvent.transition_decision:type_name -> thinkspace.api.v1.TransitionDecisionPayload
+	10, // 35: thinkspace.api.v1.WSEvent.load_history:type_name -> thinkspace.api.v1.LoadHistoryPayload
+	26, // 36: thinkspace.api.v1.WSEvent.fork_chat:type_name -> thinkspace.api.v1.ForkChatPayload
+	27, // 37: thinkspace.api.v1.WSEvent.inline_edit:type_name -> thinkspace.api.v1.InlineEditPayload
+	28, // 38: thinkspace.api.v1.WSEvent.switch_branch:type_name -> thinkspace.api.v1.SwitchBranchPayload
+	3,  // 39: thinkspace.api.v1.SyncHistoryPayload.DigestsEntry.value:type_name -> thinkspace.api.v1.DigestMeta
+	5,  // 40: thinkspace.api.v1.SyncHistoryPayload.BranchesEntry.value:type_name -> thinkspace.api.v1.BranchTopology
+	41, // [41:41] is the sub-list for method output_type
+	41, // [41:41] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_src_thinkspace_api_v1_events_proto_init() }
@@ -2515,7 +2882,7 @@ func file_src_thinkspace_api_v1_events_proto_init() {
 	if File_src_thinkspace_api_v1_events_proto != nil {
 		return
 	}
-	file_src_thinkspace_api_v1_events_proto_msgTypes[30].OneofWrappers = []any{
+	file_src_thinkspace_api_v1_events_proto_msgTypes[34].OneofWrappers = []any{
 		(*WSEvent_ChatStream)(nil),
 		(*WSEvent_TelemetryEvent)(nil),
 		(*WSEvent_AgentStream)(nil),
@@ -2533,6 +2900,9 @@ func file_src_thinkspace_api_v1_events_proto_init() {
 		(*WSEvent_ApproveContext)(nil),
 		(*WSEvent_TransitionDecision)(nil),
 		(*WSEvent_LoadHistory)(nil),
+		(*WSEvent_ForkChat)(nil),
+		(*WSEvent_InlineEdit)(nil),
+		(*WSEvent_SwitchBranch)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2540,7 +2910,7 @@ func file_src_thinkspace_api_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_src_thinkspace_api_v1_events_proto_rawDesc), len(file_src_thinkspace_api_v1_events_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   34,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

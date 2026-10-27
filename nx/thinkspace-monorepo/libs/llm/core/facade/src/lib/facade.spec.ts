@@ -38,7 +38,9 @@ describe('LlmFacade', () => {
               timestamp: '2026-10-23T12:00:00Z',
               type: 'file_delta',
               content: 'test content',
-              metadata: { parent_id: 'model-1' }
+              metadata: { parent_id: 'model-1' },
+              branchId: 'feature-branch',
+              edges: { amended_by: 'event-2' }
             }
           }
         }
@@ -51,7 +53,9 @@ describe('LlmFacade', () => {
           timestamp: '2026-10-23T12:00:00Z',
           type: 'file_delta',
           content: 'test content',
-          metadata: { parent_id: 'model-1' }
+          metadata: { parent_id: 'model-1' },
+          branchId: 'feature-branch',
+          edges: { amended_by: 'event-2' }
         }
       });
     });
@@ -79,7 +83,7 @@ describe('LlmFacade', () => {
       });
     });
 
-    it('should map a sync history event with focus correctly', () => {
+    it('should map a sync history event with focus and topology correctly', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'syncHistory',
@@ -92,7 +96,12 @@ describe('LlmFacade', () => {
               dormantLenses: ['database']
             },
             nextCursor: 'cursor-123',
-            hasMore: true
+            hasMore: true,
+            activeBranch: 'main',
+            branches: {
+              'main': { parentBranch: '', forkPoint: '' },
+              'feature-1': { parentBranch: 'main', forkPoint: 'event-5' }
+            }
           }
         }
       });
@@ -108,7 +117,12 @@ describe('LlmFacade', () => {
           dormantLenses: ['database']
         },
         nextCursor: 'cursor-123',
-        hasMore: true
+        hasMore: true,
+        activeBranch: 'main',
+        branches: {
+          'main': { parentBranch: '', forkPoint: '' },
+          'feature-1': { parentBranch: 'main', forkPoint: 'event-5' }
+        }
       });
     });
 
@@ -273,6 +287,40 @@ describe('LlmFacade', () => {
       expect(protocolBufferEvent.payload.case).toBe('transitionDecision');
       if (protocolBufferEvent.payload.case === 'transitionDecision') {
         expect(protocolBufferEvent.payload.value.approved).toBe(false);
+      }
+    });
+
+    it('should create a valid ForkChat WSEvent', () => {
+      const protocolBufferEvent = LlmFacade.createForkChat('golang', 'chat-1', 'event-456');
+      
+      expect(protocolBufferEvent.payload.case).toBe('forkChat');
+      if (protocolBufferEvent.payload.case === 'forkChat') {
+        expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
+        expect(protocolBufferEvent.payload.value.chatId).toBe('chat-1');
+        expect(protocolBufferEvent.payload.value.targetEventId).toBe('event-456');
+      }
+    });
+
+    it('should create a valid InlineEdit WSEvent', () => {
+      const protocolBufferEvent = LlmFacade.createInlineEdit('golang', 'chat-1', 'event-456', 'New text');
+      
+      expect(protocolBufferEvent.payload.case).toBe('inlineEdit');
+      if (protocolBufferEvent.payload.case === 'inlineEdit') {
+        expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
+        expect(protocolBufferEvent.payload.value.chatId).toBe('chat-1');
+        expect(protocolBufferEvent.payload.value.targetEventId).toBe('event-456');
+        expect(protocolBufferEvent.payload.value.newText).toBe('New text');
+      }
+    });
+
+    it('should create a valid SwitchBranch WSEvent', () => {
+      const protocolBufferEvent = LlmFacade.createSwitchBranch('golang', 'chat-1', 'feature-branch');
+      
+      expect(protocolBufferEvent.payload.case).toBe('switchBranch');
+      if (protocolBufferEvent.payload.case === 'switchBranch') {
+        expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
+        expect(protocolBufferEvent.payload.value.chatId).toBe('chat-1');
+        expect(protocolBufferEvent.payload.value.targetBranch).toBe('feature-branch');
       }
     });
   });

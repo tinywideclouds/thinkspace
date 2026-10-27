@@ -28,9 +28,11 @@ type GraphRepository interface {
 	GetSyncState(ctx context.Context, c *Chat) (*LedgerManifest, error)
 	SetSyncState(ctx context.Context, c *Chat, manifest LedgerManifest) error
 
-	GetTimeline(ctx context.Context, c *Chat) ([]Event, error)
-	GetTimelinePage(ctx context.Context, c *Chat, cursor string, limit int) ([]Event, string, bool, error)
-	WalkTimelineReverse(ctx context.Context, c *Chat, fn func(Event) bool) error
+	// Single-branch reads
+	GetBranchTimeline(ctx context.Context, c *Chat, branchID string) ([]Event, error)
+	GetBranchTimelinePage(ctx context.Context, c *Chat, branchID string, cursor string, limit int) ([]Event, string, bool, error)
+	WalkBranchReverse(ctx context.Context, c *Chat, branchID string, startCursor string, fn func(Event) bool) error
+
 	GetLenses(ctx context.Context, c *Chat, tag string) (LensResult, error)
 	GetStickyDigests(ctx context.Context, c *Chat) ([]DigestMeta, error)
 	GetDigests(ctx context.Context, c *Chat) ([]DigestMeta, error)
