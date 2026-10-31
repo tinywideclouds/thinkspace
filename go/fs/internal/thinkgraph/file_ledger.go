@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// FileLedger implements the Ledger interface, writing directly to the file system.
+// FileLedger implements the EventWriter interface to create the append only Ledger, writing directly to the file system.
 type FileLedger struct {
 	MaxEventsPerShard int
 	workspaceRoot     string

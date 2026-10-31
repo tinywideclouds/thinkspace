@@ -2,7 +2,7 @@ package workspace
 
 import (
 	"context"
-	"encoding/xml"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,10 +12,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+	"uuid"
 )
 
 var ErrGraphMismatch = errors.New("physical ledger mismatch detected (Git history was altered). The fast-graph index must be rebuilt")
@@ -24,24 +24,23 @@ type Service struct {
 	logger        *slog.Logger
 	engine        ChatEngine
 	workspaceRoot string
-	bus           *thinkgraph.EventBus
-	graph         thinkgraph.GraphRepository
-	store         *thinkgraph.Store
+	dispatcher    *thinkgraph.Dispatcher
+	emitter       telemetry.Emitter
 }
 
-func NewService(logger *slog.Logger, engine ChatEngine, workspaceRoot string, bus *thinkgraph.EventBus, graph thinkgraph.GraphRepository) *Service {
-	var store *thinkgraph.Store
-	if graph != nil {
-		store = thinkgraph.NewStore(graph, thinkgraph.NewFileLedger(1000, workspaceRoot))
-	}
-
+func NewService(
+	logger *slog.Logger,
+	engine ChatEngine,
+	workspaceRoot string,
+	dispatcher *thinkgraph.Dispatcher,
+	emitter telemetry.Emitter,
+) *Service {
 	return &Service{
 		logger:        logger,
 		engine:        engine,
 		workspaceRoot: workspaceRoot,
-		bus:           bus,
-		graph:         graph,
-		store:         store,
+		dispatcher:    dispatcher,
+		emitter:       emitter,
 	}
 }
 
@@ -50,7 +49,10 @@ func (s *Service) WorkspaceRoot() string {
 }
 
 func (s *Service) Graph() thinkgraph.GraphRepository {
-	return s.graph
+	if s.dispatcher != nil && s.dispatcher.GraphStore() != nil {
+		return s.dispatcher.GraphStore().Repository()
+	}
+	return nil
 }
 
 func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*thinkgraph.Chat, error) {
@@ -85,8 +87,8 @@ func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*
 		return nil, fmt.Errorf("creating ledger contexts dir: %w", err)
 	}
 
-	if s.graph != nil {
-		rehydrator := thinkgraph.NewRehydrator(s.graph, s.workspaceRoot)
+	if s.Graph() != nil {
+		rehydrator := thinkgraph.NewRehydrator(s.dispatcher.GraphStore(), s.workspaceRoot)
 		status, diskManifest, graphManifest, err := rehydrator.CheckSync(ctx, chat)
 		if err != nil {
 			return nil, fmt.Errorf("sync check failed: %w", err)
@@ -165,7 +167,7 @@ func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.Chat, tool
 	}
 
 	description := fmt.Sprintf("Proposed files: %s", strings.Join(fileList, ", "))
-	if err := s.LogProposal(ctx, c, candidateID, description, nil); err != nil {
+	if err := s.LogProposal(ctx, c, candidateID, description, nil, fileList); err != nil {
 		s.logger.ErrorContext(ctx, "failed to log proposal", "error", err)
 	}
 
@@ -193,12 +195,7 @@ func (s *Service) Checkpoint(ctx context.Context, c *thinkgraph.Chat, reason str
 
 func (s *Service) LogUserPrompt(ctx context.Context, c *thinkgraph.Chat, content string) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventPrompt, content)
-	return s.bus.Publish(ctx, c, event)
-}
-
-func (s *Service) LogUserMessage(ctx context.Context, c *thinkgraph.Chat, content string) error {
-	event := thinkgraph.NewEvent(thinkgraph.EventPrompt, content)
-	return s.bus.Publish(ctx, c, event)
+	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
 func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.Chat, content string, usage *telemetry.TokenUsage) error {
@@ -212,16 +209,21 @@ func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.Chat, cont
 		}
 	}
 
-	return s.bus.Publish(ctx, c, event)
+	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
-func (s *Service) LogProposal(ctx context.Context, c *thinkgraph.Chat, candidateID string, description string, tags []string) error {
-	event := thinkgraph.NewEvent(thinkgraph.EventCandidate, description)
+func (s *Service) LogProposal(ctx context.Context, c *thinkgraph.Chat, candidateID string, description string, tags []string, fileList []string) error {
+	event := thinkgraph.NewEvent(EventCandidateProposal, description)
 	event.Tags = tags
-	event.Metadata = map[string]string{
-		"proposal_uid": candidateID,
+
+	payload := CandidateProposalPayload{
+		CandidateID: candidateID,
+		Description: description,
+		Files:       fileList,
 	}
-	return s.bus.Publish(ctx, c, event)
+	event.Data, _ = json.Marshal(payload)
+
+	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
 func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.Chat, candidateID string, accepted bool, reason string) error {
@@ -229,13 +231,17 @@ func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.Chat, candida
 	if accepted {
 		status = "ACCEPTED"
 	}
-	event := thinkgraph.NewEvent(thinkgraph.EventResolution, fmt.Sprintf("Proposal %s %s. Reason: %s", candidateID, status, reason))
-	event.Metadata = map[string]string{
-		"proposal_uid": candidateID,
-		"status":       status,
-		"reason":       reason,
+
+	event := thinkgraph.NewEvent(EventCandidateResolution, fmt.Sprintf("Proposal %s %s. Reason: %s", candidateID, status, reason))
+
+	payload := CandidateResolutionPayload{
+		CandidateID: candidateID,
+		Accepted:    accepted,
+		Reason:      reason,
 	}
-	return s.bus.Publish(ctx, c, event)
+	event.Data, _ = json.Marshal(payload)
+
+	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
 func (s *Service) ReadCandidate(ctx context.Context, c *thinkgraph.Chat, candidateID string) (string, error) {
@@ -253,28 +259,9 @@ func (s *Service) SpawnSandbox(ctx context.Context, chatID, candidateID string) 
 	return s.engine.SpawnCandidateSandbox(ctx, chatID, candidateID)
 }
 
-func (s *Service) SaveReceipt(ctx context.Context, c *thinkgraph.Chat, receipt FlowReceipt) error {
-	receiptDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "receipts")
-	if err := os.MkdirAll(receiptDir, 0755); err != nil {
-		return fmt.Errorf("creating receipts directory: %w", err)
-	}
-
-	b, err := xml.MarshalIndent(receipt, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling receipt: %w", err)
-	}
-
-	path := filepath.Join(receiptDir, fmt.Sprintf("%s.xml", receipt.FlowID))
-	return os.WriteFile(path, append([]byte(xml.Header), b...), 0644)
-}
-
-func (s *Service) GetReceipt(ctx context.Context, c *thinkgraph.Chat, flowID string) ([]byte, error) {
-	path := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "receipts", fmt.Sprintf("%s.xml", flowID))
-	return os.ReadFile(path)
-}
-
 func (s *Service) SaveContextPreview(ctx context.Context, c *thinkgraph.Chat, content string) (string, error) {
-	previewID := uuid.NewV7().String()
+	id := uuid.NewV7()
+	previewID := id.String()
 	previewsDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "previews")
 
 	if err := os.MkdirAll(previewsDir, 0755); err != nil {
@@ -312,35 +299,37 @@ func (s *Service) GetContextPreview(ctx context.Context, c *thinkgraph.Chat, pre
 func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.Chat, summary string, tags []string, isSticky bool, summarized []uuid.UUID) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventDigest, summary)
 	event.Tags = tags
-	isStickyStr := "false"
-	if isSticky {
-		isStickyStr = "true"
-	}
-	event.Metadata = map[string]string{
-		"is_sticky": isStickyStr,
-	}
 
-	if len(summarized) > 0 {
-		var ids []string
-		for _, id := range summarized {
-			ids = append(ids, id.String())
-		}
-		event.Metadata["summarizes"] = strings.Join(ids, ",")
+	payload := thinkgraph.Digest{
+		Summary:          summary,
+		Promoted:         isSticky,
+		SummarizedEvents: summarized,
 	}
+	event.Data, _ = json.Marshal(payload)
 
-	return s.bus.Publish(ctx, c, event)
+	return s.dispatcher.SaveDigest(ctx, c, thinkgraph.DigestMeta{
+		ID:               event.ID,
+		Summary:          summary,
+		Tags:             tags,
+		Promoted:         isSticky,
+		SummarizedEvents: summarized,
+	})
 }
 
 func (s *Service) SaveMutation(ctx context.Context, c *thinkgraph.Chat, mut thinkgraph.MutationEvent) error {
-	if s.store == nil {
-		return fmt.Errorf("store is not initialized")
+	if s.dispatcher == nil {
+		return fmt.Errorf("dispatcher is not initialized")
 	}
-	return s.store.SaveMutation(ctx, c, mut)
+	return s.dispatcher.SaveMutation(ctx, c, mut)
 }
 
 func (s *Service) SaveSpaceContext(ctx context.Context, c *thinkgraph.Chat, sc thinkgraph.SpaceContext) error {
-	if s.store == nil {
-		return fmt.Errorf("store is not initialized")
+	if s.dispatcher == nil {
+		return fmt.Errorf("dispatcher is not initialized")
 	}
-	return s.store.SaveSpaceContext(ctx, c, sc)
+	return s.dispatcher.SaveSpaceContext(ctx, c, sc)
+}
+
+func (s *Service) Dispatcher() *thinkgraph.Dispatcher {
+	return s.dispatcher
 }

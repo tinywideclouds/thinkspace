@@ -2,6 +2,7 @@ import { Component, inject, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ChatFlowCardComponent, MarkdownComponent } from '@org/llm-ui-core';
 import { CognitiveGraphFacade } from '../cognitive-graph.facade';
+import { ChatItem, FlowExecutionChatItem } from '@org/llm-state-chat';
 
 @Component({
   selector: 'llm-cognitive-graph',
@@ -97,18 +98,19 @@ import { CognitiveGraphFacade } from '../cognitive-graph.facade';
             <div class="relative">
               <div class="absolute top-1/2 -left-6 w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)] -translate-y-1/2 -translate-x-1/2"></div>
               
-              @if (item.type === 'flow_card' && item.flowId) {
+              @if (item.type === 'flow_execution') {
+                @let flowItem = asFlowExecution(item);
                 <llm-chat-flow-card 
-                  [flow]="facade.flowStates().get(item.flowId)" 
-                  [summary]="item.content"
+                  [flow]="facade.flowStates().get(flowItem.flowId)" 
+                  [summary]="flowItem.content"
                   (inspect)="facade.inspectFlow($event)">
                 </llm-chat-flow-card>
               } @else {
                 <div class="p-4 rounded-xl border"
-                     [ngClass]="item.type === 'user' ? 'bg-blue-50/50 border-blue-100' : 'bg-white border-gray-200'">
+                     [ngClass]="item.type === 'prompt' ? 'bg-blue-50/50 border-blue-100' : 'bg-white border-gray-200'">
                   <strong class="block mb-2 text-[10px] font-bold uppercase tracking-wider"
-                          [ngClass]="item.type === 'user' ? 'text-blue-700' : 'text-gray-500'">
-                    {{ item.type === 'user' ? 'User Prompt' : 'Manager Output' }}
+                          [ngClass]="item.type === 'prompt' ? 'text-blue-700' : 'text-gray-500'">
+                    {{ item.type === 'prompt' ? 'User Prompt' : 'Manager Output' }}
                   </strong>
                   <div class="text-sm text-gray-800 leading-relaxed">
                     <llm-markdown [content]="item.content"></llm-markdown>
@@ -127,4 +129,8 @@ export class CognitiveGraphComponent {
   public facade = inject(CognitiveGraphFacade);
   
   nodeSelected = output<string>();
+
+  public asFlowExecution(item: ChatItem): FlowExecutionChatItem {
+    return item as FlowExecutionChatItem;
+  }
 }

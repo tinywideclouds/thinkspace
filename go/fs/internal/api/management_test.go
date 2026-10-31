@@ -30,7 +30,7 @@ func setupManagementAPI(t *testing.T) (*http.ServeMux, *workspace.ServiceManager
 	graphDB, _ := db.NewBadgerGraph(opts)
 	t.Cleanup(func() { graphDB.Close() })
 
-	manager := workspace.NewServiceManager(logger, baseRoot, factory, graphDB)
+	manager := workspace.NewServiceManager(logger, baseRoot, factory, graphDB, nil)
 
 	registry := config.NewRegistry()
 	appCfg := workspace.AppConfig{SupportedDomains: []string{"golang"}}
@@ -76,7 +76,7 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 	registry := config.NewRegistry()
 	_ = registry.LoadDirectory(configsDir)
 
-	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return nil }, nil)
+	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return nil }, nil, nil)
 	appCfg := workspace.AppConfig{SupportedDomains: []string{"golang"}}
 
 	mgmtAPI := api.NewManagementAPI(registry, manager, appCfg)
@@ -147,7 +147,6 @@ func TestManagementAPI_GetEvents(t *testing.T) {
 
 	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
 
-	// Seed multiple events for pagination testing
 	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "First test event")
 	event1.Timestamp = time.Now().Add(-2 * time.Hour)
 	event2 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Second test event")
@@ -155,9 +154,10 @@ func TestManagementAPI_GetEvents(t *testing.T) {
 	event3 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Third test event")
 	event3.Timestamp = time.Now()
 
-	_ = manager.GraphStore().AppendEvent(context.Background(), chat, event1)
-	_ = manager.GraphStore().AppendEvent(context.Background(), chat, event2)
-	_ = manager.GraphStore().AppendEvent(context.Background(), chat, event3)
+	// Use AppendNode correctly
+	_ = manager.GraphRepository().AppendNode(context.Background(), chat, thinkgraph.Node{Event: event1})
+	_ = manager.GraphRepository().AppendNode(context.Background(), chat, thinkgraph.Node{Event: event2})
+	_ = manager.GraphRepository().AppendNode(context.Background(), chat, thinkgraph.Node{Event: event3})
 
 	t.Run("Fetch By Explicit IDs", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceID+"/chats/"+chatID+"/events?ids="+event1.ID.String(), nil)
@@ -168,12 +168,12 @@ func TestManagementAPI_GetEvents(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", rr.Code)
 		}
 
-		var events []thinkgraph.Event
-		if err := json.NewDecoder(rr.Body).Decode(&events); err != nil {
+		var nodes []thinkgraph.Node
+		if err := json.NewDecoder(rr.Body).Decode(&nodes); err != nil {
 			t.Fatalf("Failed to decode response: %v", err)
 		}
 
-		if len(events) != 1 || events[0].ID != event1.ID {
+		if len(nodes) != 1 || nodes[0].ID != event1.ID {
 			t.Errorf("Expected only event1 via ID fetch")
 		}
 	})
@@ -187,30 +187,29 @@ func TestManagementAPI_GetEvents(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", rr.Code)
 		}
 
-		var events []thinkgraph.Event
-		_ = json.NewDecoder(rr.Body).Decode(&events)
+		var nodes []thinkgraph.Node
+		_ = json.NewDecoder(rr.Body).Decode(&nodes)
 
-		if len(events) != 2 {
-			t.Fatalf("Expected exactly 2 events limited, got %d", len(events))
+		if len(nodes) != 2 {
+			t.Fatalf("Expected exactly 2 events limited, got %d", len(nodes))
 		}
-		if events[0].ID != event2.ID || events[1].ID != event3.ID {
+		if nodes[0].ID != event2.ID || nodes[1].ID != event3.ID {
 			t.Errorf("Expected most recent events (event2, event3)")
 		}
 	})
 
 	t.Run("Paginate Timeline With Cursor", func(t *testing.T) {
-		// Ask for 2 events BEFORE event3
 		req := httptest.NewRequest(http.MethodGet, "/api/spaces/"+spaceID+"/chats/"+chatID+"/events?limit=2&cursor="+event3.ID.String(), nil)
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
 
-		var events []thinkgraph.Event
-		_ = json.NewDecoder(rr.Body).Decode(&events)
+		var nodes []thinkgraph.Node
+		_ = json.NewDecoder(rr.Body).Decode(&nodes)
 
-		if len(events) != 2 {
-			t.Fatalf("Expected exactly 2 events limited before cursor, got %d", len(events))
+		if len(nodes) != 2 {
+			t.Fatalf("Expected exactly 2 events limited before cursor, got %d", len(nodes))
 		}
-		if events[0].ID != event1.ID || events[1].ID != event2.ID {
+		if nodes[0].ID != event1.ID || nodes[1].ID != event2.ID {
 			t.Errorf("Expected events before cursor (event1, event2)")
 		}
 	})

@@ -1,16 +1,38 @@
 package thinkgraph
 
-// Chat represents the temporal timeline of a conversation and its physical boundaries.
-type Chat struct {
-	ID           string
-	SpaceID      string
-	ActiveBranch string // e.g., "main", "candidate-123"
+import (
+	"encoding/json"
+	"time"
+
+	"uuid"
+)
+
+// Node is the materialized read-model for BadgerDB.
+type Node struct {
+	Event
+	Tombstoned bool `json:"tombstoned"`
+
+	// MaterializedState acts as a projection data cache held directly on the graph for speed.
+	// It stores heavy, enriched artifacts (such as parsed Git diffs or structural states)
+	// that were fetched once during ingestion by the GraphBuilder. This prevents consumers 
+	// from repeating expensive I/O operations on every read.
+	MaterializedState json.RawMessage `json:"materialized_state,omitempty"`
 }
 
-// BranchTopology maps a branch to its parent and the specific event where it diverged.
-type BranchTopology struct {
-	ParentBranch string
-	ForkPoint    string // Event ID
+type MutationType string
+
+const (
+	MutationTombstone MutationType = "tombstone"
+	MutationRestore   MutationType = "restore"
+	MutationUpdate    MutationType = "update"
+)
+
+type MutationEvent struct {
+	TargetID  uuid.UUID
+	Type      MutationType
+	Timestamp time.Time
+	Payload   string          // Legacy content text updates
+	Data      json.RawMessage // Strongly typed data updates
 }
 
 // AttentionFocus models the cognitive focus of the immediate conversational trajectory.
@@ -23,6 +45,6 @@ type AttentionFocus struct {
 // GraphData represents the backend's reconstructed memory state loaded from disk.
 type GraphData struct {
 	Digests  []DigestMeta
-	Timeline []Event
+	Timeline []Node
 	Focus    AttentionFocus
 }

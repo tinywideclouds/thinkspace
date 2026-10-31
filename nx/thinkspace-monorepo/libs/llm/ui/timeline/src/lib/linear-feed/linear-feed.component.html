@@ -10,6 +10,15 @@
     </button>
   }
 
+  @if (facade.isEditMode() && facade.selectedTurnIds().size > 0) {
+    <llm-action-bar
+      [selectedCount]="facade.selectedTurnIds().size"
+      [position]="facade.uiSettings.bulkActionBarPosition()"
+      (actionRequested)="handleBulkAction($event)"
+      (cancelRequested)="facade.toggleEditMode()">
+    </llm-action-bar>
+  }
+
   <llm-scroll-viewport 
     #viewport
     [prefetchAnchor]="prefetchAnchorElement()"
@@ -20,8 +29,26 @@
       <llm-skeleton-block></llm-skeleton-block>
     }
 
-    @for (item of facade.workingMemoryFeed(); track item.id) {
-      <llm-block-router [chatItem]="item"></llm-block-router>
+    <!-- Empty State for Visual Filtering (Proper Logic) -->
+    @if (facade.uiSettings.tagFilterMode() === 'visual' && facade.activeTagFilters().size > 0 && facade.visibleFeed().length === 0 && !facade.isLoadingHistory()) {
+      <div class="flex flex-col items-center justify-center h-48 text-gray-400 font-mono text-sm">
+        <span class="text-2xl mb-2">📭</span>
+        No context matches the active visual filters.
+      </div>
+    }
+
+    @for (turn of facade.visibleFeed(); track turn.id) {
+      <llm-turn-group
+        [isEditMode]="facade.isEditMode()"
+        [isSelected]="facade.selectedTurnIds().has(turn.id)"
+        [tags]="turn.tags"
+        (selectionToggled)="facade.toggleTurnSelection(turn.id)">
+        
+        <llm-block-router [chatItem]="turn.leader"></llm-block-router>
+        @for (block of turn.blocks; track block.id) {
+          <llm-block-router [chatItem]="block"></llm-block-router>
+        }
+      </llm-turn-group>
     }
   </llm-scroll-viewport>
 

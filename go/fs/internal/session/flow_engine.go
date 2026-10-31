@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -19,76 +20,37 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type EnginePayload struct {
-	FlowID      string `json:"flow_id,omitempty"`
-	TaskID      string `json:"task_id,omitempty"`
-	AgentCount  int    `json:"agent_count,omitempty"`
-	AgentIndex  int    `json:"agent_index,omitempty"`
-	Instruction string `json:"instruction,omitempty"`
-	Attempt     int    `json:"attempt,omitempty"`
-	Trace       string `json:"trace,omitempty"`
-	CandidateID string `json:"candidate_id,omitempty"`
-	Passed      bool   `json:"passed,omitempty"`
-}
-
-func (p EnginePayload) ToMap() map[string]any {
-	m := make(map[string]any)
-	if p.FlowID != "" {
-		m["flow_id"] = p.FlowID
-	}
-	if p.TaskID != "" {
-		m["task_id"] = p.TaskID
-	}
-	if p.AgentCount != 0 {
-		m["agent_count"] = p.AgentCount
-	}
-	if p.AgentIndex != 0 {
-		m["agent_index"] = p.AgentIndex
-	}
-	if p.Instruction != "" {
-		m["instruction"] = p.Instruction
-	}
-	if p.Attempt != 0 {
-		m["attempt"] = p.Attempt
-	}
-	if p.Trace != "" {
-		m["trace"] = p.Trace
-	}
-	if p.CandidateID != "" {
-		m["candidate_id"] = p.CandidateID
-	}
-	m["passed"] = p.Passed
-	return m
-}
-
 type agentResult struct {
 	candidateID string
 	err         error
-	record      workspace.AgentRecord
+	record      flows.AgentRecordPayload
 	passed      bool
 	trace       string
 }
 
 type FlowEngine struct {
-	logger    *slog.Logger
-	service   *workspace.Service
-	executor  workspace.SubAgentExecutor
-	emitter   telemetry.Emitter
-	workbench *workspace.Workbench
+	logger     *slog.Logger
+	service    *workspace.Service
+	executor   workspace.SubAgentExecutor
+	dispatcher *thinkgraph.Dispatcher
+	emitter    telemetry.Emitter
+	workbench  *workspace.Workbench
 }
 
 func NewFlowEngine(
 	logger *slog.Logger,
 	service *workspace.Service,
 	executor workspace.SubAgentExecutor,
+	dispatcher *thinkgraph.Dispatcher,
 	emitter telemetry.Emitter,
 ) *FlowEngine {
 	return &FlowEngine{
-		logger:    logger,
-		service:   service,
-		executor:  executor,
-		emitter:   emitter,
-		workbench: workspace.NewWorkbench(),
+		logger:     logger,
+		service:    service,
+		executor:   executor,
+		dispatcher: dispatcher,
+		emitter:    emitter,
+		workbench:  workspace.NewWorkbench(),
 	}
 }
 
@@ -112,6 +74,17 @@ func (e *FlowEngine) Run(
 
 		switch directive.Action {
 		case flows.ActionSpawnAgents:
+			// Dispatch durable graph node for flow initialization
+			ev := thinkgraph.NewEvent(flows.EventFlowStarted, flowContext.FlowSummary)
+			payload := flows.FlowStartedPayload{
+				FlowID:      flowContext.FlowID,
+				TaskID:      chatSession.ID,
+				FlowSummary: flowContext.FlowSummary,
+				AgentCount:  len(directive.Tasks),
+			}
+			ev.Data, _ = json.Marshal(payload)
+			_ = e.dispatcher.AppendEvent(ctx, chatSession, ev)
+
 			candidates, err := e.spawnAgents(ctx, chatSession, space, flowContext, directive.Tasks)
 			if err != nil {
 				return err
@@ -160,25 +133,26 @@ func (e *FlowEngine) spawnAgents(
 	tasks []flows.SubAgentTask,
 ) ([]flows.BranchResult, error) {
 
-	e.emitter.Emit("manager", telemetry.Event{
-		ID:        uuid.NewV7(),
-		Type:      "flow_start",
-		Timestamp: time.Now(),
-		Message:   "Starting Flow Execution",
-		Summary:   flowContext.FlowSummary,
-		Payload:   EnginePayload{FlowID: flowContext.FlowID, TaskID: chatSession.ID, AgentCount: len(tasks)}.ToMap(),
-	})
-
 	results := make(chan agentResult, len(tasks))
 
 	for i, task := range tasks {
+		// Dispatch durable event for each agent spawned
+		ev := thinkgraph.NewEvent(flows.EventAgentSpawned, task.Instruction)
+		spawnPayload := flows.AgentSpawnedPayload{
+			FlowID:      flowContext.FlowID,
+			AgentID:     task.AgentID,
+			Instruction: task.Instruction,
+		}
+		ev.Data, _ = json.Marshal(spawnPayload)
+		_ = e.dispatcher.AppendEvent(ctx, chatSession, ev)
+
 		go func(agentIndex int, t flows.SubAgentTask) {
 			results <- e.runSingleAgent(ctx, chatSession, space, flowContext, t, agentIndex)
 		}(i+1, task)
 	}
 
 	var branches []flows.BranchResult
-	var records []workspace.AgentRecord
+	var records []flows.AgentRecordPayload
 	var errMsgs []string
 
 	for i := 0; i < len(tasks); i++ {
@@ -200,15 +174,18 @@ func (e *FlowEngine) spawnAgents(
 	}
 
 	summary := fmt.Sprintf("Generated %d candidate branches.", len(branches))
-	receipt := workspace.FlowReceipt{
-		FlowID:    flowContext.FlowID,
-		TaskID:    chatSession.ID,
-		Timestamp: time.Now().UTC(),
-		Task:      "Task Execution",
-		Agents:    records,
-		Summary:   summary,
+
+	// Dispatch final durable FlowCompleted payload to the graph (replaces FlowReceipt XML)
+	ev := thinkgraph.NewEvent(flows.EventFlowCompleted, summary)
+	compPayload := flows.FlowCompletedPayload{
+		FlowID:  flowContext.FlowID,
+		TaskID:  chatSession.ID,
+		Task:    "Task Execution",
+		Summary: summary,
+		Agents:  records,
 	}
-	_ = e.service.SaveReceipt(ctx, chatSession, receipt)
+	ev.Data, _ = json.Marshal(compPayload)
+	_ = e.dispatcher.AppendEvent(ctx, chatSession, ev)
 
 	return branches, nil
 }
@@ -222,12 +199,12 @@ func (e *FlowEngine) runSingleAgent(
 	agentIndex int,
 ) agentResult {
 
+	// Ephemeral Telemetry: Used purely for UI rendering, not saved
 	e.emitter.Emit(task.AgentID, telemetry.Event{
 		ID:        uuid.NewV7(),
-		Type:      "flow_spawn",
+		Type:      "flow_status",
 		Timestamp: time.Now(),
-		Message:   "Agent spawned and parsing context",
-		Payload:   EnginePayload{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Instruction: task.Instruction}.ToMap(),
+		Message:   "Agent spawning and parsing context",
 	})
 
 	candidateID := fmt.Sprintf("%s-%s-%s", chatSession.ID, flowContext.FlowID, task.AgentID)
@@ -244,7 +221,6 @@ func (e *FlowEngine) runSingleAgent(
 			Type:      "flow_error",
 			Timestamp: time.Now(),
 			Message:   err.Error(),
-			Payload:   EnginePayload{FlowID: flowContext.FlowID, AgentIndex: agentIndex}.ToMap(),
 		})
 		return agentResult{err: err}
 	}
@@ -273,7 +249,8 @@ func (e *FlowEngine) runSingleAgent(
 	passed, finalTrace := e.attemptLoop(ctx, sandbox, bundle, flowContext, task, agentIndex, space.Verifier())
 
 	traceBytes, _ := sandbox.ReadFile(ctx, "trace.jsonl")
-	record := workspace.AgentRecord{
+
+	record := flows.AgentRecordPayload{
 		AgentID:           task.AgentID,
 		Passed:            passed,
 		Instruction:       task.Instruction,
@@ -287,14 +264,6 @@ func (e *FlowEngine) runSingleAgent(
 
 	diff, _ := e.service.ReadCandidate(ctx, chatSession, candidateID)
 	record.StateDelta = diff
-
-	e.emitter.Emit("manager", telemetry.Event{
-		ID:        uuid.NewV7(),
-		Type:      "flow_complete",
-		Timestamp: time.Now(),
-		Message:   "Flow pipeline completed",
-		Payload:   EnginePayload{FlowID: flowContext.FlowID, AgentIndex: agentIndex, CandidateID: candidateID, Passed: passed}.ToMap(),
-	})
 
 	return agentResult{
 		candidateID: fmt.Sprintf("candidate/%s", candidateID),
@@ -331,8 +300,7 @@ func (e *FlowEngine) attemptLoop(
 			ID:        uuid.NewV7(),
 			Type:      "flow_status",
 			Timestamp: time.Now(),
-			Message:   "executing_instructions",
-			Payload:   EnginePayload{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Attempt: attempt}.ToMap(),
+			Message:   "Executing instructions...",
 		})
 
 		err := e.executor(ctx, bundle, sandbox, agentIndex, nil)
@@ -346,8 +314,7 @@ func (e *FlowEngine) attemptLoop(
 			ID:        uuid.NewV7(),
 			Type:      "flow_status",
 			Timestamp: time.Now(),
-			Message:   "running_tests",
-			Payload:   EnginePayload{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Attempt: attempt}.ToMap(),
+			Message:   "Running tests and verification...",
 		})
 
 		err = verifier.Verify(ctx, sandbox)
@@ -361,8 +328,7 @@ func (e *FlowEngine) attemptLoop(
 			ID:        uuid.NewV7(),
 			Type:      "flow_error",
 			Timestamp: time.Now(),
-			Message:   "verification failed",
-			Payload:   EnginePayload{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Attempt: attempt, Trace: finalTrace}.ToMap(),
+			Message:   "Verification failed",
 		})
 	}
 

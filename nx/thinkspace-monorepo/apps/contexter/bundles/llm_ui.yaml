@@ -102,4 +102,11 @@ files:
   - libs/llm/ui/timeline/src/lib/blocks/file-delta-block/file-delta-block.component.spec.ts
   - libs/llm/ui/timeline/src/lib/blocks/file-delta-block/file-delta-block.component.ts
   - libs/llm/ui/timeline/src/lib/blocks/skeleton-block.component.ts
+  - libs/llm/ui/timeline/src/lib/action-bar.component.ts
+  - libs/llm/ui/timeline/src/lib/tag-ribbon.component.ts
+  - libs/llm/ui/timeline/src/lib/linear-feed/turn-group.component.ts
+  - libs/llm/ui/timeline/src/lib/action-bar.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/inline-edit-composer.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/inline-edit-composer.component.ts
+  - libs/llm/ui/timeline/src/lib/tag-ribbon.component.spec.ts
 last_context: llm_ui_04.md

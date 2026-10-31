@@ -18,8 +18,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// --- Mocks ---
-
 type feMockChatEngine struct {
 	sandbox      *feMockSandbox
 	acceptCalled bool
@@ -137,14 +135,15 @@ func (u *feMockUI) ConfirmTransition(targetDomain string, reasoning string) bool
 	return u.transitionToReturn
 }
 
-// --- Tests ---
-
 func TestFlowEngine_FanOutIntegration(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &feMockChatEngine{}
 	workspaceRoot := t.TempDir()
-	bus := thinkgraph.NewEventBus()
-	service := workspace.NewService(logger, engine, workspaceRoot, bus, nil)
+
+	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
+	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
+
+	service := workspace.NewService(logger, engine, workspaceRoot, dispatcher, &feMockEmitter{})
 	chatSession, _ := service.InitializeChat(context.Background(), "golang", "chat-1")
 
 	emitter := &feMockEmitter{}
@@ -154,7 +153,7 @@ func TestFlowEngine_FanOutIntegration(t *testing.T) {
 		return nil
 	}
 
-	flowEngine := session.NewFlowEngine(logger, service, executor, emitter)
+	flowEngine := session.NewFlowEngine(logger, service, executor, dispatcher, emitter)
 
 	flowCfg := flows.FanOutConfig{MaxSteps: 10, RetryPrompt: "Trace: {{.ErrorTrace}}"}
 	fanOutFlow := flows.NewFanOutFlow(logger, flowCfg)
@@ -201,11 +200,14 @@ func TestFlowEngine_FailFast_HallucinatedFile(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &feMockChatEngine{}
 	workspaceRoot := t.TempDir()
-	bus := thinkgraph.NewEventBus()
-	service := workspace.NewService(logger, engine, workspaceRoot, bus, nil)
+
+	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
+	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
+
+	service := workspace.NewService(logger, engine, workspaceRoot, dispatcher, &feMockEmitter{})
 	chatSession, _ := service.InitializeChat(context.Background(), "golang", "chat-1")
 
-	flowEngine := session.NewFlowEngine(logger, service, nil, &feMockEmitter{})
+	flowEngine := session.NewFlowEngine(logger, service, nil, dispatcher, &feMockEmitter{})
 	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
 
 	args := map[string]any{

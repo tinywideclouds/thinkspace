@@ -13,6 +13,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
@@ -22,56 +23,65 @@ type ServiceManager struct {
 	logger        *slog.Logger
 	baseRoot      string
 	engineFactory EngineFactory
-	graphStore    thinkgraph.GraphRepository
+	graphRepo     thinkgraph.GraphRepository
+	emitter       telemetry.Emitter
 	services      map[string]*Service
 	mu            sync.Mutex
 }
 
-func NewServiceManager(logger *slog.Logger, baseRoot string, factory EngineFactory, graphStore thinkgraph.GraphRepository) *ServiceManager {
+func NewServiceManager(
+	logger *slog.Logger,
+	baseRoot string,
+	factory EngineFactory,
+	graphRepo thinkgraph.GraphRepository,
+	emitter telemetry.Emitter,
+) *ServiceManager {
 	return &ServiceManager{
 		logger:        logger,
 		baseRoot:      baseRoot,
 		engineFactory: factory,
-		graphStore:    graphStore,
+		graphRepo:     graphRepo,
+		emitter:       emitter,
 		services:      make(map[string]*Service),
 	}
 }
 
-func (m *ServiceManager) WorkspaceRoot() string {
-	return m.baseRoot
+func (manager *ServiceManager) WorkspaceRoot() string {
+	return manager.baseRoot
 }
 
-func (m *ServiceManager) GraphStore() thinkgraph.GraphRepository {
-	return m.graphStore
+// GraphRepository returns the raw underlying graph database connection.
+func (manager *ServiceManager) GraphRepository() thinkgraph.GraphRepository {
+	return manager.graphRepo
 }
 
-func (m *ServiceManager) GetService(spaceID string) *Service {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (manager *ServiceManager) GetService(spaceID string) *Service {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 
-	if service, exists := m.services[spaceID]; exists {
+	if service, exists := manager.services[spaceID]; exists {
 		return service
 	}
 
-	spaceRoot := filepath.Join(m.baseRoot, spaceID)
-	engine := m.engineFactory(spaceRoot)
+	spaceRoot := filepath.Join(manager.baseRoot, spaceID)
+	engine := manager.engineFactory(spaceRoot)
 
-	bus := thinkgraph.NewEventBus()
-	bus.Subscribe(thinkgraph.NewLedgerSubscriber(1000, m.baseRoot))
-	bus.Subscribe(thinkgraph.NewDigestSubscriber(m.baseRoot))
+	builder := NewWorkspaceGraphBuilder(engine)
+	var dispatcher *thinkgraph.Dispatcher
 
-	if m.graphStore != nil {
-		bus.Subscribe(thinkgraph.NewGraphSubscriber(m.graphStore))
+	if manager.graphRepo != nil {
+		graphStore := thinkgraph.NewGraphStore(manager.graphRepo, builder)
+		ledger := thinkgraph.NewFileLedger(1000, manager.baseRoot)
+		dispatcher = thinkgraph.NewDispatcher(graphStore, ledger)
 	}
 
-	service := NewService(m.logger, engine, m.baseRoot, bus, m.graphStore)
-
-	m.services[spaceID] = service
+	service := NewService(manager.logger, engine, manager.baseRoot, dispatcher, manager.emitter)
+	manager.services[spaceID] = service
 	return service
 }
 
-func (m *ServiceManager) ListSpaces(ctx context.Context) ([]string, error) {
-	entries, err := os.ReadDir(m.baseRoot)
+func (manager *ServiceManager) ListSpaces(ctx context.Context) ([]string, error) {
+	entries, err := os.ReadDir(manager.baseRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil
@@ -88,9 +98,9 @@ func (m *ServiceManager) ListSpaces(ctx context.Context) ([]string, error) {
 	return spaces, nil
 }
 
-func (m *ServiceManager) GetSpaceState(spaceID string) (SpaceState, error) {
+func (manager *ServiceManager) GetSpaceState(spaceID string) (SpaceState, error) {
 	var state SpaceState
-	path := filepath.Join(m.baseRoot, spaceID, "space.json")
+	path := filepath.Join(manager.baseRoot, spaceID, "space.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return state, err
@@ -99,15 +109,15 @@ func (m *ServiceManager) GetSpaceState(spaceID string) (SpaceState, error) {
 	return state, err
 }
 
-func (m *ServiceManager) UpdateSpaceState(spaceID string, updateFn func(*SpaceState)) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (manager *ServiceManager) UpdateSpaceState(spaceID string, updateFn func(*SpaceState)) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 
-	state, _ := m.GetSpaceState(spaceID)
+	state, _ := manager.GetSpaceState(spaceID)
 
 	updateFn(&state)
 
-	path := filepath.Join(m.baseRoot, spaceID, "space.json")
+	path := filepath.Join(manager.baseRoot, spaceID, "space.json")
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling space state: %w", err)
@@ -120,8 +130,8 @@ func (m *ServiceManager) UpdateSpaceState(spaceID string, updateFn func(*SpaceSt
 	return nil
 }
 
-func (m *ServiceManager) ListChats(ctx context.Context, spaceID string) ([]ChatMeta, error) {
-	chatsDir := filepath.Join(m.baseRoot, spaceID, "chats")
+func (manager *ServiceManager) ListChats(ctx context.Context, spaceID string) ([]ChatMeta, error) {
+	chatsDir := filepath.Join(manager.baseRoot, spaceID, "chats")
 
 	entries, err := os.ReadDir(chatsDir)
 	if err != nil {
@@ -148,7 +158,7 @@ func (m *ServiceManager) ListChats(ctx context.Context, spaceID string) ([]ChatM
 
 		if data, err := os.ReadFile(metaPath); err == nil {
 			if unmarshalErr := json.Unmarshal(data, &meta); unmarshalErr != nil {
-				m.logger.WarnContext(ctx, "failed to parse meta.json", "chat_id", chatID, "error", unmarshalErr)
+				manager.logger.WarnContext(ctx, "failed to parse meta.json", "chat_id", chatID, "error", unmarshalErr)
 			}
 		} else {
 			if info, err := entry.Info(); err == nil {
@@ -165,8 +175,8 @@ func (m *ServiceManager) ListChats(ctx context.Context, spaceID string) ([]ChatM
 	return chats, nil
 }
 
-func (m *ServiceManager) CreateChat(ctx context.Context, spaceID string, requestedName string) (ChatMeta, error) {
-	chats, err := m.ListChats(ctx, spaceID)
+func (manager *ServiceManager) CreateChat(ctx context.Context, spaceID string, requestedName string) (ChatMeta, error) {
+	chats, err := manager.ListChats(ctx, spaceID)
 	if err != nil {
 		return ChatMeta{}, err
 	}
@@ -192,9 +202,10 @@ func (m *ServiceManager) CreateChat(ctx context.Context, spaceID string, request
 		}
 	}
 
-	id := uuid.NewV7().String()
+	id := uuid.NewV7()
+	idStr := id.String()
 	meta := ChatMeta{
-		ID:           id,
+		ID:           idStr,
 		Name:         name,
 		CreatedAt:    time.Now().UTC(),
 		ActiveBranch: "main",
@@ -206,7 +217,7 @@ func (m *ServiceManager) CreateChat(ctx context.Context, spaceID string, request
 		},
 	}
 
-	chatDir := filepath.Join(m.baseRoot, spaceID, "chats", id)
+	chatDir := filepath.Join(manager.baseRoot, spaceID, "chats", idStr)
 	if err := os.MkdirAll(chatDir, 0755); err != nil {
 		return ChatMeta{}, fmt.Errorf("creating chat directory: %w", err)
 	}
@@ -223,8 +234,8 @@ func (m *ServiceManager) CreateChat(ctx context.Context, spaceID string, request
 	return meta, nil
 }
 
-func (m *ServiceManager) GetChatMeta(spaceID, chatID string) (ChatMeta, error) {
-	chatsDir := filepath.Join(m.baseRoot, spaceID, "chats")
+func (manager *ServiceManager) GetChatMeta(spaceID, chatID string) (ChatMeta, error) {
+	chatsDir := filepath.Join(manager.baseRoot, spaceID, "chats")
 	metaPath := filepath.Join(chatsDir, chatID, "meta.json")
 
 	data, err := os.ReadFile(metaPath)
@@ -237,18 +248,18 @@ func (m *ServiceManager) GetChatMeta(spaceID, chatID string) (ChatMeta, error) {
 	return meta, err
 }
 
-func (m *ServiceManager) UpdateChatMeta(spaceID, chatID string, updateFn func(*ChatMeta)) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (manager *ServiceManager) UpdateChatMeta(spaceID, chatID string, updateFn func(*ChatMeta)) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
 
-	meta, err := m.GetChatMeta(spaceID, chatID)
+	meta, err := manager.GetChatMeta(spaceID, chatID)
 	if err != nil {
 		return err
 	}
 
 	updateFn(&meta)
 
-	chatsDir := filepath.Join(m.baseRoot, spaceID, "chats")
+	chatsDir := filepath.Join(manager.baseRoot, spaceID, "chats")
 	metaPath := filepath.Join(chatsDir, chatID, "meta.json")
 
 	metaBytes, err := json.MarshalIndent(meta, "", "  ")

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { create } from '@bufbuild/protobuf';
-import { WSEventSchema, DelegationStrategy } from '@org/llm-core-protos';
+import { WSEventSchema, DelegationStrategy as ProtoDelegationStrategy, MessageType } from '@org/llm-core-protos';
 import { LlmFacade } from './facade';
-import { DomainDelegationStrategy } from './domain-models';
+import { DelegationStrategy } from './domain-models';
 
 describe('LlmFacade', () => {
   describe('toDomain (Inbound)', () => {
@@ -28,7 +28,7 @@ describe('LlmFacade', () => {
       expect(domainEvent).toEqual({ type: 'agent_stream', agentId: 1, text: 'thinking' });
     });
 
-    it('should map a streamed graph event correctly', () => {
+    it('should map a streamed graph event (File Delta) correctly using the strict payload', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'streamedGraphEvent',
@@ -36,26 +36,79 @@ describe('LlmFacade', () => {
             event: {
               id: 'event-1',
               timestamp: '2026-10-23T12:00:00Z',
-              type: 'file_delta',
-              content: 'test content',
-              metadata: { parent_id: 'model-1' },
               branchId: 'feature-branch',
-              edges: { amended_by: 'event-2' }
+              edges: { amended_by: 'event-2' },
+              tags: ['ui'],
+              metadata: { custom_info: 'test' },
+              payload: {
+                case: 'fileDelta',
+                value: {
+                  summary: 'test content',
+                  path: 'src/main.ts',
+                  previewSnippet: 'patch_data',
+                  fileRef: 'ref-123',
+                  parentId: 'model-1'
+                }
+              }
             }
           }
         }
       });
+      
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'streamed_graph_event',
         event: {
           id: 'event-1',
-          timestamp: '2026-10-23T12:00:00Z',
           type: 'file_delta',
+          timestamp: expect.anything(), // Temporal.Instant mapped
+          tags: ['ui'],
           content: 'test content',
-          metadata: { parent_id: 'model-1' },
+          path: 'src/main.ts',
+          previewSnippet: 'patch_data',
+          fileRef: 'ref-123',
+          parentId: 'model-1',
+          tombstoned: false,
+          metadata: { custom_info: 'test' },
           branchId: 'feature-branch',
           edges: { amended_by: 'event-2' }
+        }
+      });
+    });
+
+    it('should map a streamed graph event (Message) correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'streamedGraphEvent',
+          value: {
+            event: {
+              id: 'event-2',
+              timestamp: '2026-10-23T12:05:00Z',
+              payload: {
+                case: 'message',
+                value: {
+                  type: MessageType.MODEL,
+                  text: 'Here is the response'
+                }
+              }
+            }
+          }
+        }
+      });
+      
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'streamed_graph_event',
+        event: {
+          id: 'event-2',
+          type: 'model',
+          timestamp: expect.anything(), // Temporal.Instant mapped
+          tags: [],
+          content: 'Here is the response',
+          tombstoned: false,
+          metadata: {},
+          edges: {},
+          branchId: undefined
         }
       });
     });
@@ -83,12 +136,29 @@ describe('LlmFacade', () => {
       });
     });
 
-    it('should map a sync history event with focus and topology correctly', () => {
+    it('should map a sync history event correctly and filter broken payloads', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'syncHistory',
           value: {
-            recentEvents: [],
+            recentEvents: [
+              {
+                id: 'event-broken',
+                timestamp: '2026-10-23T12:05:00Z',
+                // Missing payload
+              },
+              {
+                id: 'event-valid',
+                timestamp: '2026-10-23T12:06:00Z',
+                payload: {
+                  case: 'message',
+                  value: {
+                    type: MessageType.PROMPT,
+                    text: 'Valid prompt'
+                  }
+                }
+              }
+            ],
             digests: {},
             focus: {
               primaryFocus: ['architecture'],
@@ -109,7 +179,19 @@ describe('LlmFacade', () => {
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'sync_history',
-        recentEvents: [],
+        recentEvents: [
+          {
+            id: 'event-valid',
+            type: 'prompt',
+            timestamp: expect.anything(), // Temporal.Instant mapped
+            tags: [],
+            content: 'Valid prompt',
+            tombstoned: false,
+            metadata: {},
+            edges: {},
+            branchId: undefined
+          }
+        ],
         digests: {},
         focus: {
           primaryFocus: ['architecture'],
@@ -126,7 +208,7 @@ describe('LlmFacade', () => {
       });
     });
 
-    it('should map a preview context event with focus correctly', () => {
+    it('should map a preview context event correctly', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'previewContext',
@@ -211,7 +293,7 @@ describe('LlmFacade', () => {
         channel: 'agent-1',
         id: 'uuid-123',
         eventType: 'flow_status',
-        timestamp: '2026-09-02T15:00:00Z',
+        timestamp: expect.anything(), // Temporal.Instant mapped
         message: 'Compiling Go AST...',
         summary: 'Testing AST',
         payload: {
@@ -251,7 +333,7 @@ describe('LlmFacade', () => {
       }
     });
 
-    it('should create a valid ApproveContext WSEvent with pruning arrays', () => {
+    it('should create a valid ApproveContext WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createApproveContext(true, ['src/main.go'], [0, 2]);
       
       expect(protocolBufferEvent.payload.case).toBe('approveContext');
@@ -263,11 +345,11 @@ describe('LlmFacade', () => {
     });
 
     it('should create a valid SelectStrategy WSEvent', () => {
-      const protocolBufferEvent = LlmFacade.createSelectStrategy(DomainDelegationStrategy.REFINE);
+      const protocolBufferEvent = LlmFacade.createSelectStrategy(DelegationStrategy.REFINE);
       
       expect(protocolBufferEvent.payload.case).toBe('selectStrategy');
       if (protocolBufferEvent.payload.case === 'selectStrategy') {
-        expect(protocolBufferEvent.payload.value.strategyId).toBe(DelegationStrategy.REFINE);
+        expect(protocolBufferEvent.payload.value.strategyId).toBe(ProtoDelegationStrategy.REFINE);
       }
     });
 

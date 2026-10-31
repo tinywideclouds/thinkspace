@@ -44,8 +44,7 @@ func TestServiceManager_LazyLoading(t *testing.T) {
 		return &mockFactoryEngine{repoRoot: repoRoot}
 	}
 
-	// Passing nil for the GraphRepository to satisfy the new signature
-	manager := workspace.NewServiceManager(logger, baseRoot, factory, nil)
+	manager := workspace.NewServiceManager(logger, baseRoot, factory, nil, nil)
 
 	golangService := manager.GetService("golang")
 	if golangService == nil {
@@ -72,8 +71,7 @@ func TestServiceManager_ChatManagement(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	baseRoot := t.TempDir()
 
-	// Passing nil for the GraphRepository to satisfy the new signature
-	manager := workspace.NewServiceManager(logger, baseRoot, func(r string) workspace.ChatEngine { return nil }, nil)
+	manager := workspace.NewServiceManager(logger, baseRoot, func(r string) workspace.ChatEngine { return nil }, nil, nil)
 	ctx := context.Background()
 
 	spaceID := "golang"

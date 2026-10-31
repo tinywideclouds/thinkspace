@@ -5,7 +5,7 @@ import { TimelineStore } from './timeline.store';
 import { FlowStore } from './flow.store';
 import { CognitiveStore } from './cognitive.store';
 import { UiSettingsService } from './ui-settings.service';
-import { LlmFacade, DomainEvent, DomainDelegationStrategy } from '@org/llm-core-facade';
+import { LlmFacade, AppEvent, DelegationStrategy } from '@org/llm-core-facade';
 
 @Injectable({ providedIn: 'root' })
 export class ChatConnectionService {
@@ -56,7 +56,7 @@ export class ChatConnectionService {
     this.cognitive.resetTurn();
 
     if (text.trim() !== '') {
-      this.timeline.appendCoreChat('user', text);
+      this.timeline.appendCoreChat('prompt', text);
       this.timeline.appendCoreChat('system', 'Manager Thinking...');
     }
     this.transport.send(LlmFacade.createSubmitPrompt(text, spaceId, chatId));
@@ -87,10 +87,10 @@ export class ChatConnectionService {
     this.transport.send(LlmFacade.createApproveContext(approved, paths, indices));
   }
 
-  public selectStrategy(strategy: DomainDelegationStrategy): void {
+  public selectStrategy(strategy: DelegationStrategy): void {
     this.flow.resetTurn();
     this.cognitive.pendingStrategy.set(false);
-    this.timeline.appendCoreChat('user', `Selected Strategy: ${DomainDelegationStrategy[strategy]}`);
+    this.timeline.appendCoreChat('prompt', `Selected Strategy: ${DelegationStrategy[strategy]}`);
     this.transport.send(LlmFacade.createSelectStrategy(strategy));
   }
 
@@ -99,7 +99,7 @@ export class ChatConnectionService {
     const branch = this.cognitive.pendingReviewBranch();
     this.cognitive.pendingReviewBranch.set(null);
     if (branch) {
-      this.timeline.appendCoreChat('user', `Review for ${branch}: ${accepted ? 'ACCEPTED' : 'REJECTED'}`);
+      this.timeline.appendCoreChat('prompt', `Review for ${branch}: ${accepted ? 'ACCEPTED' : 'REJECTED'}`);
       this.transport.send(LlmFacade.createReviewDecision(branch, accepted));
     }
   }
@@ -110,8 +110,6 @@ export class ChatConnectionService {
     this.flow.appendSystemLog('INFO', approved ? 'Transition approved.' : 'Transition aborted.');
     this.transport.send(LlmFacade.createTransitionDecision(approved));
   }
-
-  // --- Branching & Editing Commands ---
 
   public forkChat(targetEventId: string): void {
     const spaceId = this.workspace.activeSpaceId();
@@ -134,20 +132,18 @@ export class ChatConnectionService {
     const chatId = this.workspace.activeChatId();
     if (!spaceId || !chatId) return;
 
-    // Eagerly clear timeline and set loading state to avoid UI stutter/ghosting during the transition
     this.timeline.coreChat.set([]);
     this.timeline.isLoadingHistory.set(true);
 
     this.transport.send(LlmFacade.createSwitchBranch(spaceId, chatId, targetBranch));
   }
 
-  private routeIncomingEvent(event: DomainEvent): void {
+  private routeIncomingEvent(event: AppEvent): void {
     switch (event.type) {
       case 'sync_history':
         this.cognitive.activeFocus.set(event.focus);
         if (Object.keys(event.digests).length > 0) this.cognitive.activeDigests.set(event.digests);
         
-        // Pass the new topology data into the timeline store
         if (event.activeBranch && event.branches) {
           this.timeline.processSyncHistory(event.recentEvents, event.nextCursor, event.hasMore, event.activeBranch, event.branches);
         }
@@ -177,9 +173,9 @@ export class ChatConnectionService {
         this.flow.processTelemetry(event);
         if (event.channel === 'manager') {
           if (event.eventType === 'flow_start') {
-            this.timeline.injectFlowCard(event.payload?.flow_id, event.summary || 'Orchestrating Agents...');
+            this.timeline.injectFlowExecution(event.payload['flow_id'] as string, event.summary || 'Orchestrating Agents...');
           } else if (event.eventType === 'flow_complete') {
-            this.timeline.updateFlowCardStatus(event.payload?.flow_id, 'completed');
+            this.timeline.updateFlowExecutionStatus(event.payload['flow_id'] as string, 'completed');
           }
         }
         break;

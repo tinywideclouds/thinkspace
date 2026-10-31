@@ -40,17 +40,13 @@ export default [
             // Standard rule for any other LLM libraries (like transport) so they CANNOT see protos
             {
               sourceTag: 'scope:llm',
-              onlyDependOnLibsWithTags: ['scope:llm', 'scope:shared'],
+              onlyDependOnLibsWithTags: ['scope:llm', 'scope:shared', 'scope:core'],
               // Optionally exclude 'type:protos' here if you want to be extra safe,
               // but the type-based rules above usually supersede effectively if applied correctly.
             },
             {
               sourceTag: 'scope:shared',
               onlyDependOnLibsWithTags: ['scope:shared'],
-            },
-            {
-              sourceTag: 'scope:shop',
-              onlyDependOnLibsWithTags: ['scope:shop', 'scope:shared'],
             },
             {
               sourceTag: 'scope:api',

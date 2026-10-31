@@ -20,6 +20,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -78,7 +79,8 @@ func main() {
 		return gitfs.NewGoGitEngine(repoRoot, rootMode)
 	}
 
-	serviceManager := workspace.NewServiceManager(logger, baseRoot, factory, graphDB)
+	emitter := telemetry.NewSlogEmitter(logger)
+	serviceManager := workspace.NewServiceManager(logger, baseRoot, factory, graphDB, emitter)
 
 	registry := config.NewRegistry()
 	if err := registry.LoadDirectory(configurationsDirectory); err != nil {

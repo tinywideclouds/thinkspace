@@ -12,7 +12,7 @@
     "importHelpers": true,
     "target": "esnext",
     "module": "esnext",
-    "lib": ["es2020", "dom"],
+    "lib": ["ES2025", "DOM", "ESNext.Temporal"],
     "skipLibCheck": true,
     "skipDefaultLibCheck": true,
     "paths": {
@@ -43,7 +43,8 @@
       "@org/llm-ui-linear-feed": ["./libs/llm/ui/linear-feed/src/index.ts"],
       "@org/llm-ui-cognitive-graph": [
         "./libs/llm/ui/cognitive-graph/src/index.ts"
-      ]
+      ],
+      "@org/core-logger": ["./libs/core/logger/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

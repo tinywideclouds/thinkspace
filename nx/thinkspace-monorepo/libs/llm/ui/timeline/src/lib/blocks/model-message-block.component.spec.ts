@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ComponentRef } from '@angular/core';
 import { ModelMessageBlockComponent } from './model-message-block.component';
 import { describe, beforeEach, it, expect, vi } from 'vitest';
+import { FileDeltaChatItem } from '@org/llm-state-chat';
 
 describe('ModelMessageBlockComponent', () => {
   let component: ModelMessageBlockComponent;
@@ -34,13 +35,20 @@ describe('ModelMessageBlockComponent', () => {
   });
 
   it('should render attachments if provided', () => {
-    componentRef.setInput('attachments', [
-      { id: 'att-1', type: 'file_delta', path: 'src/main.ts', content: 'update' }
-    ]);
+    const deltaItem: FileDeltaChatItem = {
+      id: 'att-1',
+      type: 'file_delta',
+      path: 'src/main.ts',
+      content: 'update',
+      previewSnippet: 'export const a = 1;',
+      fileRef: 'ref-1',
+      timestamp: Temporal.Now.instant()
+    };
+
+    componentRef.setInput('attachments', [deltaItem]);
     fixture.detectChanges();
 
     const compiled = fixture.nativeElement as HTMLElement;
-    // The nested file_delta block should be rendered
     expect(compiled.querySelector('llm-file-delta-block')).toBeTruthy();
   });
 

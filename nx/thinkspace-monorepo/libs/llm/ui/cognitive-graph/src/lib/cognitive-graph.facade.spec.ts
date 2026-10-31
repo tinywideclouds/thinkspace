@@ -3,11 +3,11 @@ import { CognitiveGraphFacade } from './cognitive-graph.facade';
 import { CognitiveStore, TimelineStore, FlowStore, ChatItem, FlowState } from '@org/llm-state-chat';
 import { signal, WritableSignal } from '@angular/core';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
-import { DomainAttentionFocus, DomainDigestMeta } from '@org/llm-core-facade';
+import { AttentionFocus, DigestMeta } from '@org/llm-core-facade';
 
 interface MockCognitiveStore {
-  activeDigests: WritableSignal<Record<string, DomainDigestMeta>>;
-  activeFocus: WritableSignal<DomainAttentionFocus>;
+  activeDigests: WritableSignal<Record<string, DigestMeta>>;
+  activeFocus: WritableSignal<AttentionFocus>;
 }
 
 interface MockTimelineStore {

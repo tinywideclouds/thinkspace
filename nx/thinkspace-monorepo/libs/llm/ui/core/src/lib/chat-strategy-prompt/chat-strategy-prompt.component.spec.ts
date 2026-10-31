@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ChatStrategyPromptComponent } from './chat-strategy-prompt.component';
-import { DomainDelegationStrategy } from '@org/llm-core-facade';
+import { DelegationStrategy } from '@org/llm-core-facade';
 import { vi, describe, beforeEach, it, expect } from 'vitest';
 
 describe('ChatStrategyPromptComponent', () => {
@@ -20,8 +20,8 @@ describe('ChatStrategyPromptComponent', () => {
   it('should emit the selected strategy', () => {
     const emitSpy = vi.spyOn(component.strategySelected, 'emit');
 
-    component.select(DomainDelegationStrategy.REFINE);
+    component.select(DelegationStrategy.REFINE);
 
-    expect(emitSpy).toHaveBeenCalledWith(DomainDelegationStrategy.REFINE);
+    expect(emitSpy).toHaveBeenCalledWith(DelegationStrategy.REFINE);
   });
 });

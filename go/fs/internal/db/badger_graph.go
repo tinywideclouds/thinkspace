@@ -63,22 +63,22 @@ func scanPrefix[T any](txn *badger.Txn, prefix []byte, filter func(T) bool) ([]T
 	return results, nil
 }
 
-func (g *BadgerGraph) AppendEvent(ctx context.Context, c *thinkgraph.Chat, event thinkgraph.Event) error {
-	nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, event.ID.String())
+func (g *BadgerGraph) AppendNode(ctx context.Context, c *thinkgraph.Chat, node thinkgraph.Node) error {
+	nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, node.ID.String())
 
-	branchID := event.BranchID
+	branchID := node.BranchID
 	if branchID == "" {
 		branchID = "main"
 	}
 
-	timelineKey := fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, event.Timestamp.UnixNano(), event.ID.String())
+	timelineKey := fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, node.Timestamp.UnixNano(), node.ID.String())
 
-	nodeData, err := json.Marshal(event)
+	nodeData, err := json.Marshal(node)
 	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
+		return fmt.Errorf("failed to marshal node: %w", err)
 	}
 
-	slog.DebugContext(ctx, "BadgerDB appending event", "key", string(nodeKey))
+	slog.DebugContext(ctx, "BadgerDB appending node", "key", string(nodeKey))
 
 	return g.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(nodeKey, nodeData); err != nil {
@@ -87,8 +87,8 @@ func (g *BadgerGraph) AppendEvent(ctx context.Context, c *thinkgraph.Chat, event
 		if err := txn.Set(timelineKey, nil); err != nil {
 			return err
 		}
-		for _, tag := range event.Tags {
-			lensKey := fmt.Appendf(nil, "%s:%s:%s:%s:%s", nsLens, c.SpaceID, c.ID, tag, event.ID.String())
+		for _, tag := range node.Tags {
+			lensKey := fmt.Appendf(nil, "%s:%s:%s:%s:%s", nsLens, c.SpaceID, c.ID, tag, node.ID.String())
 			if err := txn.Set(lensKey, nil); err != nil {
 				return err
 			}
@@ -150,22 +150,27 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.Chat, muta
 		evKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, mutation.TargetID.String())
 		if item, err := txn.Get(evKey); err == nil {
 			return item.Value(func(val []byte) error {
-				var ev thinkgraph.Event
-				if json.Unmarshal(val, &ev) != nil {
+				var node thinkgraph.Node
+				if json.Unmarshal(val, &node) != nil {
 					return nil
 				}
 
 				if mutation.Type == thinkgraph.MutationTombstone {
-					ev.Tombstoned = true
+					node.Tombstoned = true
 				}
 				if mutation.Type == thinkgraph.MutationRestore {
-					ev.Tombstoned = false
+					node.Tombstoned = false
 				}
 				if mutation.Type == thinkgraph.MutationUpdate {
-					ev.Content = mutation.Payload
+					if mutation.Payload != "" {
+						node.Content = mutation.Payload
+					}
+					if len(mutation.Data) > 0 {
+						node.Data = mutation.Data
+					}
 				}
 
-				data, _ := json.Marshal(ev)
+				data, _ := json.Marshal(node)
 				return txn.Set(evKey, data)
 			})
 		}
@@ -184,7 +189,7 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.Chat, muta
 				if mutation.Type == thinkgraph.MutationRestore {
 					d.Tombstoned = false
 				}
-				if mutation.Type == thinkgraph.MutationUpdate {
+				if mutation.Type == thinkgraph.MutationUpdate && mutation.Payload != "" {
 					d.Summary = mutation.Payload
 				}
 
@@ -207,7 +212,7 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.Chat, muta
 				if mutation.Type == thinkgraph.MutationRestore {
 					sc.Tombstoned = false
 				}
-				if mutation.Type == thinkgraph.MutationUpdate {
+				if mutation.Type == thinkgraph.MutationUpdate && mutation.Payload != "" {
 					sc.Content = mutation.Payload
 				}
 
@@ -240,8 +245,8 @@ func (g *BadgerGraph) ClearChatGraph(ctx context.Context, c *thinkgraph.Chat) er
 	})
 }
 
-func (g *BadgerGraph) GetBranchTimeline(ctx context.Context, c *thinkgraph.Chat, branchID string) ([]thinkgraph.Event, error) {
-	var events []thinkgraph.Event
+func (g *BadgerGraph) GetBranchTimeline(ctx context.Context, c *thinkgraph.Chat, branchID string) ([]thinkgraph.Node, error) {
+	var nodes []thinkgraph.Node
 	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.SpaceID, c.ID, branchID)
 
 	err := g.db.View(func(txn *badger.Txn) error {
@@ -258,9 +263,9 @@ func (g *BadgerGraph) GetBranchTimeline(ctx context.Context, c *thinkgraph.Chat,
 			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, eventID)
 			if nodeItem, err := txn.Get(nodeKey); err == nil {
 				_ = nodeItem.Value(func(val []byte) error {
-					var ev thinkgraph.Event
-					if json.Unmarshal(val, &ev) == nil && !ev.Tombstoned {
-						events = append(events, ev)
+					var node thinkgraph.Node
+					if json.Unmarshal(val, &node) == nil && !node.Tombstoned {
+						nodes = append(nodes, node)
 					}
 					return nil
 				})
@@ -268,11 +273,11 @@ func (g *BadgerGraph) GetBranchTimeline(ctx context.Context, c *thinkgraph.Chat,
 		}
 		return nil
 	})
-	return events, err
+	return nodes, err
 }
 
-func (g *BadgerGraph) GetBranchTimelinePage(ctx context.Context, c *thinkgraph.Chat, branchID string, cursor string, limit int) ([]thinkgraph.Event, string, bool, error) {
-	var events []thinkgraph.Event
+func (g *BadgerGraph) GetBranchTimelinePage(ctx context.Context, c *thinkgraph.Chat, branchID string, cursor string, limit int) ([]thinkgraph.Node, string, bool, error) {
+	var nodes []thinkgraph.Node
 	var hasMore bool
 	var nextCursor string
 
@@ -291,11 +296,11 @@ func (g *BadgerGraph) GetBranchTimelinePage(ctx context.Context, c *thinkgraph.C
 			if err != nil {
 				return fmt.Errorf("cursor event not found: %w", err)
 			}
-			var ev thinkgraph.Event
+			var node thinkgraph.Node
 			_ = item.Value(func(val []byte) error {
-				return json.Unmarshal(val, &ev)
+				return json.Unmarshal(val, &node)
 			})
-			seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, ev.Timestamp.UnixNano(), ev.ID.String())
+			seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, node.Timestamp.UnixNano(), node.ID.String())
 		} else {
 			seekPrefix = append(prefix, 0xFF)
 		}
@@ -318,9 +323,9 @@ func (g *BadgerGraph) GetBranchTimelinePage(ctx context.Context, c *thinkgraph.C
 			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, eventID)
 			if nodeItem, err := txn.Get(nodeKey); err == nil {
 				_ = nodeItem.Value(func(val []byte) error {
-					var ev thinkgraph.Event
-					if json.Unmarshal(val, &ev) == nil && !ev.Tombstoned {
-						events = append([]thinkgraph.Event{ev}, events...)
+					var node thinkgraph.Node
+					if json.Unmarshal(val, &node) == nil && !node.Tombstoned {
+						nodes = append([]thinkgraph.Node{node}, nodes...)
 						count++
 					}
 					return nil
@@ -330,10 +335,10 @@ func (g *BadgerGraph) GetBranchTimelinePage(ctx context.Context, c *thinkgraph.C
 		return nil
 	})
 
-	return events, nextCursor, hasMore, err
+	return nodes, nextCursor, hasMore, err
 }
 
-func (g *BadgerGraph) WalkBranchReverse(ctx context.Context, c *thinkgraph.Chat, branchID string, startCursor string, fn func(thinkgraph.Event) bool) error {
+func (g *BadgerGraph) WalkBranchReverse(ctx context.Context, c *thinkgraph.Chat, branchID string, startCursor string, fn func(thinkgraph.Node) bool) error {
 	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.SpaceID, c.ID, branchID)
 
 	return g.db.View(func(txn *badger.Txn) error {
@@ -347,9 +352,9 @@ func (g *BadgerGraph) WalkBranchReverse(ctx context.Context, c *thinkgraph.Chat,
 			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, startCursor)
 			item, err := txn.Get(nodeKey)
 			if err == nil {
-				var ev thinkgraph.Event
-				_ = item.Value(func(val []byte) error { return json.Unmarshal(val, &ev) })
-				seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, ev.Timestamp.UnixNano(), ev.ID.String())
+				var node thinkgraph.Node
+				_ = item.Value(func(val []byte) error { return json.Unmarshal(val, &node) })
+				seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.SpaceID, c.ID, branchID, node.Timestamp.UnixNano(), node.ID.String())
 			} else {
 				seekPrefix = append(prefix, 0xFF)
 			}
@@ -367,13 +372,13 @@ func (g *BadgerGraph) WalkBranchReverse(ctx context.Context, c *thinkgraph.Chat,
 
 			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, eventID)
 			if nodeItem, err := txn.Get(nodeKey); err == nil {
-				var ev thinkgraph.Event
+				var node thinkgraph.Node
 				_ = nodeItem.Value(func(val []byte) error {
-					return json.Unmarshal(val, &ev)
+					return json.Unmarshal(val, &node)
 				})
 
-				if !ev.Tombstoned {
-					if !fn(ev) {
+				if !node.Tombstoned {
+					if !fn(node) {
 						break
 					}
 				}
@@ -400,9 +405,9 @@ func (g *BadgerGraph) GetLenses(ctx context.Context, c *thinkgraph.Chat, tag str
 
 			if item, err := txn.Get(fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, eventID)); err == nil {
 				_ = item.Value(func(val []byte) error {
-					var ev thinkgraph.Event
-					if json.Unmarshal(val, &ev) == nil && !ev.Tombstoned {
-						result.Events = append(result.Events, ev)
+					var node thinkgraph.Node
+					if json.Unmarshal(val, &node) == nil && !node.Tombstoned {
+						result.Nodes = append(result.Nodes, node)
 					}
 					return nil
 				})
@@ -472,8 +477,8 @@ func (g *BadgerGraph) GetSpaceContexts(ctx context.Context, c *thinkgraph.Chat) 
 	return contexts, err
 }
 
-func (g *BadgerGraph) GetEvents(ctx context.Context, c *thinkgraph.Chat, ids []string) ([]thinkgraph.Event, error) {
-	var events []thinkgraph.Event
+func (g *BadgerGraph) GetNodes(ctx context.Context, c *thinkgraph.Chat, ids []string) ([]thinkgraph.Node, error) {
+	var nodes []thinkgraph.Node
 	err := g.db.View(func(txn *badger.Txn) error {
 		for _, id := range ids {
 			key := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.SpaceID, c.ID, id)
@@ -483,16 +488,16 @@ func (g *BadgerGraph) GetEvents(ctx context.Context, c *thinkgraph.Chat, ids []s
 			}
 
 			_ = item.Value(func(val []byte) error {
-				var ev thinkgraph.Event
-				if json.Unmarshal(val, &ev) == nil && !ev.Tombstoned {
-					events = append(events, ev)
+				var node thinkgraph.Node
+				if json.Unmarshal(val, &node) == nil && !node.Tombstoned {
+					nodes = append(nodes, node)
 				}
 				return nil
 			})
 		}
 		return nil
 	})
-	return events, err
+	return nodes, err
 }
 
 func (g *BadgerGraph) GetSyncState(ctx context.Context, c *thinkgraph.Chat) (*thinkgraph.LedgerManifest, error) {

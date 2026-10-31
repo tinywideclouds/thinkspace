@@ -1,36 +1,39 @@
+export type ChatItemType = 'prompt' | 'model' | 'system' | 'file_delta' | 'flow_execution';
+
 export interface BaseChatItem {
   id: string;
-  content: string;
+  type: ChatItemType;
+  timestamp: Temporal.Instant;
   tags?: string[];
   metadata?: Record<string, string>;
-  edges?: Record<string, string>; // The new generic topological mapping (e.g., amended_by, forked_from)
+  edges?: Record<string, string>;
+  branchId?: string;
 }
 
-export interface UserChatItem extends BaseChatItem {
-  type: 'user';
+export interface MessageChatItem extends BaseChatItem {
+  type: 'prompt' | 'model' | 'system';
+  content: string;
 }
 
-export interface ModelChatItem extends BaseChatItem {
-  type: 'model' | 'system';
-}
-
-export interface FlowCardChatItem extends BaseChatItem {
-  type: 'flow_card';
+export interface FlowExecutionChatItem extends BaseChatItem {
+  type: 'flow_execution';
+  content: string; // summary
   flowId: string;
-  status: 'running' | 'completed';
+  status: 'running' | 'completed' | string;
 }
 
 export interface FileDeltaChatItem extends BaseChatItem {
   type: 'file_delta';
+  content: string; // summary
   path: string;
   previewSnippet: string;
   fileRef: string;
+  parentId?: string;
 }
 
 export type ChatItem = 
-  | UserChatItem 
-  | ModelChatItem 
-  | FlowCardChatItem 
+  | MessageChatItem 
+  | FlowExecutionChatItem 
   | FileDeltaChatItem;
 
 export interface LogItem {

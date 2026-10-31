@@ -2,12 +2,81 @@ import { create } from '@bufbuild/protobuf';
 import { 
   WSEvent, 
   WSEventSchema,
-  DelegationStrategy 
+  MessageType,
+  DelegationStrategy as ProtoDelegationStrategy,
+  GraphEvent as ProtoGraphEvent
 } from '@org/llm-core-protos';
-import { DomainEvent, DomainDelegationStrategy, DomainDigestMeta, DomainBranchTopology } from './domain-models';
+import { 
+  AppEvent, 
+  DelegationStrategy, 
+  DigestMeta, 
+  BranchTopology, 
+  GraphEvent 
+} from './domain-models';
 
 export class LlmFacade {
-  static toDomain(protocolBufferEvent: WSEvent): DomainEvent | null {
+  
+  private static mapGraphEvent(protoEvent: ProtoGraphEvent): GraphEvent | null {
+    if (!protoEvent.payload || protoEvent.payload.case === undefined) {
+      console.warn(`[LlmFacade] GraphEvent ${protoEvent.id} has no valid payload.`);
+      return null;
+    }
+
+    const base = {
+      id: protoEvent.id,
+      timestamp: Temporal.Instant.from(protoEvent.timestamp),
+      tags: protoEvent.tags || [],
+      tombstoned: protoEvent.tombstoned,
+      metadata: protoEvent.metadata || {},
+      edges: protoEvent.edges || {},
+      branchId: protoEvent.branchId || undefined
+    };
+
+    switch (protoEvent.payload.case) {
+      case 'message': {
+        const msgType = protoEvent.payload.value.type;
+        let domainType: 'prompt' | 'model' | 'system' = 'prompt'; 
+        
+        if (msgType === MessageType.MODEL) {
+          domainType = 'model';
+        } else if (msgType === MessageType.SYSTEM) {
+          domainType = 'system';
+        }
+        
+        return {
+          ...base,
+          type: domainType,
+          content: protoEvent.payload.value.text
+        };
+      }
+      
+      case 'fileDelta':
+        return {
+          ...base,
+          type: 'file_delta',
+          content: protoEvent.payload.value.summary,
+          path: protoEvent.payload.value.path,
+          previewSnippet: protoEvent.payload.value.previewSnippet,
+          fileRef: protoEvent.payload.value.fileRef,
+          parentId: protoEvent.payload.value.parentId || undefined
+        };
+      
+      case 'flowExecution':
+        return {
+          ...base,
+          type: 'flow_execution',
+          content: protoEvent.payload.value.summary,
+          flowId: protoEvent.payload.value.flowId,
+          status: protoEvent.payload.value.status
+        };
+
+      default:
+        console.warn(`[LlmFacade] Unknown GraphEvent payload: ${protoEvent.payload}`);
+        return null;
+    }
+  }
+
+  static toDomain(protocolBufferEvent: WSEvent): AppEvent | null {
     if (!protocolBufferEvent.payload || protocolBufferEvent.payload.case === undefined) {
       return null;
     }
@@ -35,22 +104,18 @@ export class LlmFacade {
       case 'availableSpaces':
         return { type: 'available_spaces', spaces: protocolBufferEvent.payload.value.spaces.map(space => ({ id: space.id, name: space.name })) };
       
-      case 'syncHistory':
+      case 'syncHistory': {
+        const validEvents = protocolBufferEvent.payload.value.recentEvents
+          .map(e => this.mapGraphEvent(e))
+          .filter((e): e is GraphEvent => e !== null);
+
         return {
           type: 'sync_history',
-          recentEvents: protocolBufferEvent.payload.value.recentEvents.map(event => ({
-            id: event.id,
-            timestamp: event.timestamp,
-            type: event.type,
-            content: event.content,
-            metadata: event.metadata,
-            edges: event.edges,
-            branchId: event.branchId
-          })),
+          recentEvents: validEvents,
           digests: Object.entries(protocolBufferEvent.payload.value.digests).reduce((accumulator, [key, digest]) => {
             accumulator[key] = { id: digest.id, summary: digest.summary, isSticky: digest.isSticky };
             return accumulator;
-          }, {} as Record<string, DomainDigestMeta>),
+          }, {} as Record<string, DigestMeta>),
           focus: {
             primaryFocus: protocolBufferEvent.payload.value.focus?.primaryFocus || [],
             relatedContext: protocolBufferEvent.payload.value.focus?.relatedContext || [],
@@ -58,12 +123,13 @@ export class LlmFacade {
           },
           nextCursor: protocolBufferEvent.payload.value.nextCursor,
           hasMore: protocolBufferEvent.payload.value.hasMore,
-          activeBranch: protocolBufferEvent.payload.value.activeBranch,
+          activeBranch: protocolBufferEvent.payload.value.activeBranch || 'main',
           branches: Object.entries(protocolBufferEvent.payload.value.branches).reduce((accumulator, [key, topology]) => {
             accumulator[key] = { parentBranch: topology.parentBranch, forkPoint: topology.forkPoint };
             return accumulator;
-          }, {} as Record<string, DomainBranchTopology>)
+          }, {} as Record<string, BranchTopology>)
         };
+      }
 
       case 'previewContext':
         return {
@@ -102,7 +168,7 @@ export class LlmFacade {
           channel: telemetry.channel,
           id: telemetry.event?.id || '',
           eventType: telemetry.event?.type || '',
-          timestamp: telemetry.event?.timestamp || '',
+          timestamp: telemetry.event?.timestamp ? Temporal.Instant.from(telemetry.event.timestamp) : Temporal.Now.instant(),
           message: telemetry.event?.message || '',
           summary: telemetry.event?.summary || '',
           payload: parsedPayload
@@ -110,19 +176,15 @@ export class LlmFacade {
       }
 
       case 'streamedGraphEvent': {
-        const event = protocolBufferEvent.payload.value.event;
-        if (!event) return null;
+        const protoGraphEvent = protocolBufferEvent.payload.value.event;
+        if (!protoGraphEvent) return null;
+        
+        const mappedDomainEvent = this.mapGraphEvent(protoGraphEvent);
+        if (!mappedDomainEvent) return null;
+
         return {
           type: 'streamed_graph_event',
-          event: {
-            id: event.id,
-            timestamp: event.timestamp,
-            type: event.type,
-            content: event.content,
-            metadata: event.metadata,
-            edges: event.edges,
-            branchId: event.branchId
-          }
+          event: mappedDomainEvent
         };
       }
       
@@ -150,9 +212,9 @@ export class LlmFacade {
     });
   }
 
-  static createSelectStrategy(strategy: DomainDelegationStrategy): WSEvent {
+  static createSelectStrategy(strategy: DelegationStrategy): WSEvent {
     return create(WSEventSchema, {
-      payload: { case: 'selectStrategy', value: { strategyId: strategy as unknown as DelegationStrategy } }
+      payload: { case: 'selectStrategy', value: { strategyId: strategy as unknown as ProtoDelegationStrategy } }
     });
   }
 

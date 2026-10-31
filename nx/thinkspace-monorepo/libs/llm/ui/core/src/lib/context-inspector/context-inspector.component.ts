@@ -7,7 +7,7 @@ import {
   effect,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { DomainPreviewContext } from '@org/llm-core-facade';
+import { PreviewContext } from '@org/llm-core-facade';
 
 @Component({
   selector: 'llm-context-inspector',
@@ -16,7 +16,7 @@ import { DomainPreviewContext } from '@org/llm-core-facade';
   templateUrl: './context-inspector.component.html',
 })
 export class ContextInspectorComponent {
-  context = input.required<DomainPreviewContext & { previewId?: string }>();
+  context = input.required<PreviewContext & { previewId?: string }>();
 
   approve = output<{
     retainedFilePaths: string[];
@@ -25,10 +25,6 @@ export class ContextInspectorComponent {
   reviewCancelled = output<void>();
   copyFull = output<string>();
 
-  // We track history items by array index rather than UUID.
-  // Because the context window is assembled Just-In-Time (JIT), the frontend and backend
-  // don't need to cross-reference permanent database IDs to prune the active prompt.
-  // When approved, the backend simply slices its working memory array using these structural indices.
   retainedFiles = signal<Set<string>>(new Set());
   retainedHistory = signal<Set<number>>(new Set());
 
@@ -36,7 +32,6 @@ export class ContextInspectorComponent {
     effect(() => {
       const ctx = this.context();
       if (ctx) {
-        // Default to everything fully selected when the component opens
         this.retainedFiles.set(
           new Set(ctx.fileContexts?.map((f) => f.path) || []),
         );
@@ -67,7 +62,6 @@ export class ContextInspectorComponent {
     this.retainedHistory.set(current);
   }
 
-  // Recalculates dynamically as checkboxes are toggled
   totalFileTokens = computed(() => {
     const retained = this.retainedFiles();
     return this.context().fileContexts.reduce((sum, file) => {

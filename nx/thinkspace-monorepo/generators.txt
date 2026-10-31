@@ -1,5 +1,5 @@
 
-npx nx g @nx/angular:library --name=llm-ui-linear-feed --directory=libs/llm/ui/linear-feed --tags="scope:llm"
+npx nx g @nx/angular:library --name=core-logger --directory=libs/core/logger
 
 nx g @nx/workspace:move --project=llm-ui-chat --destination=libs/llm/ui/core
 

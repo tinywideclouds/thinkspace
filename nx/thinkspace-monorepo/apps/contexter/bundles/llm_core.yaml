@@ -35,4 +35,4 @@ files:
   - libs/llm/core/transport/src/lib/transport.service.ts
   - libs/llm/core/facade/src/lib/trace-parser.spec.ts
   - libs/llm/core/facade/src/lib/trace-parser.ts
-last_context: llm_core_06.md
+last_context: llm_core_20.md

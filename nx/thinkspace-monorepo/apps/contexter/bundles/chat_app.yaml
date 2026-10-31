@@ -23,4 +23,5 @@ files:
   - apps/llm/chat-app/src/app/mocks/mock-transport.service.ts
   - apps/llm/chat-app/.postcssrc.json
   - apps/llm/chat-app/src/app/mocks/mock-workspace-state.service.ts
+  - apps/llm/chat-app/src/app/mocks/mock-thinkspace-state.service.ts
 last_context: chat_app.md

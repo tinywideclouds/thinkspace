@@ -46,8 +46,13 @@ describe('BlockRouterComponent', () => {
     componentRef = fixture.componentRef;
   });
 
-  it('should route to the user message block', async () => {
-    componentRef.setInput('chatItem', { id: '1', type: 'user', content: 'User text' });
+  it('should route to the user message block for prompt type', async () => {
+    componentRef.setInput('chatItem', { 
+      id: '1', 
+      type: 'prompt', 
+      content: 'User text',
+      timestamp: Temporal.Now.instant()
+    } as ChatItem);
     await fixture.whenStable();
     fixture.detectChanges();
     
@@ -55,7 +60,12 @@ describe('BlockRouterComponent', () => {
   });
 
   it('should route to the model message block', async () => {
-    componentRef.setInput('chatItem', { id: '2', type: 'model', content: 'Model text' });
+    componentRef.setInput('chatItem', { 
+      id: '2', 
+      type: 'model', 
+      content: 'Model text',
+      timestamp: Temporal.Now.instant()
+    } as ChatItem);
     await fixture.whenStable();
     fixture.detectChanges();
     
@@ -69,11 +79,27 @@ describe('BlockRouterComponent', () => {
       path: 'src/app.ts', 
       previewSnippet: 'patch', 
       fileRef: 'ref', 
-      content: 'summary text' 
-    });
+      content: 'summary text',
+      timestamp: Temporal.Now.instant()
+    } as ChatItem);
     await fixture.whenStable();
     fixture.detectChanges();
     
     expect(fixture.nativeElement.querySelector('llm-file-delta-block')).toBeTruthy();
+  });
+
+  it('should route to the flow execution card component', async () => {
+    componentRef.setInput('chatItem', { 
+      id: '4', 
+      type: 'flow_execution', 
+      flowId: 'flow-123', 
+      status: 'running', 
+      content: 'Running agent tests',
+      timestamp: Temporal.Now.instant()
+    } as ChatItem);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    
+    expect(fixture.nativeElement.querySelector('llm-chat-flow-card')).toBeTruthy();
   });
 });

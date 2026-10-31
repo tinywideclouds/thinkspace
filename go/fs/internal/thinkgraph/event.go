@@ -1,57 +1,48 @@
 package thinkgraph
 
 import (
+	"context"
+	"encoding/json"
 	"time"
+
 	"uuid"
 )
 
-const (
-	EventPrompt     = "prompt"
-	EventModel      = "model"
-	EventTool       = "tool"
-	EventCandidate  = "candidate"
-	EventResolution = "resolution"
-	EventDigest     = "digest"
-	EventSystem     = "system"
-)
-
-type MutationType string
+type EventType string
 
 const (
-	MutationTombstone MutationType = "tombstone"
-	MutationRestore   MutationType = "restore"
-	MutationUpdate    MutationType = "update"
+	EventPrompt EventType = "prompt"
+	EventModel  EventType = "model"
+	EventDigest EventType = "digest"
 )
 
-type MutationEvent struct {
-	TargetID  uuid.UUID    `json:"target_id"`
-	Type      MutationType `json:"type"`
-	Timestamp time.Time    `json:"timestamp"`
-	Payload   string       `json:"payload,omitempty"`
-}
-
+// Event is the storage envelope for the append-only ledger.
 type Event struct {
-	ID         uuid.UUID         `json:"id"`
-	Type       string            `json:"type"`
-	Timestamp  time.Time         `json:"timestamp"`
-	Content    string            `json:"content"`
-	Tags       []string          `json:"tags,omitempty"`
-	Metadata   map[string]string `json:"metadata,omitempty"`
-	Tombstoned bool              `json:"tombstoned"`
-	BranchID   string            `json:"branch_id,omitempty"` // Associates the event with its fork topology
+	ID        uuid.UUID         `json:"id"`
+	Type      EventType         `json:"type"`
+	Timestamp time.Time         `json:"timestamp"`
+	Content   string            `json:"content"`
+	Tags      []string          `json:"tags,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	BranchID  string            `json:"branch_id,omitempty"`
+	Data      json.RawMessage   `json:"data,omitempty"` // Strictly typed domain structs live here
 }
 
-func NewEvent(eventType, content string) Event {
+func NewEvent(eventType EventType, content string) Event {
+	id := uuid.NewV7()
 	return Event{
-		ID:        uuid.NewV7(),
+		ID:        id,
 		Type:      eventType,
 		Timestamp: time.Now().UTC(),
 		Content:   content,
-		Tags:      []string{},
 		Metadata:  make(map[string]string),
 	}
 }
 
-func (e Event) IsTombstoned() bool {
-	return e.Tombstoned
+// EventWriter defines the shared write contract for both the physical ledger and the materialized graph.
+type EventWriter interface {
+	AppendEvent(ctx context.Context, c *Chat, event Event) error
+	SaveDigest(ctx context.Context, c *Chat, digest DigestMeta) error
+	SaveSpaceContext(ctx context.Context, c *Chat, spaceCtx SpaceContext) error
+	SaveMutation(ctx context.Context, c *Chat, mutation MutationEvent) error
 }

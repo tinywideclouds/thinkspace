@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"uuid"
-
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
@@ -18,6 +16,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"uuid"
 )
 
 type ChatSession struct {
@@ -26,14 +25,14 @@ type ChatSession struct {
 	ChatID  string
 	Meta    workspace.ChatMeta
 
-	logger            *slog.Logger
-	registry          *config.Registry
-	workspaceManager  *workspace.ServiceManager
-	workspaceService  *workspace.Service
-	modelClient       llm.ModelClient
-	trajectoryBuilder *thinkgraph.TrajectoryBuilder
-	fanOutFlow        flows.Flow
-	digestManager     *DigestManager
+	logger           *slog.Logger
+	registry         *config.Registry
+	workspaceManager *workspace.ServiceManager
+	workspaceService *workspace.Service
+	modelClient      llm.ModelClient
+	contextProjecter *thinkgraph.ContextProjecter
+	fanOutFlow       flows.Flow
+	digestManager    *DigestManager
 }
 
 // OpenChat acts as the factory, reading physical state exactly once.
@@ -60,17 +59,17 @@ func OpenChat(
 	}
 
 	return &ChatSession{
-		SpaceID:           spaceID,
-		ChatID:            chatID,
-		Meta:              meta,
-		logger:            logger,
-		registry:          registry,
-		workspaceManager:  workspaceManager,
-		workspaceService:  workspaceService,
-		modelClient:       modelClient,
-		trajectoryBuilder: thinkgraph.NewTrajectoryBuilder(),
-		fanOutFlow:        fanOutFlow,
-		digestManager:     digestManager,
+		SpaceID:          spaceID,
+		ChatID:           chatID,
+		Meta:             meta,
+		logger:           logger,
+		registry:         registry,
+		workspaceManager: workspaceManager,
+		workspaceService: workspaceService,
+		modelClient:      modelClient,
+		contextProjecter: thinkgraph.NewContextProjecter(),
+		fanOutFlow:       fanOutFlow,
+		digestManager:    digestManager,
 	}, nil
 }
 
@@ -214,7 +213,8 @@ func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInt
 		executor := llm.NewSubAgentExecutor(s.logger, s.modelClient, thinkState.Config().Roles.Worker.Model, thinkState.Patcher())
 		spaceConfig, _ := s.registry.GetConfig(activeDomain)
 
-		flowEngine := NewFlowEngine(s.logger, s.workspaceService, executor, emitter)
+		// Inject the new Dispatcher dependency into the FlowEngine alongside the Emitter
+		flowEngine := NewFlowEngine(s.logger, s.workspaceService, executor, s.workspaceService.Dispatcher(), emitter)
 		coordinator := NewCoordinator(s.logger, s.workspaceService, s.modelClient, emitter, flowEngine, s.fanOutFlow, s.digestManager, s.SpaceID, spaceConfig.WorkerSystemPrompt())
 
 		err = coordinator.RunAgentLoop(ctx, chatObj, s, thinkState, bundle, ui, s.buildToolRegistry(thinkState))
@@ -233,9 +233,9 @@ func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInt
 }
 
 func (s *ChatSession) assembleBundle(ctx context.Context, chatObj *thinkgraph.Chat, thinkState spaces.ThinkState) (cognition.ThinkBundle, *thinkgraph.GraphData, error) {
-	graphStore := s.workspaceManager.GraphStore()
-	traversalEngine := thinkgraph.NewTraversalEngine(graphStore)
-	var volatileEvents []thinkgraph.Event
+	graphRepository := s.workspaceManager.GraphRepository()
+	traversalEngine := thinkgraph.NewTraversalEngine(graphRepository)
+	var volatileEvents []thinkgraph.Node
 	primaryTags := make(map[string]bool)
 	relatedTags := make(map[string]bool)
 
@@ -248,19 +248,19 @@ func (s *ChatSession) assembleBundle(ctx context.Context, chatObj *thinkgraph.Ch
 	digestionHorizon := s.Meta.DigestionHorizon
 	s.mu.RUnlock()
 
-	err := traversalEngine.WalkTimelineReverse(ctx, chatObj, s.buildTopology(), func(ev thinkgraph.Event) bool {
-		if ev.ID == digestionHorizon {
+	err := traversalEngine.WalkTimelineReverse(ctx, chatObj, s.buildTopology(), func(node thinkgraph.Node) bool {
+		if node.ID == digestionHorizon {
 			return false
 		}
 
-		volatileEvents = append(volatileEvents, ev)
+		volatileEvents = append(volatileEvents, node)
 
 		if len(volatileEvents) <= focusDepth {
-			for _, tag := range ev.Tags {
+			for _, tag := range node.Tags {
 				primaryTags[tag] = true
 			}
 		} else {
-			for _, tag := range ev.Tags {
+			for _, tag := range node.Tags {
 				relatedTags[tag] = true
 			}
 		}
@@ -278,12 +278,12 @@ func (s *ChatSession) assembleBundle(ctx context.Context, chatObj *thinkgraph.Ch
 		volatileEvents[i], volatileEvents[j] = volatileEvents[j], volatileEvents[i]
 	}
 
-	allStickyDigests, err := graphStore.GetStickyDigests(ctx, chatObj)
+	allStickyDigests, err := graphRepository.GetStickyDigests(ctx, chatObj)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching digests: %w", err)
 	}
 
-	allSpaceContexts, err := graphStore.GetSpaceContexts(ctx, chatObj)
+	allSpaceContexts, err := graphRepository.GetSpaceContexts(ctx, chatObj)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching space contexts: %w", err)
 	}
@@ -327,12 +327,10 @@ func (s *ChatSession) assembleBundle(ctx context.Context, chatObj *thinkgraph.Ch
 		}
 	}
 
-	var dormantLenses []string
-
 	focus := thinkgraph.AttentionFocus{
 		PrimaryFocus:   mapKeys(primaryTags),
 		RelatedContext: mapKeys(relatedTags),
-		DormantLenses:  dormantLenses,
+		DormantLenses:  []string{},
 	}
 
 	graphData := &thinkgraph.GraphData{
@@ -355,21 +353,22 @@ func (s *ChatSession) assembleBundle(ctx context.Context, chatObj *thinkgraph.Ch
 		stringMaps[string(k)] = v
 	}
 
-	var catalystEvent *thinkgraph.Event
+	var catalystNode *thinkgraph.Node
 	if len(volatileEvents) > 0 {
 		last := volatileEvents[len(volatileEvents)-1]
-		catalystEvent = &last
+		catalystNode = &last
 		volatileEvents = volatileEvents[:len(volatileEvents)-1]
 	}
 
-	trajectoryRequest := thinkgraph.TrajectoryRequest{
+	trajectoryRequest := thinkgraph.ContextRequest{
 		Manifest:     manifest,
 		RecentEvents: volatileEvents,
-		Catalyst:     catalystEvent,
+		Catalyst:     catalystNode,
 		Focus:        focus,
 	}
 
-	trajectory, err := s.trajectoryBuilder.Build(ctx, trajectoryRequest)
+	// Uses the new ContextProjecter to safely ignore heavy MaterializedState diffs
+	trajectory, err := s.contextProjecter.Build(ctx, trajectoryRequest)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("assembling trajectory: %w", err)
 	}
@@ -414,8 +413,8 @@ func (s *ChatSession) buildToolRegistry(thinkState spaces.ThinkState) []llm.Tool
 }
 
 func (s *ChatSession) evaluateAndTriggerDigestion(ctx context.Context, chatObj *thinkgraph.Chat, memoryConfig spaces.MemoryConfig) {
-	graphStore := s.workspaceManager.GraphStore()
-	traversalEngine := thinkgraph.NewTraversalEngine(graphStore)
+	graphRepository := s.workspaceManager.GraphRepository()
+	traversalEngine := thinkgraph.NewTraversalEngine(graphRepository)
 	timeline, err := traversalEngine.GetFullTimeline(ctx, chatObj, s.buildTopology())
 	if err != nil || len(timeline) == 0 {
 		return
@@ -440,9 +439,13 @@ func (s *ChatSession) evaluateAndTriggerDigestion(ctx context.Context, chatObj *
 	}
 
 	if horizonIndex >= 0 && horizonIndex+1 < len(timeline) {
-		volatileEvents = timeline[horizonIndex+1:]
+		for _, n := range timeline[horizonIndex+1:] {
+			volatileEvents = append(volatileEvents, n.Event)
+		}
 	} else if horizonIndex == -1 {
-		volatileEvents = timeline
+		for _, n := range timeline {
+			volatileEvents = append(volatileEvents, n.Event)
+		}
 	}
 
 	if len(volatileEvents) == 0 {

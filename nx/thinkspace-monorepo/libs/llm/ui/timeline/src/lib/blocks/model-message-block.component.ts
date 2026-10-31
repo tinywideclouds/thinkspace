@@ -2,6 +2,7 @@ import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MarkdownComponent } from '@org/llm-ui-core';
 import { FileDeltaBlockComponent } from './file-delta-block/file-delta-block.component';
+import { ChatItem, FileDeltaChatItem } from '@org/llm-state-chat';
 
 @Component({
   selector: 'llm-model-message-block',
@@ -52,11 +53,12 @@ import { FileDeltaBlockComponent } from './file-delta-block/file-delta-block.com
           <div class="mt-4 flex flex-col gap-2 border-t border-gray-200 pt-3">
             @for (att of attachments(); track att.id) {
               @if (att.type === 'file_delta') {
+                @let fileItem = asFileDelta(att);
                 <llm-file-delta-block
-                  [path]="att.path || att.metadata?.path"
-                  [summary]="att.content"
-                  [previewSnippet]="att.previewSnippet || att.metadata?.previewSnippet"
-                  [fileRef]="att.fileRef || att.metadata?.fileRef">
+                  [path]="fileItem.path"
+                  [summary]="fileItem.content"
+                  [previewSnippet]="fileItem.previewSnippet"
+                  [fileRef]="fileItem.fileRef">
                 </llm-file-delta-block>
               }
             }
@@ -70,7 +72,7 @@ export class ModelMessageBlockComponent {
   public source = input.required<string>();
   public content = input.required<string>();
   public tags = input<string[]>([]);
-  public attachments = input<any[]>([]); // New input for bundled GraphEvents
+  public attachments = input<ChatItem[]>([]);
   
   public isDimmed = input<boolean>(false);
   public isCollapsed = input<boolean>(false);
@@ -78,6 +80,10 @@ export class ModelMessageBlockComponent {
 
   public tagHover = output<string | null>();
   public tagClick = output<string>();
+
+  public asFileDelta(item: ChatItem): FileDeltaChatItem {
+    return item as FileDeltaChatItem;
+  }
 
   public hasActiveTag(): boolean {
     const active = this.activeTag();

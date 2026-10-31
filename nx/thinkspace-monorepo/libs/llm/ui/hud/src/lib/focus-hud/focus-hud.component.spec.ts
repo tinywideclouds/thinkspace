@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FocusHudComponent } from './focus-hud.component';
 import { ComponentRef } from '@angular/core';
 import { describe, beforeEach, it, expect, vi } from 'vitest';
-import { DomainAttentionFocus } from '@org/llm-core-facade';
+import { AttentionFocus } from '@org/llm-core-facade';
 
 describe('FocusHudComponent', () => {
   let component: FocusHudComponent;
@@ -18,7 +18,7 @@ describe('FocusHudComponent', () => {
     component = fixture.componentInstance;
     componentRef = fixture.componentRef;
 
-    const mockFocus: DomainAttentionFocus = {
+    const mockFocus: AttentionFocus = {
       primaryFocus: ['architecture'],
       relatedContext: ['auth'],
       dormantLenses: ['database']

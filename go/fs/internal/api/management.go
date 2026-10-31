@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"uuid"
 )
 
 type ManagementAPI struct {
@@ -150,7 +150,7 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if api.manager.GraphStore() == nil {
+	if api.manager.GraphRepository() == nil {
 		http.Error(w, "Graph database is not initialized", http.StatusInternalServerError)
 		return
 	}
@@ -166,12 +166,12 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 	}
 
 	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID, ActiveBranch: activeBranch}
-	var events []thinkgraph.Event
+	var events []thinkgraph.Node
 	var err error
 
 	if idsParam != "" {
 		ids := strings.Split(idsParam, ",")
-		events, err = api.manager.GraphStore().GetEvents(r.Context(), chat, ids)
+		events, err = api.manager.GraphRepository().GetNodes(r.Context(), chat, ids)
 	} else {
 		limit := 50
 		if l, parseErr := strconv.Atoi(r.URL.Query().Get("limit")); parseErr == nil && l > 0 {
@@ -179,15 +179,15 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 		}
 		cursor := r.URL.Query().Get("cursor")
 
-		var timeline []thinkgraph.Event
-		engine := thinkgraph.NewTraversalEngine(api.manager.GraphStore())
+		var timeline []thinkgraph.Node
+		engine := thinkgraph.NewTraversalEngine(api.manager.GraphRepository())
 		timeline, err = engine.GetFullTimeline(r.Context(), chat, topo)
 
 		if err == nil {
 			endIdx := len(timeline)
 			if cursor != "" {
-				for i, ev := range timeline {
-					if ev.ID.String() == cursor {
+				for i, n := range timeline {
+					if n.ID.String() == cursor {
 						endIdx = i
 						break
 					}
@@ -202,7 +202,7 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 			if startIdx < endIdx {
 				events = timeline[startIdx:endIdx]
 			} else {
-				events = []thinkgraph.Event{}
+				events = []thinkgraph.Node{}
 			}
 		}
 	}
@@ -227,14 +227,14 @@ func (api *ManagementAPI) handleGetContexts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if api.manager.GraphStore() == nil {
+	if api.manager.GraphRepository() == nil {
 		http.Error(w, "Graph database is not initialized", http.StatusInternalServerError)
 		return
 	}
 
 	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
 
-	contexts, err := api.manager.GraphStore().GetSpaceContexts(r.Context(), chat)
+	contexts, err := api.manager.GraphRepository().GetSpaceContexts(r.Context(), chat)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -295,14 +295,14 @@ func (api *ManagementAPI) handleGetLenses(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if api.manager.GraphStore() == nil {
+	if api.manager.GraphRepository() == nil {
 		http.Error(w, "Graph database is not initialized", http.StatusInternalServerError)
 		return
 	}
 
 	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
 
-	result, err := api.manager.GraphStore().GetLenses(r.Context(), chat, tag)
+	result, err := api.manager.GraphRepository().GetLenses(r.Context(), chat, tag)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

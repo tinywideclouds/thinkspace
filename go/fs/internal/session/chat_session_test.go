@@ -29,12 +29,12 @@ type csTestModelClient struct {
 	lastRequest cognition.ThinkBundle
 }
 
-func (m *csTestModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
-	m.lastRequest = bundle
+func (client *csTestModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
+	client.lastRequest = bundle
 	return func(yield func(llm.StreamChunk, error) bool) {
-		if m.callCount < len(m.responses) {
-			resp := m.responses[m.callCount]
-			m.callCount++
+		if client.callCount < len(client.responses) {
+			resp := client.responses[client.callCount]
+			client.callCount++
 			yield(resp, nil)
 		}
 	}
@@ -42,29 +42,29 @@ func (m *csTestModelClient) GenerateContentStream(ctx context.Context, model str
 
 type csTestChatEngine struct{}
 
-func (m *csTestChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
-func (m *csTestChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+func (engine *csTestChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
+func (engine *csTestChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
 	return "mock-sha", nil
 }
-func (m *csTestChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID, candidateID string) (workspace.CandidateSandbox, error) {
+func (engine *csTestChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID, candidateID string) (workspace.CandidateSandbox, error) {
 	return nil, nil
 }
-func (m *csTestChatEngine) PreviewCandidate(ctx context.Context, chatID, candidateID string) error {
+func (engine *csTestChatEngine) PreviewCandidate(ctx context.Context, chatID, candidateID string) error {
 	return nil
 }
-func (m *csTestChatEngine) Accept(ctx context.Context, chatID, candidateID, reason string) error {
+func (engine *csTestChatEngine) Accept(ctx context.Context, chatID, candidateID, reason string) error {
 	return nil
 }
-func (m *csTestChatEngine) Reject(ctx context.Context, chatID, candidateID, reason string) error {
+func (engine *csTestChatEngine) Reject(ctx context.Context, chatID, candidateID, reason string) error {
 	return nil
 }
-func (m *csTestChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
+func (engine *csTestChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
 	return "", nil
 }
 
 type csTestThinkSpace struct{}
 
-func (m *csTestThinkSpace) Config() spaces.ThinkStateConfig {
+func (space *csTestThinkSpace) Config() spaces.ThinkStateConfig {
 	cfg := spaces.ThinkStateConfig{
 		Roles: spaces.RolesConfig{
 			Manager: spaces.ManagerConfig{Model: "test-manager"},
@@ -75,12 +75,12 @@ func (m *csTestThinkSpace) Config() spaces.ThinkStateConfig {
 	cfg.ApplyDefaults()
 	return cfg
 }
-func (m *csTestThinkSpace) Tools() []llm.ToolDef                                   { return nil }
-func (m *csTestThinkSpace) Verifier() spaces.Verifier                              { return nil }
-func (m *csTestThinkSpace) Mapbook() spaces.Mapbook                                { return nil }
-func (m *csTestThinkSpace) Patcher() workspace.Patcher                             { return nil }
-func (m *csTestThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
-func (m *csTestThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus, workspaceRoot string) error {
+func (space *csTestThinkSpace) Tools() []llm.ToolDef                                   { return nil }
+func (space *csTestThinkSpace) Verifier() spaces.Verifier                              { return nil }
+func (space *csTestThinkSpace) Mapbook() spaces.Mapbook                                { return nil }
+func (space *csTestThinkSpace) Patcher() workspace.Patcher                             { return nil }
+func (space *csTestThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
+func (space *csTestThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus, workspaceRoot string) error {
 	return nil
 }
 
@@ -91,29 +91,29 @@ type csTestUI struct {
 	transitionApproved     bool
 }
 
-func (u *csTestUI) OnTextChunk(text string) {}
-func (u *csTestUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
+func (ui *csTestUI) OnTextChunk(text string) {}
+func (ui *csTestUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{
-		Approved:               u.reviewApproved,
-		RetainedHistoryIndices: u.retainedHistoryIndices,
-		RetainedFilePaths:      u.retainedFilePaths,
+		Approved:               ui.reviewApproved,
+		RetainedHistoryIndices: ui.retainedHistoryIndices,
+		RetainedFilePaths:      ui.retainedFilePaths,
 	}
 }
-func (u *csTestUI) ChooseNextStep() flows.FlowStrategy { return flows.StrategyManual }
-func (u *csTestUI) ReviewCandidate(branch string) bool { return true }
-func (u *csTestUI) ConfirmTransition(targetDomain string, reasoning string) bool {
-	return u.transitionApproved
+func (ui *csTestUI) ChooseNextStep() flows.FlowStrategy { return flows.StrategyManual }
+func (ui *csTestUI) ReviewCandidate(branch string) bool { return true }
+func (ui *csTestUI) ConfirmTransition(targetDomain string, reasoning string) bool {
+	return ui.transitionApproved
 }
 
 type csTestEmitter struct{}
 
-func (e *csTestEmitter) Emit(channel string, event telemetry.Event) {}
+func (emitter *csTestEmitter) Emit(channel string, event telemetry.Event) {}
 
 type csTestFlow struct{}
 
-func (f *csTestFlow) Name() string  { return "TestFlow" }
-func (f *csTestFlow) MaxSteps() int { return 10 }
-func (f *csTestFlow) Next(state flows.FlowState) flows.FlowDirective {
+func (flow *csTestFlow) Name() string  { return "TestFlow" }
+func (flow *csTestFlow) MaxSteps() int { return 10 }
+func (flow *csTestFlow) Next(state flows.FlowState) flows.FlowDirective {
 	return flows.FlowDirective{Action: flows.ActionFinish}
 }
 
@@ -123,7 +123,7 @@ func scaffoldTestChat(workspaceRoot, spaceID, chatID string) {
 	_ = os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
 }
 
-func setupSessionTest(t *testing.T, chatID string) (*session.ChatSession, *workspace.ServiceManager, *csTestModelClient, string) {
+func setupSessionTest(t *testing.T, chatID string) (*session.ChatSession, *workspace.ServiceManager, *workspace.Service, *csTestModelClient, string) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 	spaceID := "test-space"
@@ -135,7 +135,8 @@ func setupSessionTest(t *testing.T, chatID string) (*session.ChatSession, *works
 	}
 	t.Cleanup(func() { graphDB.Close() })
 
-	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatEngine { return &csTestChatEngine{} }, graphDB)
+	emitter := &csTestEmitter{}
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatEngine { return &csTestChatEngine{} }, graphDB, emitter)
 	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
 	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.Domain = "golang" })
 
@@ -156,13 +157,15 @@ func setupSessionTest(t *testing.T, chatID string) (*session.ChatSession, *works
 		t.Fatalf("failed to open chat session: %v", err)
 	}
 
-	return chatSession, svcManager, client, spaceID
+	workspaceService := svcManager.GetService(spaceID)
+
+	return chatSession, svcManager, workspaceService, client, spaceID
 }
 
 func TestChatSession_RunTurn_Sequencing(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-seq"
-	chatSession, svcManager, client, spaceID := setupSessionTest(t, chatID)
+	chatSession, svcManager, _, client, spaceID := setupSessionTest(t, chatID)
 
 	client.responses = []llm.StreamChunk{{Text: "Test standard response"}}
 	ui := &csTestUI{reviewApproved: true}
@@ -174,7 +177,7 @@ func TestChatSession_RunTurn_Sequencing(t *testing.T) {
 	}
 
 	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID, ActiveBranch: "main"}
-	timeline, err := svcManager.GraphStore().GetBranchTimeline(ctx, chat, "main")
+	timeline, err := svcManager.GraphRepository().GetBranchTimeline(ctx, chat, "main")
 	if err != nil {
 		t.Fatalf("Failed to fetch timeline: %v", err)
 	}
@@ -187,7 +190,7 @@ func TestChatSession_RunTurn_Sequencing(t *testing.T) {
 func TestChatSession_RunTurn_Transition(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-trans"
-	chatSession, svcManager, client, spaceID := setupSessionTest(t, chatID)
+	chatSession, svcManager, _, client, spaceID := setupSessionTest(t, chatID)
 
 	client.responses = []llm.StreamChunk{
 		{
@@ -223,11 +226,13 @@ func TestChatSession_RunTurn_Transition(t *testing.T) {
 func TestChatSession_SpaceContextAssembly(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-context"
-	chatSession, svcManager, client, spaceID := setupSessionTest(t, chatID)
+	chatSession, svcManager, workspaceService, client, spaceID := setupSessionTest(t, chatID)
 
 	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID, ActiveBranch: "main"}
-	_ = svcManager.GraphStore().SaveSpaceContext(ctx, chat, thinkgraph.SpaceContext{
-		ID:      uuid.NewV7(),
+
+	id := uuid.NewV7()
+	_ = svcManager.GraphRepository().SaveSpaceContext(ctx, chat, thinkgraph.SpaceContext{
+		ID:      id,
 		Content: "Always use PostgreSQL.",
 		Tags:    []string{"database"},
 	})
@@ -235,7 +240,8 @@ func TestChatSession_SpaceContextAssembly(t *testing.T) {
 	ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Build database")
 	ev.Tags = []string{"database"}
 	ev.BranchID = "main"
-	_ = svcManager.GraphStore().AppendEvent(ctx, chat, ev)
+
+	_ = workspaceService.Dispatcher().AppendEvent(ctx, chat, ev)
 
 	client.responses = []llm.StreamChunk{{Text: "Ok"}}
 	ui := &csTestUI{reviewApproved: true}

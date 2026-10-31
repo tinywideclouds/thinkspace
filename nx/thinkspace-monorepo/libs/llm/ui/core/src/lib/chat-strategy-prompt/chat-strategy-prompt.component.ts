@@ -1,5 +1,5 @@
 import { Component, output } from '@angular/core';
-import { DomainDelegationStrategy } from '@org/llm-core-facade';
+import { DelegationStrategy } from '@org/llm-core-facade';
 
 @Component({
   selector: 'llm-chat-strategy-prompt',
@@ -11,25 +11,25 @@ import { DomainDelegationStrategy } from '@org/llm-core-facade';
       <strong>Select Next Step:</strong>
       <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
         <button
-          (click)="select(DomainDelegationStrategy.MANUAL)"
+          (click)="select(DelegationStrategy.MANUAL)"
           style="padding: 6px 12px; cursor: pointer;"
         >
           [1] Manual Review
         </button>
         <button
-          (click)="select(DomainDelegationStrategy.REVIEW)"
+          (click)="select(DelegationStrategy.REVIEW)"
           style="padding: 6px 12px; cursor: pointer;"
         >
           [2] Assisted Review
         </button>
         <button
-          (click)="select(DomainDelegationStrategy.REFINE)"
+          (click)="select(DelegationStrategy.REFINE)"
           style="padding: 6px 12px; cursor: pointer;"
         >
           [3] Auto-Refine
         </button>
         <button
-          (click)="select(DomainDelegationStrategy.SKIP)"
+          (click)="select(DelegationStrategy.SKIP)"
           style="padding: 6px 12px; cursor: pointer;"
         >
           [0] Skip / Abort
@@ -39,10 +39,10 @@ import { DomainDelegationStrategy } from '@org/llm-core-facade';
   `,
 })
 export class ChatStrategyPromptComponent {
-  DomainDelegationStrategy = DomainDelegationStrategy;
-  strategySelected = output<DomainDelegationStrategy>();
+  DelegationStrategy = DelegationStrategy;
+  strategySelected = output<DelegationStrategy>();
 
-  select(strategy: DomainDelegationStrategy) {
+  select(strategy: DelegationStrategy) {
     this.strategySelected.emit(strategy);
   }
 }

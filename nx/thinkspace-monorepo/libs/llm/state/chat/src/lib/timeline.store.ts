@@ -1,6 +1,11 @@
 import { Injectable, signal } from '@angular/core';
-import { DomainGraphEvent, DomainBranchTopology } from '@org/llm-core-facade';
-import { ChatItem, ModelChatItem, FlowCardChatItem, FileDeltaChatItem } from './chat.models';
+import { GraphEvent, BranchTopology } from '@org/llm-core-facade';
+import { 
+  ChatItem, 
+  MessageChatItem, 
+  FlowExecutionChatItem, 
+  FileDeltaChatItem 
+} from './chat.models';
 
 @Injectable({ providedIn: 'root' })
 export class TimelineStore {
@@ -10,9 +15,8 @@ export class TimelineStore {
   public isLoadingHistory = signal<boolean>(false);
   public totalHistoryMessages = signal<number>(0);
 
-  // Topology Signals
   public activeBranch = signal<string>('main');
-  public branches = signal<Record<string, DomainBranchTopology>>({});
+  public branches = signal<Record<string, BranchTopology>>({});
 
   public clearSession(): void {
     this.coreChat.set([]);
@@ -25,16 +29,14 @@ export class TimelineStore {
   }
 
   public processSyncHistory(
-    recentEvents: DomainGraphEvent[], 
+    recentEvents: GraphEvent[], 
     nextCursor: string, 
     hasMore: boolean, 
     activeBranch: string,
-    branches: Record<string, DomainBranchTopology>,
+    branches: Record<string, BranchTopology>,
     totalMessages = 0
   ): void {
-    const incomingTimeline: ChatItem[] = recentEvents
-      .filter(e => e.type === 'prompt' || e.type === 'model' || e.type === 'file_delta')
-      .map(e => this.mapDomainEventToChatItem(e));
+    const incomingTimeline: ChatItem[] = recentEvents.map(e => this.mapGraphEventToChatItem(e));
 
     this.coreChat.update(existing => {
       if (this.isLoadingHistory() && existing.length > 0) {
@@ -52,13 +54,10 @@ export class TimelineStore {
     this.branches.set(branches);
   }
 
-  public ingestEvent(event: DomainGraphEvent): void {
-    // Strict Filtering: Ignore live events that belong to a background branch
+  public ingestEvent(event: GraphEvent): void {
     if (event.branchId && event.branchId !== this.activeBranch()) return;
-
-    if (event.type !== 'prompt' && event.type !== 'model' && event.type !== 'file_delta') return;
     
-    const newItem = this.mapDomainEventToChatItem(event);
+    const newItem = this.mapGraphEventToChatItem(event);
     
     this.coreChat.update(history => {
       const cleanHistory = history.filter(c => !(c.type === 'system' && c.content.includes('Thinking')));
@@ -66,33 +65,57 @@ export class TimelineStore {
     });
   }
 
-  private mapDomainEventToChatItem(e: DomainGraphEvent): ChatItem {
+  private mapGraphEventToChatItem(e: GraphEvent): ChatItem {
+    const base = {
+      id: e.id,
+      timestamp: e.timestamp,
+      tags: e.tags,
+      metadata: e.metadata,
+      edges: e.edges,
+      branchId: e.branchId
+    };
+
     if (e.type === 'file_delta') {
       return {
-        id: e.id,
+        ...base,
         type: 'file_delta',
         content: e.content,
-        path: e.metadata['path'] || 'Unknown Path',
-        previewSnippet: e.metadata['previewSnippet'] || '',
-        fileRef: e.metadata['fileRef'] || '',
-        metadata: e.metadata,
-        edges: e.edges
-      } as FileDeltaChatItem;
+        path: e.path,
+        previewSnippet: e.previewSnippet,
+        fileRef: e.fileRef,
+        parentId: e.parentId,
+      } satisfies FileDeltaChatItem;
     }
     
+    if (e.type === 'flow_execution') {
+      return {
+        ...base,
+        type: 'flow_execution',
+        content: e.content,
+        flowId: e.flowId,
+        status: e.status
+      } satisfies FlowExecutionChatItem;
+    }
+
     return { 
-      id: e.id, 
-      type: e.type === 'model' ? 'model' : 'user', 
-      content: e.content,
-      metadata: e.metadata,
-      edges: e.edges
-    } as ChatItem;
+      ...base,
+      type: e.type, 
+      content: e.content
+    } satisfies MessageChatItem;
   }
 
-  public appendCoreChat(type: 'user' | 'model' | 'system', content: string): void {
+  public appendCoreChat(type: 'prompt' | 'model' | 'system', content: string): void {
     this.coreChat.update(history => {
       const cleanHistory = history.filter(c => !(c.type === 'system' && c.content.includes('Thinking')));
-      return [...cleanHistory, { id: crypto.randomUUID(), type, content } as ChatItem];
+      return [
+        ...cleanHistory, 
+        { 
+          id: crypto.randomUUID(), 
+          timestamp: Temporal.Now.instant(), 
+          type, 
+          content 
+        } satisfies MessageChatItem
+      ];
     });
   }
 
@@ -100,23 +123,51 @@ export class TimelineStore {
     this.coreChat.update(history => {
       const cleanHistory = history.filter(c => !(c.type === 'system' && c.content.includes('Thinking')));
       if (cleanHistory.length === 0 || cleanHistory[cleanHistory.length - 1].type !== 'model') {
-        return [...cleanHistory, { id: crypto.randomUUID(), type: 'model', content: chunkText } as ModelChatItem];
+        return [
+          ...cleanHistory, 
+          { 
+            id: crypto.randomUUID(), 
+            timestamp: Temporal.Now.instant(), 
+            type: 'model', 
+            content: chunkText 
+          } satisfies MessageChatItem
+        ];
       }
+      
       const updated = [...cleanHistory];
-      updated[updated.length - 1].content += chunkText;
+      const last = updated[updated.length - 1] as MessageChatItem;
+      updated[updated.length - 1] = {
+        ...last,
+        content: last.content + chunkText
+      };
       return updated;
     });
   }
 
-  public injectFlowCard(flowId: string, summary: string): void {
+  public injectFlowExecution(flowId: string, summary: string): void {
     this.coreChat.update(history => {
       const cleanHistory = history.filter(c => !(c.type === 'system' && c.content.includes('Thinking')));
-      return [...cleanHistory, { id: crypto.randomUUID(), type: 'flow_card', content: summary, flowId, status: 'running' } as FlowCardChatItem];
+      return [
+        ...cleanHistory, 
+        { 
+          id: crypto.randomUUID(), 
+          timestamp: Temporal.Now.instant(), 
+          type: 'flow_execution', 
+          content: summary, 
+          flowId, 
+          status: 'running' 
+        } satisfies FlowExecutionChatItem
+      ];
     });
   }
 
-  public updateFlowCardStatus(flowId: string, status: 'running' | 'completed'): void {
-    this.coreChat.update(history => history.map(item => item.type === 'flow_card' && item.flowId === flowId ? { ...item, status } : item));
+  public updateFlowExecutionStatus(flowId: string, status: 'running' | 'completed' | string): void {
+    this.coreChat.update(history => history.map(item => {
+      if (item.type === 'flow_execution' && item.flowId === flowId) {
+        return { ...item, status };
+      }
+      return item;
+    }));
   }
 
   public clearThinkingIndicators(): void {

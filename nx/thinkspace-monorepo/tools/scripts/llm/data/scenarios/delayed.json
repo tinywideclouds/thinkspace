@@ -2,8 +2,7 @@
   {
     "offsetMs": 200,
     "payload": {
-      "case": "telemetryEvent",
-      "value": {
+      "telemetryEvent": {
         "channel": "manager",
         "event": {
           "id": "scenario-delay-1",
@@ -19,8 +18,7 @@
   {
     "offsetMs": 5000,
     "payload": {
-      "case": "chatStream",
-      "value": {
+      "chatStream": {
         "text": "💥 BOOM! This is a massive delayed message block that arrived 5 seconds later. It should trigger the 'New Messages ↓' pill instead of forcing your scroll if you moved your view up."
       }
     }
@@ -28,8 +26,7 @@
   {
     "offsetMs": 5200,
     "payload": {
-      "case": "telemetryEvent",
-      "value": {
+      "telemetryEvent": {
         "channel": "manager",
         "event": {
           "id": "scenario-delay-end",

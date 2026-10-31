@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
 	"uuid"
 )
 
@@ -21,12 +22,12 @@ const (
 )
 
 type Rehydrator struct {
-	graph         GraphRepository
+	store         *GraphStore
 	workspaceRoot string
 }
 
-func NewRehydrator(graph GraphRepository, workspaceRoot string) *Rehydrator {
-	return &Rehydrator{graph: graph, workspaceRoot: workspaceRoot}
+func NewRehydrator(store *GraphStore, workspaceRoot string) *Rehydrator {
+	return &Rehydrator{store: store, workspaceRoot: workspaceRoot}
 }
 
 func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *LedgerManifest, *LedgerManifest, error) {
@@ -41,14 +42,14 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *Ledge
 		return SyncStatusMismatch, nil, nil, fmt.Errorf("failed to load disk manifest: %w", err)
 	}
 
-	graphManifest, err := r.graph.GetSyncState(ctx, c)
+	graphManifest, err := r.store.Repository().GetSyncState(ctx, c)
 	if err != nil {
 		return SyncStatusMismatch, nil, nil, fmt.Errorf("failed to get graph sync state: %w", err)
 	}
 
 	if graphManifest == nil {
 		if diskManifest.TotalEvents == 0 {
-			_ = r.graph.SetSyncState(ctx, c, *diskManifest)
+			_ = r.store.Repository().SetSyncState(ctx, c, *diskManifest)
 			return SyncStatusOK, diskManifest, diskManifest, nil
 		}
 		return SyncStatusMismatch, diskManifest, nil, nil
@@ -108,22 +109,22 @@ func (r *Rehydrator) FastForward(ctx context.Context, c *Chat, graphManifest, di
 				continue
 			}
 
-			if err := r.graph.AppendEvent(ctx, c, event); err != nil {
+			if err := r.store.AppendEvent(ctx, c, event); err != nil {
 				file.Close()
 				return err
 			}
 
 			graphManifest.TotalEvents++
-			_ = r.graph.SetSyncState(ctx, c, *graphManifest)
+			_ = r.store.Repository().SetSyncState(ctx, c, *graphManifest)
 		}
 		file.Close()
 	}
 
-	return r.graph.SetSyncState(ctx, c, *diskManifest)
+	return r.store.Repository().SetSyncState(ctx, c, *diskManifest)
 }
 
 func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
-	if err := r.graph.ClearChatGraph(ctx, c); err != nil {
+	if err := r.store.Repository().ClearChatGraph(ctx, c); err != nil {
 		return fmt.Errorf("failed to clear graph: %w", err)
 	}
 
@@ -137,7 +138,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 				if err == nil {
 					spaceCtx := r.parseSpaceContextMarkdown(e.Name(), string(content))
 					if spaceCtx.ID != (uuid.UUID{}) {
-						_ = r.graph.SaveSpaceContext(ctx, c, spaceCtx)
+						_ = r.store.SaveSpaceContext(ctx, c, spaceCtx)
 					}
 				}
 			}
@@ -154,7 +155,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 				if err == nil {
 					digestMeta := r.parseDigestMarkdown(e.Name(), string(content))
 					if digestMeta.ID != (uuid.UUID{}) {
-						_ = r.graph.SaveDigest(ctx, c, digestMeta)
+						_ = r.store.SaveDigest(ctx, c, digestMeta)
 					}
 				}
 			}
@@ -197,7 +198,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 			if data, err := os.ReadFile(filepath.Join(mutationsDir, filename)); err == nil {
 				var mut MutationEvent
 				if json.Unmarshal(data, &mut) == nil {
-					_ = r.graph.SaveMutation(ctx, c, mut)
+					_ = r.store.SaveMutation(ctx, c, mut)
 				}
 			}
 		}

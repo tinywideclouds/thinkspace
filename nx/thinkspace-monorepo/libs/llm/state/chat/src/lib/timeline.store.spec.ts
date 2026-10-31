@@ -1,71 +1,130 @@
 import { TestBed } from '@angular/core/testing';
 import { TimelineStore } from './timeline.store';
-import { DomainGraphEvent, DomainBranchTopology } from '@org/llm-core-facade';
-import { describe, beforeEach, it, expect } from 'vitest';
+import { GraphEvent } from '@org/llm-core-facade';
 
 describe('TimelineStore', () => {
   let store: TimelineStore;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [TimelineStore] });
+    TestBed.configureTestingModule({
+      providers: [TimelineStore],
+    });
     store = TestBed.inject(TimelineStore);
   });
 
-  it('should process sync history with topology data and map edges', () => {
-    const mockEvents: DomainGraphEvent[] = [
-      { 
-        id: '1', 
-        type: 'model', 
-        content: 'test msg', 
-        timestamp: "", 
-        metadata: {}, 
-        edges: { amended_by: '2' },
-        branchId: 'feature-branch' 
+  it('should initialize with empty state', () => {
+    expect(store.coreChat()).toEqual([]);
+    expect(store.hasMoreHistory()).toBe(false);
+    expect(store.activeBranch()).toBe('main');
+  });
+
+  it('should process sync history and strictly map to ChatItem', () => {
+    const events: GraphEvent[] = [
+      {
+        id: 'msg-1',
+        type: 'prompt',
+        timestamp: Temporal.Instant.from('2026-10-23T12:00:00Z'),
+        tags: [],
+        content: 'hello',
+        tombstoned: false,
+        metadata: {},
+        edges: {}
+      },
+      {
+        id: 'file-1',
+        type: 'file_delta',
+        timestamp: Temporal.Instant.from('2026-10-23T12:01:00Z'),
+        tags: [],
+        content: 'updated file',
+        path: 'test.go',
+        previewSnippet: 'func main()',
+        fileRef: 'ref-1',
+        tombstoned: false,
+        metadata: {},
+        edges: {}
       }
     ];
+
+    store.processSyncHistory(events, 'next-cursor', true, 'main', {}, 2);
+
+    const chat = store.coreChat();
+    expect(chat.length).toBe(2);
+    expect(chat[0].type).toBe('prompt');
+    expect(chat[0].timestamp.toString()).toBe('2026-10-23T12:00:00Z');
     
-    const mockTopology: Record<string, DomainBranchTopology> = {
-      'feature-branch': { parentBranch: 'main', forkPoint: '0' }
-    };
+    const fileItem = chat[1];
+    expect(fileItem.type).toBe('file_delta');
+    if (fileItem.type === 'file_delta') {
+      expect(fileItem.path).toBe('test.go');
+    }
     
-    store.processSyncHistory(mockEvents, 'next-cursor-123', true, 'feature-branch', mockTopology, 50);
-    
-    expect(store.coreChat().length).toBe(1);
-    expect(store.coreChat()[0].edges?.['amended_by']).toBe('2'); // Edge mapping verified
-    expect(store.activeBranch()).toBe('feature-branch');
-    expect(store.branches()['feature-branch'].parentBranch).toBe('main');
-    expect(store.nextCursor()).toBe('next-cursor-123');
     expect(store.hasMoreHistory()).toBe(true);
-    expect(store.totalHistoryMessages()).toBe(50);
-    expect(store.isLoadingHistory()).toBe(false);
+    expect(store.nextCursor()).toBe('next-cursor');
   });
 
-  it('should strictly filter live ingest events not matching the active branch', () => {
+  it('should strictly map and ingest a new GraphEvent', () => {
+    const event: GraphEvent = {
+      id: 'exec-1',
+      type: 'flow_execution',
+      timestamp: Temporal.Instant.from('2026-10-23T12:02:00Z'),
+      tags: [],
+      content: 'Running tests',
+      flowId: 'flow-123',
+      status: 'running',
+      tombstoned: false,
+      metadata: {},
+      edges: {}
+    };
+
+    store.ingestEvent(event);
+    
+    const item = store.coreChat()[0];
+    expect(item.type).toBe('flow_execution');
+    if (item.type === 'flow_execution') {
+      expect(item.flowId).toBe('flow-123');
+      expect(item.status).toBe('running');
+    }
+  });
+
+  it('should ignore events from inactive branches', () => {
     store.activeBranch.set('main');
     
-    const crossBranchEvent: DomainGraphEvent = {
-      id: '2', type: 'model', content: 'cross contamination', timestamp: '', metadata: {}, edges: {}, branchId: 'other-branch'
-    };
-    
-    const correctBranchEvent: DomainGraphEvent = {
-      id: '3', type: 'model', content: 'correct branch', timestamp: '', metadata: {}, edges: {}, branchId: 'main'
+    const event: GraphEvent = {
+      id: 'msg-1',
+      type: 'model',
+      timestamp: Temporal.Instant.from('2026-10-23T12:02:00Z'),
+      tags: [],
+      content: 'I am on another branch',
+      branchId: 'feature-branch',
+      tombstoned: false,
+      metadata: {},
+      edges: {}
     };
 
-    store.ingestEvent(crossBranchEvent);
-    expect(store.coreChat().length).toBe(0); // Should be ignored
-
-    store.ingestEvent(correctBranchEvent);
-    expect(store.coreChat().length).toBe(1); // Should be ingested
-    expect(store.coreChat()[0].content).toBe('correct branch');
+    store.ingestEvent(event);
+    expect(store.coreChat().length).toBe(0);
   });
 
-  it('should clear session and topology', () => {
-    store.activeBranch.set('feature-branch');
-    store.branches.set({ 'feature-branch': { parentBranch: 'main', forkPoint: '1' } });
+  it('should clear thinking indicators when appending new chat', () => {
+    store.appendCoreChat('system', 'Manager Thinking...');
+    expect(store.coreChat().length).toBe(1);
+
+    store.appendCoreChat('prompt', 'Actual prompt');
+    expect(store.coreChat().length).toBe(1); // Replaced the thinking indicator
+    expect(store.coreChat()[0].type).toBe('prompt');
+  });
+
+  it('should inject and update a flow execution item', () => {
+    store.injectFlowExecution('f-1', 'Compiling...');
     
-    store.clearSession();
+    let item = store.coreChat()[0];
+    expect(item.type).toBe('flow_execution');
+
+    store.updateFlowExecutionStatus('f-1', 'completed');
     
-    expect(store.activeBranch()).toBe('main');
-    expect(store.branches()).toEqual({});
+    item = store.coreChat()[0];
+    if (item.type === 'flow_execution') {
+      expect(item.status).toBe('completed');
+    }
   });
 });

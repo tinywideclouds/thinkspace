@@ -23,4 +23,9 @@ describe('UiSettingsService', () => {
     expect(service.pagination().size).toBe(5);
     expect(service.pagination().prefetchIndex).toBe(2);
   });
+
+  it('should initialize with default tag filter and bulk action bar settings', () => {
+    expect(service.tagFilterMode()).toBe('visual');
+    expect(service.bulkActionBarPosition()).toBe('top');
+  });
 });

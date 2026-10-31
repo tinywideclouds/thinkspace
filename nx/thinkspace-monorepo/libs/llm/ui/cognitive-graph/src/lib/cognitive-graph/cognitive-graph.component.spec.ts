@@ -4,11 +4,11 @@ import { CognitiveGraphFacade } from '../cognitive-graph.facade';
 import { signal, WritableSignal } from '@angular/core';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
 import { ChatItem, FlowState } from '@org/llm-state-chat';
-import { DomainDigestMeta } from '@org/llm-core-facade';
+import { DigestMeta } from '@org/llm-core-facade';
 
 interface MockCognitiveGraphFacade {
-  stickyNodes: WritableSignal<DomainDigestMeta[]>;
-  trajectoryNodes: WritableSignal<DomainDigestMeta[]>;
+  stickyNodes: WritableSignal<DigestMeta[]>;
+  trajectoryNodes: WritableSignal<DigestMeta[]>;
   activeFeed: WritableSignal<ChatItem[]>;
   flowStates: WritableSignal<Map<string, FlowState>>;
   isNodeInFocus: Mock<(summary: string) => boolean>;
@@ -29,7 +29,12 @@ describe('CognitiveGraphComponent', () => {
         { id: 'traj-1', summary: 'Refactored auth module', isSticky: false }
       ]),
       activeFeed: signal([
-        { id: 'msg-1', source: 'user', content: 'What next?' }
+        { 
+          id: 'msg-1', 
+          type: 'prompt', 
+          content: 'What next?',
+          timestamp: Temporal.Now.instant()
+        } as ChatItem
       ]),
       flowStates: signal(new Map<string, FlowState>()),
       isNodeInFocus: vi.fn((summary: string) => false),

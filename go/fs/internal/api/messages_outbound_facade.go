@@ -10,20 +10,8 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
-func MarshalSyncHistory(recentEvents []thinkgraph.Event, digests []thinkgraph.DigestMeta, focus thinkgraph.AttentionFocus, nextCursor string, hasMore bool) ([]byte, error) {
-	var pbEvents []*pb.GraphEvent
-	for _, e := range recentEvents {
-		pbEvents = append(pbEvents, &pb.GraphEvent{
-			Id:         e.ID.String(),
-			Timestamp:  e.Timestamp.Format(time.RFC3339),
-			Type:       string(e.Type),
-			Content:    e.Content,
-			Metadata:   e.Metadata,
-			Tags:       e.Tags,
-			Tombstoned: e.Tombstoned,
-			BranchId:   e.BranchID,
-		})
-	}
+func MarshalSyncHistory(recentEvents []thinkgraph.Node, digests []thinkgraph.DigestMeta, focus thinkgraph.AttentionFocus, nextCursor string, hasMore bool) ([]byte, error) {
+	pbEvents := ProjectTimeline(recentEvents)
 
 	pbDigests := make(map[string]*pb.DigestMeta)
 	for _, d := range digests {

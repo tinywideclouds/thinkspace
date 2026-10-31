@@ -3,19 +3,32 @@ import { TimelineStore, FlowStore, CognitiveStore, ChatItem, WorkspaceStateServi
 
 export type TimelineViewMode = 'linear' | 'cognitive';
 
+export interface Turn {
+  id: string;
+  leader: ChatItem;
+  blocks: ChatItem[];
+  tags: string[];
+}
+
+export type EnrichedChatItem = ChatItem & { attachments: ChatItem[] };
+
 @Injectable({ providedIn: 'root' })
 export class TimelineFacade {
   private domainTimeline = inject(TimelineStore);
   private flow = inject(FlowStore);
   private cognitive = inject(CognitiveStore);
   private workspace = inject(WorkspaceStateService);
-  private uiSettings = inject(UiSettingsService);
+  public uiSettings = inject(UiSettingsService);
 
   public viewMode = signal<TimelineViewMode>('linear');
   public isDebugMode = signal<boolean>(true);
+  public isEditMode = signal<boolean>(false);
   
   public hoveredTag = signal<string | null>(null);
   public selectedTag = signal<string | null>(null);
+  
+  public selectedTurnIds = signal<Set<string>>(new Set());
+  public activeTagFilters = signal<Set<string>>(new Set());
 
   public flowStates = this.flow.flowStates;
   public rawFeed = this.domainTimeline.coreChat;
@@ -24,14 +37,18 @@ export class TimelineFacade {
   
   public isLoadingHistory = this.domainTimeline.isLoadingHistory;
   public paginationSettings = this.uiSettings.pagination;
-  
-  public enhancedFeed = computed<ChatItem[]>(() => {
+
+  public enhancedFeed = computed<EnrichedChatItem[]>(() => {
     const feed = this.rawFeed();
-    const bundledFeed: any[] = [];
-    const attachmentMap = new Map<string, any[]>();
+    const bundledFeed: EnrichedChatItem[] = [];
+    const attachmentMap = new Map<string, ChatItem[]>();
+
+    const getParentId = (item: ChatItem): string | undefined => {
+      return item.type === 'file_delta' ? item.parentId : undefined;
+    };
 
     for (const item of feed) {
-      const parentId = (item as any).parentId || (item as any).metadata?.parent_id;
+      const parentId = getParentId(item);
       if (parentId) {
         if (!attachmentMap.has(parentId)) attachmentMap.set(parentId, []);
         attachmentMap.get(parentId)!.push(item);
@@ -40,15 +57,17 @@ export class TimelineFacade {
 
     for (let i = 0; i < feed.length; i++) {
       const item = feed[i];
-      const parentId = (item as any).parentId || (item as any).metadata?.parent_id;
-      if (parentId) continue;
+      if (getParentId(item)) continue;
 
-      const enrichedItem: any = { ...item, attachments: attachmentMap.get(item.id) || [] };
+      const enrichedItem: EnrichedChatItem = { 
+        ...item, 
+        attachments: attachmentMap.get(item.id) || [] 
+      };
 
-      if (item.type === 'user') {
+      if (enrichedItem.type === 'prompt') {
         const nextItem = feed[i + 1];
         if (nextItem && (nextItem.type === 'model' || nextItem.type === 'system') && nextItem.tags) {
-          enrichedItem.tags = Array.from(new Set([...(item.tags || []), ...nextItem.tags]));
+          enrichedItem.tags = Array.from(new Set([...(enrichedItem.tags || []), ...nextItem.tags]));
         }
       }
       
@@ -58,8 +77,40 @@ export class TimelineFacade {
     return bundledFeed;
   });
 
-  public workingMemoryFeed = computed(() => {
-    return this.enhancedFeed();
+  public visibleFeed = computed<Turn[]>(() => {
+    const feed = this.enhancedFeed();
+    const filters = this.activeTagFilters();
+    const filterMode = this.uiSettings.tagFilterMode();
+    
+    const turns: Turn[] = [];
+    let currentTurn: Turn | null = null;
+
+    for (const item of feed) {
+      if (item.type === 'prompt' || !currentTurn) {
+        if (currentTurn) turns.push(currentTurn);
+        currentTurn = {
+          id: item.id,
+          leader: item,
+          blocks: [],
+          tags: item.tags || []
+        };
+        if (item.type !== 'prompt') {
+          currentTurn.blocks.push(item);
+        }
+      } else {
+        currentTurn.blocks.push(item);
+        if (item.tags) {
+          currentTurn.tags = Array.from(new Set([...currentTurn.tags, ...item.tags]));
+        }
+      }
+    }
+    if (currentTurn) turns.push(currentTurn);
+
+    if (filterMode === 'visual' && filters.size > 0) {
+      return turns.filter(turn => turn.tags.some(tag => filters.has(tag)));
+    }
+
+    return turns;
   });
 
   public toggleViewMode(): void {
@@ -68,6 +119,13 @@ export class TimelineFacade {
 
   public toggleDebugMode(): void {
     this.isDebugMode.update(m => !m);
+  }
+
+  public toggleEditMode(): void {
+    this.isEditMode.update(m => !m);
+    if (!this.isEditMode()) {
+      this.selectedTurnIds.set(new Set());
+    }
   }
 
   public inspectFlow(flowId: string): void {
@@ -80,6 +138,37 @@ export class TimelineFacade {
 
   public toggleSelectedTag(tag: string): void {
     this.selectedTag.update(current => current === tag ? null : tag);
+  }
+
+  public toggleTurnSelection(turnId: string): void {
+    this.selectedTurnIds.update(set => {
+      const newSet = new Set(set);
+      if (newSet.has(turnId)) newSet.delete(turnId);
+      else newSet.add(turnId);
+      return newSet;
+    });
+  }
+
+  public toggleTagFilter(tag: string): void {
+    this.activeTagFilters.update(set => {
+      const newSet = new Set(set);
+      if (newSet.has(tag)) newSet.delete(tag);
+      else newSet.add(tag);
+      return newSet;
+    });
+
+    if (this.uiSettings.tagFilterMode() === 'context') {
+      this.dispatchContextFocus();
+    }
+  }
+
+  public dispatchContextFocus(): void {
+    const tags = Array.from(this.activeTagFilters());
+    this.cognitive.activeFocus.update(focus => ({
+      primaryFocus: tags,
+      relatedContext: focus?.relatedContext || [],
+      dormantLenses: focus?.dormantLenses || []
+    }));
   }
 
   public isItemDimmed(item: ChatItem): boolean {

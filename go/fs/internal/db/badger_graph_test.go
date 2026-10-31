@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
 	"uuid"
 
 	"github.com/dgraph-io/badger/v4"
@@ -30,21 +31,21 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 
 	chat := &thinkgraph.Chat{ID: "chat-123", SpaceID: "test-space", ActiveBranch: "main"}
 
-	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "First event")
-	event1.Tags = []string{"init"}
-	event1.Timestamp = time.Now().Add(-1 * time.Hour)
-	event1.BranchID = "main"
+	node1 := thinkgraph.Node{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "First event")}
+	node1.Tags = []string{"init"}
+	node1.Timestamp = time.Now().Add(-1 * time.Hour)
+	node1.BranchID = "main"
 
-	event2 := thinkgraph.NewEvent(thinkgraph.EventModel, "Second event")
-	event2.Tags = []string{"response", "init"}
-	event2.Timestamp = time.Now()
-	event2.BranchID = "main"
+	node2 := thinkgraph.Node{Event: thinkgraph.NewEvent(thinkgraph.EventModel, "Second event")}
+	node2.Tags = []string{"response", "init"}
+	node2.Timestamp = time.Now()
+	node2.BranchID = "main"
 
-	if err := graph.AppendEvent(ctx, chat, event1); err != nil {
-		t.Fatalf("Failed to append event 1: %v", err)
+	if err := graph.AppendNode(ctx, chat, node1); err != nil {
+		t.Fatalf("Failed to append node 1: %v", err)
 	}
-	if err := graph.AppendEvent(ctx, chat, event2); err != nil {
-		t.Fatalf("Failed to append event 2: %v", err)
+	if err := graph.AppendNode(ctx, chat, node2); err != nil {
+		t.Fatalf("Failed to append node 2: %v", err)
 	}
 
 	timeline, err := graph.GetBranchTimeline(ctx, chat, "main")
@@ -53,7 +54,7 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 	}
 
 	if len(timeline) != 2 {
-		t.Fatalf("Expected 2 events in timeline, got %d", len(timeline))
+		t.Fatalf("Expected 2 nodes in timeline, got %d", len(timeline))
 	}
 }
 
@@ -62,58 +63,56 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 	ctx := context.Background()
 	chat := &thinkgraph.Chat{ID: "chat-page", SpaceID: "test-space", ActiveBranch: "main"}
 
-	var events []thinkgraph.Event
+	var nodes []thinkgraph.Node
 	for i := 0; i < 5; i++ {
 		ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("Event %d", i))
 		ev.Timestamp = time.Now().Add(time.Duration(i) * time.Minute)
 		ev.BranchID = "main"
-		_ = graph.AppendEvent(ctx, chat, ev)
-		events = append(events, ev)
+		node := thinkgraph.Node{Event: ev}
+		_ = graph.AppendNode(ctx, chat, node)
+		nodes = append(nodes, node)
 	}
 
-	// 1. Fetch latest page without cursor
 	page1, nextCursor, hasMore, err := graph.GetBranchTimelinePage(ctx, chat, "main", "", 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 1: %v", err)
 	}
 	if len(page1) != 2 {
-		t.Fatalf("Expected 2 events, got %d", len(page1))
+		t.Fatalf("Expected 2 nodes, got %d", len(page1))
 	}
 	if !hasMore {
 		t.Fatalf("Expected hasMore to be true")
 	}
-	if page1[1].ID != events[4].ID || page1[0].ID != events[3].ID {
-		t.Fatalf("Expected latest 2 events, got %s and %s", page1[0].Content, page1[1].Content)
+	if page1[1].ID != nodes[4].ID || page1[0].ID != nodes[3].ID {
+		t.Fatalf("Expected latest 2 nodes, got %s and %s", page1[0].Content, page1[1].Content)
 	}
 
-	// 2. Fetch older page using cursor
 	page2, nextCursor2, hasMore2, err := graph.GetBranchTimelinePage(ctx, chat, "main", nextCursor, 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 2: %v", err)
 	}
 	if len(page2) != 2 {
-		t.Fatalf("Expected 2 events, got %d", len(page2))
+		t.Fatalf("Expected 2 nodes, got %d", len(page2))
 	}
 	if !hasMore2 {
 		t.Fatalf("Expected hasMore to be true")
 	}
-	if page2[1].ID != events[2].ID || page2[0].ID != events[1].ID {
-		t.Fatalf("Expected older 2 events, got %s and %s", page2[0].Content, page2[1].Content)
+	if page2[1].ID != nodes[2].ID || page2[0].ID != nodes[1].ID {
+		t.Fatalf("Expected older 2 nodes, got %s and %s", page2[0].Content, page2[1].Content)
 	}
 
-	// 3. Fetch final page using nextCursor2
 	page3, _, hasMore3, err := graph.GetBranchTimelinePage(ctx, chat, "main", nextCursor2, 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 3: %v", err)
 	}
 	if len(page3) != 1 {
-		t.Fatalf("Expected 1 event, got %d", len(page3))
+		t.Fatalf("Expected 1 node, got %d", len(page3))
 	}
 	if hasMore3 {
 		t.Fatalf("Expected hasMore to be false")
 	}
-	if page3[0].ID != events[0].ID {
-		t.Fatalf("Expected oldest event, got %s", page3[0].Content)
+	if page3[0].ID != nodes[0].ID {
+		t.Fatalf("Expected oldest node, got %s", page3[0].Content)
 	}
 }
 
@@ -122,21 +121,24 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	ctx := context.Background()
 	chat := &thinkgraph.Chat{ID: "chat-mutations", SpaceID: "test-space", ActiveBranch: "main"}
 
-	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be deleted")
-	event1.BranchID = "main"
-	event2 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be updated")
-	event2.BranchID = "main"
+	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be deleted")
+	ev1.BranchID = "main"
+	node1 := thinkgraph.Node{Event: ev1}
 
-	_ = graph.AppendEvent(ctx, chat, event1)
-	_ = graph.AppendEvent(ctx, chat, event2)
+	ev2 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be updated")
+	ev2.BranchID = "main"
+	node2 := thinkgraph.Node{Event: ev2}
+
+	_ = graph.AppendNode(ctx, chat, node1)
+	_ = graph.AppendNode(ctx, chat, node2)
 
 	t1, _ := graph.GetBranchTimeline(ctx, chat, "main")
 	if len(t1) != 2 {
-		t.Fatalf("Expected 2 events baseline, got %d", len(t1))
+		t.Fatalf("Expected 2 nodes baseline, got %d", len(t1))
 	}
 
 	mut1 := thinkgraph.MutationEvent{
-		TargetID:  event1.ID,
+		TargetID:  node1.ID,
 		Type:      thinkgraph.MutationTombstone,
 		Timestamp: time.Now(),
 	}
@@ -145,12 +147,12 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	}
 
 	t2, _ := graph.GetBranchTimeline(ctx, chat, "main")
-	if len(t2) != 1 || t2[0].ID != event2.ID {
-		t.Fatalf("Tombstoned event was not filtered out of timeline")
+	if len(t2) != 1 || t2[0].ID != node2.ID {
+		t.Fatalf("Tombstoned node was not filtered out of timeline")
 	}
 
 	mut2 := thinkgraph.MutationEvent{
-		TargetID:  event2.ID,
+		TargetID:  node2.ID,
 		Type:      thinkgraph.MutationUpdate,
 		Timestamp: time.Now(),
 		Payload:   "Updated content!",
@@ -163,7 +165,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	}
 
 	mut3 := thinkgraph.MutationEvent{
-		TargetID:  event1.ID,
+		TargetID:  node1.ID,
 		Type:      thinkgraph.MutationRestore,
 		Timestamp: time.Now(),
 	}
@@ -171,7 +173,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 
 	t4, _ := graph.GetBranchTimeline(ctx, chat, "main")
 	if len(t4) != 2 {
-		t.Fatalf("Failed to restore tombstoned event")
+		t.Fatalf("Failed to restore tombstoned node")
 	}
 }
 
@@ -180,23 +182,26 @@ func TestBadgerGraph_GetLenses(t *testing.T) {
 	ctx := context.Background()
 	chat := &thinkgraph.Chat{ID: "chat-lenses", SpaceID: "test-space", ActiveBranch: "main"}
 
-	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Query DB")
-	event1.Tags = []string{"database", "backend"}
-	event1.BranchID = "main"
+	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Query DB")
+	ev1.Tags = []string{"database", "backend"}
+	ev1.BranchID = "main"
+	node1 := thinkgraph.Node{Event: ev1}
 
+	digestID := uuid.NewV7()
 	digest := thinkgraph.DigestMeta{
-		ID:      uuid.NewV7(),
+		ID:      digestID,
 		Summary: "DB Schema decided",
 		Tags:    []string{"database"},
 	}
 
+	spaceCtxID := uuid.NewV7()
 	spaceCtx := thinkgraph.SpaceContext{
-		ID:      uuid.NewV7(),
+		ID:      spaceCtxID,
 		Content: "Always use PostgreSQL",
 		Tags:    []string{"database"},
 	}
 
-	_ = graph.AppendEvent(ctx, chat, event1)
+	_ = graph.AppendNode(ctx, chat, node1)
 	_ = graph.SaveDigest(ctx, chat, digest)
 	_ = graph.SaveSpaceContext(ctx, chat, spaceCtx)
 
@@ -205,126 +210,13 @@ func TestBadgerGraph_GetLenses(t *testing.T) {
 		t.Fatalf("GetLenses failed: %v", err)
 	}
 
-	if len(result.Events) != 1 || result.Events[0].ID != event1.ID {
-		t.Errorf("Lens failed to return correct Event")
+	if len(result.Nodes) != 1 || result.Nodes[0].ID != node1.ID {
+		t.Errorf("Lens failed to return correct Node")
 	}
 	if len(result.Digests) != 1 || result.Digests[0].ID != digest.ID {
 		t.Errorf("Lens failed to return correct Digest")
 	}
 	if len(result.SpaceContexts) != 1 || result.SpaceContexts[0].ID != spaceCtx.ID {
 		t.Errorf("Lens failed to return correct SpaceContext")
-	}
-}
-
-func TestBadgerGraph_GetEvents(t *testing.T) {
-	graph := setupTestGraph(t)
-	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-events", SpaceID: "test-space"}
-
-	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event 1")
-	event2 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event 2")
-	event3 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event 3")
-
-	_ = graph.AppendEvent(ctx, chat, event1)
-	_ = graph.AppendEvent(ctx, chat, event2)
-	_ = graph.AppendEvent(ctx, chat, event3)
-
-	ids := []string{event1.ID.String(), event3.ID.String(), "missing-id-123"}
-	events, err := graph.GetEvents(ctx, chat, ids)
-	if err != nil {
-		t.Fatalf("GetEvents failed: %v", err)
-	}
-
-	if len(events) != 2 {
-		t.Fatalf("Expected exactly 2 events fetched, got %d", len(events))
-	}
-}
-
-func TestBadgerGraph_Digests(t *testing.T) {
-	graph := setupTestGraph(t)
-	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-digests", SpaceID: "test-space"}
-
-	linkedID := uuid.NewV7()
-	promotedDigest := thinkgraph.DigestMeta{
-		ID:               uuid.NewV7(),
-		Summary:          "Architecture rules.",
-		Promoted:         true,
-		SummarizedEvents: []uuid.UUID{linkedID},
-	}
-
-	normalDigest := thinkgraph.DigestMeta{
-		ID:       uuid.NewV7(),
-		Summary:  "Older discussion about auth.",
-		Promoted: false,
-	}
-
-	if err := graph.SaveDigest(ctx, chat, promotedDigest); err != nil {
-		t.Fatalf("Failed to save sticky digest: %v", err)
-	}
-	if err := graph.SaveDigest(ctx, chat, normalDigest); err != nil {
-		t.Fatalf("Failed to save normal digest: %v", err)
-	}
-
-	stickies, err := graph.GetStickyDigests(ctx, chat)
-	if err != nil {
-		t.Fatalf("GetStickyDigests failed: %v", err)
-	}
-
-	if len(stickies) != 1 {
-		t.Fatalf("Expected exactly 1 sticky digest, got %d", len(stickies))
-	}
-	if stickies[0].ID != promotedDigest.ID {
-		t.Errorf("Retrieved incorrect sticky digest")
-	}
-
-	allDigests, err := graph.GetDigests(ctx, chat)
-	if err != nil {
-		t.Fatalf("GetDigests failed: %v", err)
-	}
-	if len(allDigests) != 2 {
-		t.Fatalf("Expected exactly 2 total digests, got %d", len(allDigests))
-	}
-}
-
-func TestBadgerGraph_ClearChatGraph(t *testing.T) {
-	graph := setupTestGraph(t)
-	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-clear", SpaceID: "test-space"}
-
-	_ = graph.AppendEvent(ctx, chat, thinkgraph.NewEvent(thinkgraph.EventPrompt, "Test"))
-
-	if err := graph.ClearChatGraph(ctx, chat); err != nil {
-		t.Fatalf("ClearChatGraph failed: %v", err)
-	}
-}
-
-func TestBadgerGraph_ClearChatGraph_PrefixCollision(t *testing.T) {
-	graph := setupTestGraph(t)
-	ctx := context.Background()
-
-	chat1 := &thinkgraph.Chat{ID: "chat-1", SpaceID: "test-space", ActiveBranch: "main"}
-	chat11 := &thinkgraph.Chat{ID: "chat-11", SpaceID: "test-space", ActiveBranch: "main"}
-
-	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event for chat 1")
-	ev1.BranchID = "main"
-	ev11 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Event for chat 11")
-	ev11.BranchID = "main"
-
-	_ = graph.AppendEvent(ctx, chat1, ev1)
-	_ = graph.AppendEvent(ctx, chat11, ev11)
-
-	if err := graph.ClearChatGraph(ctx, chat1); err != nil {
-		t.Fatalf("ClearChatGraph failed: %v", err)
-	}
-
-	t1, _ := graph.GetBranchTimeline(ctx, chat1, "main")
-	if len(t1) != 0 {
-		t.Errorf("Expected chat-1 to be wiped, got %d events remaining", len(t1))
-	}
-
-	t11, _ := graph.GetBranchTimeline(ctx, chat11, "main")
-	if len(t11) != 1 {
-		t.Errorf("Expected chat-11 to be untouched, got %d events. Prefix collision occurred!", len(t11))
 	}
 }

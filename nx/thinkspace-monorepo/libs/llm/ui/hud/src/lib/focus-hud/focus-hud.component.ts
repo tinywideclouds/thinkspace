@@ -1,6 +1,6 @@
 import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { DomainAttentionFocus } from '@org/llm-core-facade';
+import { AttentionFocus } from '@org/llm-core-facade';
 
 @Component({
   selector: 'llm-focus-hud',
@@ -10,7 +10,7 @@ import { DomainAttentionFocus } from '@org/llm-core-facade';
   styleUrl: './focus-hud.component.scss'
 })
 export class FocusHudComponent {
-  focus = input<DomainAttentionFocus | null>(null);
+  focus = input<AttentionFocus | null>(null);
   activeHoverTag = input<string | null>(null);
 
   tagHovered = output<string | null>();

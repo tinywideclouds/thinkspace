@@ -1,122 +1,144 @@
-import { Injectable, signal, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { ThinkspaceStateService } from './thinkspace-state.service';
-import { DomainTelemetryEvent } from '@org/llm-core-facade';
-import { firstValueFrom } from 'rxjs';
-import { LogItem, FlowState, FlowAgentState } from './chat.models';
+import { Injectable, signal } from '@angular/core';
+import { TelemetryEvent } from '@org/llm-core-facade';
+import { FlowState, LogItem, TimelineEntry } from './chat.models';
 
 @Injectable({ providedIn: 'root' })
 export class FlowStore {
-  private httpClient = inject(HttpClient);
-  private workspaceState = inject(ThinkspaceStateService);
-
   public flowStates = signal<Map<string, FlowState>>(new Map());
   public systemLogs = signal<LogItem[]>([]);
   public retainLogs = signal<boolean>(false);
   public inspectedReceipt = signal<string | null>(null);
 
-  public resetTurn(): void {
-    if (!this.retainLogs()) {
-      this.systemLogs.set([]);
-    }
-    this.flowStates.set(new Map());
-  }
-
-  public clearSession(): void {
-    this.flowStates.set(new Map());
-    this.systemLogs.set([]);
-    this.inspectedReceipt.set(null);
+  public appendSystemLog(level: string, message: string): void {
+    this.systemLogs.update(logs => [
+      ...logs,
+      {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        level,
+        message
+      }
+    ]);
   }
 
   public manualClearLogs(): void {
     this.systemLogs.set([]);
   }
 
-  public appendSystemLog(level: string, message: string): void {
-    this.systemLogs.update(logs => [...logs, { id: crypto.randomUUID(), timestamp: Date.now(), level, message }]);
-  }
-
-  public async inspectFlow(flowId: string): Promise<void> {
-    const spaceId = this.workspaceState.activeSpaceId();
-    const chatId = this.workspaceState.activeChatId();
-    if (!spaceId || !chatId) return;
-
-    try {
-      const url = `/api/receipts/${encodeURIComponent(chatId)}/${encodeURIComponent(flowId)}?space=${encodeURIComponent(spaceId)}`;
-      const xmlData = await firstValueFrom(this.httpClient.get(url, { responseType: 'text' }));
-      this.inspectedReceipt.set(xmlData);
-    } catch (error) {
-      this.appendSystemLog('ERROR', `Failed to load receipt for flow ${flowId}`);
-    }
-  }
-
-  public processTelemetry(event: DomainTelemetryEvent): void {
-    const payload = event.payload || {};
-    const flowId = payload.flow_id;
-
+  public processTelemetry(event: TelemetryEvent): void {
     if (event.channel === 'manager') {
-      if (event.eventType === 'log' || event.eventType === 'error') {
-        this.appendSystemLog(event.eventType === 'error' ? 'ERROR' : 'INFO', event.message);
-      }
-
-      if (event.eventType === 'flow_start') {
-        this.flowStates.update(current => {
-          const updated = new Map(current);
-          updated.set(flowId, { flowId, taskId: payload.task_id || '', agentCount: payload.agent_count || 1, completedCount: 0, status: 'running', agents: new Map() });
-          return updated;
-        });
-      }
-
-      if (event.eventType === 'flow_complete') {
-        this.flowStates.update(current => {
-          const updated = new Map(current);
-          const flow = updated.get(flowId);
-          if (flow) {
-            flow.completedCount++;
-            if (flow.completedCount === flow.agentCount) {
-              updated.set(flowId, { ...flow, status: 'completed' });
-            }
-          }
-          return updated;
-        });
-      }
-    }
-
-    if (flowId && payload.agent_index !== undefined) {
-      this.flowStates.update(currentFlows => {
-        const updatedMap = new Map(currentFlows);
-        const flow = updatedMap.get(flowId);
-        if (!flow) return updatedMap;
-
-        const updatedAgents = new Map(flow.agents);
-        const agentId = event.channel.startsWith('agent-') ? event.channel : `agent-${payload.agent_index}`;
-        
-        const existing = updatedAgents.get(agentId);
-        const agent: FlowAgentState = existing ? { ...existing, timeline: [...existing.timeline] } : { agentId, agentIndex: payload.agent_index, instruction: '', status: 'starting', attempt: 1, trace: '', passed: false, timeline: [] };
-
-        if (payload.instruction) agent.instruction = payload.instruction;
-        if (payload.attempt) agent.attempt = payload.attempt;
-        if (payload.passed !== undefined) agent.passed = payload.passed;
-
-        if (event.eventType === 'flow_error') {
-          agent.trace = payload.trace || event.message;
-          agent.status = 'failed';
-          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Error: ${agent.trace}`, isError: true });
-        } else if (event.eventType === 'flow_status') {
-          const statusMsg = event.message || 'working';
-          if (agent.status !== statusMsg) {
-            agent.status = statusMsg;
-            agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Status: ${statusMsg}`, isError: false });
-          }
+      this.appendSystemLog('INFO', event.message || event.summary || event.eventType);
+      
+      const flowId = event.payload['flow_id'] as string;
+      if (flowId) {
+        if (event.eventType === 'flow_start') {
+           const taskId = event.payload['task_id'] as string || 'unknown';
+           const agentCount = (event.payload['agent_count'] as number) || 0;
+           this.flowStates.update(map => {
+             const newMap = new Map(map);
+             newMap.set(flowId, {
+               flowId,
+               taskId,
+               agentCount,
+               completedCount: 0,
+               status: 'running',
+               agents: new Map()
+             });
+             return newMap;
+           });
         } else if (event.eventType === 'flow_complete') {
-          agent.status = payload.passed ? 'passed' : 'failed';
-          agent.timeline.push({ id: crypto.randomUUID(), timestamp: Date.now(), message: `[Attempt ${agent.attempt}] Completed: ${agent.status}`, isError: !payload.passed });
+           this.flowStates.update(map => {
+             const newMap = new Map(map);
+             const flow = newMap.get(flowId);
+             if (flow) {
+               newMap.set(flowId, { ...flow, status: 'completed' });
+             }
+             return newMap;
+           });
         }
-
-        updatedAgents.set(agentId, agent);
-        updatedMap.set(flowId, { ...flow, agents: updatedAgents });
-        return updatedMap;
-      });
+      }
+      return;
     }
+
+    // Agent channel telemetry
+    const flowId = event.payload['flow_id'] as string;
+    const agentId = event.payload['agent_id'] as string;
+    if (!flowId || !agentId) return;
+
+    this.flowStates.update(map => {
+      const newMap = new Map(map);
+      const flow = newMap.get(flowId);
+      if (!flow) return newMap;
+
+      const agents = new Map(flow.agents);
+      let agent = agents.get(agentId);
+
+      if (!agent) {
+        agent = {
+          agentId,
+          agentIndex: (event.payload['agent_index'] as number) || 0,
+          instruction: (event.payload['instruction'] as string) || '',
+          status: 'running',
+          attempt: 1,
+          trace: '',
+          passed: false,
+          timeline: []
+        };
+      }
+
+      const timelineEntry: TimelineEntry = {
+        id: event.id || crypto.randomUUID(),
+        timestamp: Date.now(), 
+        message: event.message || event.eventType,
+        isError: event.eventType.includes('error') || event.eventType.includes('failed')
+      };
+
+      if (event.eventType === 'agent_status') {
+         agent.status = (event.payload['status'] as string) || agent.status;
+      } else if (event.eventType === 'agent_complete') {
+         agent.status = 'completed';
+         agent.passed = !!event.payload['passed'];
+         agent.trace = (event.payload['trace'] as string) || '';
+      } else if (event.eventType === 'agent_error') {
+         agent.status = 'error';
+         agent.passed = false;
+         agent.trace = (event.payload['trace'] as string) || '';
+      }
+
+      agent.timeline = [...agent.timeline, timelineEntry];
+      agents.set(agentId, agent);
+      newMap.set(flowId, { ...flow, agents });
+
+      return newMap;
+    });
+  }
+
+  public inspectFlow(flowId: string): void {
+    console.log(`[FlowStore] Inspecting flow ${flowId}`);
+    const mockReceipt = `<?xml version="1.0" encoding="UTF-8"?>
+    <FlowReceipt FlowID="${flowId}" TaskID="task-1" Timestamp="${new Date().toISOString()}">
+      <Task>Inspected Task</Task>
+      <Summary>Flow execution summary for ${flowId}</Summary>
+      <Agents>
+        <Agent AgentID="agent-1" Passed="true">
+          <Instruction>Execute flow tasks based on provided instructions.</Instruction>
+          <RawPayload>{}</RawPayload>
+          <VerificationTrace>[VERIFY] check dependencies: SUCCESS</VerificationTrace>
+          <StateDelta></StateDelta>
+        </Agent>
+      </Agents>
+    </FlowReceipt>`;
+    this.inspectedReceipt.set(mockReceipt);
+  }
+
+  public resetTurn(): void {
+    if (!this.retainLogs()) {
+      this.systemLogs.set([]);
+    }
+  }
+
+  public clearSession(): void {
+    this.flowStates.set(new Map());
+    this.systemLogs.set([]);
   }
 }

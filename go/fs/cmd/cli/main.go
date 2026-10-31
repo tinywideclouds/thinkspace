@@ -85,7 +85,8 @@ func main() {
 		return gitfs.NewGoGitEngine(repoRoot, true)
 	}
 
-	serviceManager := workspace.NewServiceManager(logger, baseRoot, engineFactory, graphDB)
+	emitter := telemetry.NewSlogEmitter(logger)
+	serviceManager := workspace.NewServiceManager(logger, baseRoot, engineFactory, graphDB, emitter)
 
 	registry := config.NewRegistry()
 	if err := registry.LoadDirectory(configurationsDirectory); err != nil {
@@ -157,7 +158,6 @@ func main() {
 	}
 
 	userInterface := cli.NewTerminalUI()
-	emitter := telemetry.MultiEmitter{telemetry.NewSlogEmitter(logger)}
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 

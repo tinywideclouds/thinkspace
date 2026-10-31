@@ -74,7 +74,7 @@ func (c *Coordinator) RunAgentLoop(
 			ID:        uuid.NewV7(),
 			Type:      "log",
 			Timestamp: time.Now(),
-			Message:   "Manager is analyzing context and formulating a plan...",
+			Message:   "Analyzing context and formulating a plan...",
 		})
 
 		stream := c.modelClient.GenerateContentStream(
@@ -125,12 +125,6 @@ func (c *Coordinator) RunAgentLoop(
 		}
 
 		if len(interceptedTools) == 0 {
-			c.emitter.Emit("manager", telemetry.Event{
-				ID:        uuid.NewV7(),
-				Type:      "log",
-				Timestamp: time.Now(),
-				Message:   "Manager has concluded its response.",
-			})
 			break
 		}
 
@@ -168,12 +162,11 @@ func (c *Coordinator) handleTransitionWorkspace(ctx context.Context, bundle *cog
 	targetDomain, _ := call.Args["target_domain"].(string)
 	reasoning, _ := call.Args["reasoning"].(string)
 
-	c.logger.InfoContext(ctx, "intercepted transition request", "target", targetDomain, "reasoning", reasoning)
 	c.emitter.Emit("manager", telemetry.Event{
 		ID:        uuid.NewV7(),
 		Type:      "log",
 		Timestamp: time.Now(),
-		Message:   fmt.Sprintf("Manager requested workspace transition to '%s'", targetDomain),
+		Message:   fmt.Sprintf("Requested workspace transition to '%s'", targetDomain),
 	})
 
 	if ui.ConfirmTransition(targetDomain, reasoning) {
@@ -190,7 +183,7 @@ func (c *Coordinator) handleTransitionWorkspace(ctx context.Context, bundle *cog
 		ID:        uuid.NewV7(),
 		Type:      "log",
 		Timestamp: time.Now(),
-		Message:   "Transition denied by user. Forcing manager to self-correct...",
+		Message:   "Transition denied by user. Self-correcting...",
 	})
 	ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** Transition to '%s' denied.\nAsking Manager to continue in current domain...\n", targetDomain))
 
@@ -203,12 +196,11 @@ func (c *Coordinator) handleTransitionWorkspace(ctx context.Context, bundle *cog
 
 func (c *Coordinator) handleQueryLens(ctx context.Context, chatObj *thinkgraph.Chat, activeSession *ChatSession, bundle *cognition.ThinkBundle, ui UserInterface, call llm.ToolCall) (bool, error) {
 	tag, _ := call.Args["tag"].(string)
-	c.logger.InfoContext(ctx, "executing query_lens", "tag", tag)
 	c.emitter.Emit("manager", telemetry.Event{
 		ID:        uuid.NewV7(),
 		Type:      "log",
 		Timestamp: time.Now(),
-		Message:   fmt.Sprintf("Manager invoked query_lens for tag: %s", tag),
+		Message:   fmt.Sprintf("Querying lens for tag: %s", tag),
 	})
 	ui.OnTextChunk(fmt.Sprintf("\n\n🔍 **Searching memory for #%s...**\n", tag))
 
@@ -222,11 +214,11 @@ func (c *Coordinator) handleQueryLens(ctx context.Context, chatObj *thinkgraph.C
 		lensResult, err := graph.GetLenses(ctx, chatObj, tag)
 		if err != nil {
 			toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", err))
-		} else if len(lensResult.Events) == 0 {
+		} else if len(lensResult.Nodes) == 0 && len(lensResult.Digests) == 0 {
 			toolResponse.WriteString("No historical events found for this tag.\n")
 		} else {
-			for _, ev := range lensResult.Events {
-				toolResponse.WriteString(fmt.Sprintf("- [%s] %s: %s\n", ev.Timestamp.Format("15:04:05"), ev.Type, ev.Content))
+			for _, node := range lensResult.Nodes {
+				toolResponse.WriteString(fmt.Sprintf("- [%s] %s: %s\n", node.Timestamp.Format("15:04:05"), node.Type, node.Content))
 			}
 		}
 	}
@@ -269,7 +261,6 @@ func (c *Coordinator) handleCreateDigest(ctx context.Context, chatObj *thinkgrap
 	)
 
 	if err != nil {
-		c.logger.WarnContext(ctx, "create_digest failed", "error", err)
 		c.emitter.Emit("manager", telemetry.Event{
 			ID:        uuid.NewV7(),
 			Type:      "error",
@@ -285,7 +276,7 @@ func (c *Coordinator) handleProposeChange(ctx context.Context, chatObj *thinkgra
 		ID:        uuid.NewV7(),
 		Type:      "log",
 		Timestamp: time.Now(),
-		Message:   "Manager is proposing changes and delegating to sub-agents...",
+		Message:   "Delegating tasks to sub-agents...",
 	})
 
 	flowContext := flows.FlowContext{
@@ -298,7 +289,6 @@ func (c *Coordinator) handleProposeChange(ctx context.Context, chatObj *thinkgra
 	err := c.flowEngine.Run(ctx, chatObj, thinkSpace, c.fanOutFlow, call.Args, flowContext, ui)
 
 	if err != nil {
-		c.logger.WarnContext(ctx, "tool execution failed, bouncing back to manager", "error", err)
 		c.emitter.Emit("manager", telemetry.Event{
 			ID:        uuid.NewV7(),
 			Type:      "error",

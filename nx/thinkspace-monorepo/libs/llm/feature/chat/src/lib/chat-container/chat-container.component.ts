@@ -40,7 +40,7 @@ import { DeskComponent } from '@org/llm-ui-workbench';
     DeskComponent
   ],
   templateUrl: './chat-container.component.html',
-  styleUrl: './chat-container.component.css',
+  styleUrl: './chat-container.component.scss',
   host: {
     class: 'block h-full w-full'
   }

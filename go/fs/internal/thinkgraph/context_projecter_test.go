@@ -4,12 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+	"uuid"
 )
 
-func TestAssembler_Build(t *testing.T) {
+func TestContextProjecter_Build(t *testing.T) {
 	manifest := thinkgraph.NewChatManifest()
 
 	stickyID := uuid.NewV7()
@@ -26,30 +26,37 @@ func TestAssembler_Build(t *testing.T) {
 	}
 
 	mistakeEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, "I want to use MySQL")
-	amendingEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Actually, switch to PostgreSQL")
-	mistakeEvent.Metadata["amended_by"] = amendingEvent.ID.String()
+	mistakeNode := thinkgraph.Node{Event: mistakeEvent}
 
-	assemblyRequest := thinkgraph.TrajectoryRequest{
+	amendingEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Actually, switch to PostgreSQL")
+	amendingNode := thinkgraph.Node{Event: amendingEvent}
+	mistakeNode.Metadata["amended_by"] = amendingNode.ID.String()
+
+	catalystID := uuid.NewV7()
+	assemblyRequest := thinkgraph.ContextRequest{
 		Manifest: manifest,
-		RecentEvents: []thinkgraph.Event{
-			mistakeEvent,
-			thinkgraph.NewEvent(thinkgraph.EventModel, "Previous answer"),
+		RecentEvents: []thinkgraph.Node{
+			mistakeNode,
+			{Event: thinkgraph.NewEvent(thinkgraph.EventModel, "Previous answer")},
 		},
-		Catalyst: &thinkgraph.Event{
-			ID:      uuid.NewV7(),
-			Type:    thinkgraph.EventPrompt,
-			Content: "Recent question",
+		Catalyst: &thinkgraph.Node{
+			Event: thinkgraph.Event{
+				ID:      catalystID,
+				Type:    thinkgraph.EventPrompt,
+				Content: "Recent question",
+			},
 		},
 		Focus: thinkgraph.AttentionFocus{
 			PrimaryFocus: []string{"golang"},
 		},
-		Amendments: map[string]thinkgraph.Event{
-			amendingEvent.ID.String(): amendingEvent,
+		Amendments: map[string]thinkgraph.Node{
+			amendingNode.ID.String(): amendingNode,
 		},
 	}
 
-	a := thinkgraph.NewTrajectoryBuilder()
-	trajectory, err := a.Build(context.Background(), assemblyRequest)
+	// Updated constructor name
+	projecter := thinkgraph.NewContextProjecter()
+	trajectory, err := projecter.Build(context.Background(), assemblyRequest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -66,12 +73,11 @@ func TestAssembler_Build(t *testing.T) {
 		t.Fatalf("Expected 2 working memory events, got %d", len(trajectory.WorkingMemory))
 	}
 
-	// Verify the semantic inline correction was applied
 	if !strings.Contains(trajectory.WorkingMemory[0].Content, "I want to use MySQL") {
 		t.Errorf("Missing original mistaken prompt")
 	}
 	if !strings.Contains(trajectory.WorkingMemory[0].Content, "[System Note: This prompt was later amended to: Actually, switch to PostgreSQL]") {
-		t.Errorf("Trajectory builder failed to inject the inline amendment")
+		t.Errorf("Context projecter failed to inject the inline amendment")
 	}
 
 	if trajectory.Catalyst.Content != "Recent question" {

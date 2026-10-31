@@ -19,11 +19,11 @@ func TestDigestManager_CreateManualDigest(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	spaceID := "test-space"
 
-	bus := thinkgraph.NewEventBus()
-	bus.Subscribe(thinkgraph.NewLedgerSubscriber(1000, workspaceRoot))
-	bus.Subscribe(thinkgraph.NewDigestSubscriber(workspaceRoot))
+	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
+	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
+	emitter := &csTestEmitter{}
 
-	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, dispatcher, emitter)
 	chatSession, _ := svc.InitializeChat(context.Background(), spaceID, "test-digest-thread")
 
 	client := &coordMockModelClient{
@@ -59,11 +59,11 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	spaceID := "test-space"
 
-	bus := thinkgraph.NewEventBus()
-	bus.Subscribe(thinkgraph.NewLedgerSubscriber(1000, workspaceRoot))
-	bus.Subscribe(thinkgraph.NewDigestSubscriber(workspaceRoot))
+	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
+	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
+	emitter := &csTestEmitter{}
 
-	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, bus, nil)
+	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, dispatcher, emitter)
 	chatSession, _ := svc.InitializeChat(context.Background(), spaceID, "test-bg-digest-thread")
 
 	jsonResponse := `
@@ -81,7 +81,6 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 	cfg := session.DigestConfig{BackgroundPrompt: "Context: {{.TargetWindow}}"}
 	manager := session.NewDigestManager(logger, client, cfg)
 
-	// Create specific events to test the UUID serialization into frontmatter
 	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Build auth")
 	ev2 := thinkgraph.NewEvent(thinkgraph.EventModel, "Sure thing")
 	targetWindow := []thinkgraph.Event{ev1, ev2}
@@ -111,7 +110,6 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 		t.Errorf("expected content match in markdown file, got:\n%s", contentStr)
 	}
 
-	// Verify the linkage data is properly serialized to the markdown frontmatter
 	if !strings.Contains(contentStr, "summarizes: [") {
 		t.Errorf("expected summarizes array in frontmatter, got:\n%s", contentStr)
 	}

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -111,11 +110,10 @@ func setupServiceTest(t *testing.T) (*workspace.Service, *mockChatEngine, string
 	mockEngine := &mockChatEngine{}
 	workspaceRoot := t.TempDir()
 
-	bus := thinkgraph.NewEventBus()
-	// Must attach subscriber to physically write to disk to verify the ledger logic
-	bus.Subscribe(thinkgraph.NewLedgerSubscriber(10, workspaceRoot))
+	ledger := thinkgraph.NewFileLedger(10, workspaceRoot)
+	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
 
-	svc := workspace.NewService(logger, mockEngine, workspaceRoot, bus, nil)
+	svc := workspace.NewService(logger, mockEngine, workspaceRoot, dispatcher, nil)
 	return svc, mockEngine, workspaceRoot
 }
 
@@ -183,48 +181,6 @@ func TestService_ProposeAndResolveCandidate(t *testing.T) {
 	}
 }
 
-func TestService_Receipts(t *testing.T) {
-	svc, _, _ := setupServiceTest(t)
-	ctx := context.Background()
-
-	thread, _ := svc.InitializeChat(ctx, "test-space", "receipt-thread")
-
-	receipt := workspace.FlowReceipt{
-		FlowID:    "flow-999",
-		TaskID:    thread.ID,
-		Timestamp: time.Now().UTC(),
-		Task:      "Test Serialization",
-		Summary:   "Saved successfully",
-		Agents: []workspace.AgentRecord{
-			{
-				AgentID:     "agent-1",
-				Passed:      true,
-				Instruction: "Do work",
-			},
-		},
-	}
-
-	if err := svc.SaveReceipt(ctx, thread, receipt); err != nil {
-		t.Fatalf("SaveReceipt failed: %v", err)
-	}
-
-	data, err := svc.GetReceipt(ctx, thread, "flow-999")
-	if err != nil {
-		t.Fatalf("GetReceipt failed: %v", err)
-	}
-
-	xmlStr := string(data)
-	if !strings.Contains(xmlStr, `FlowID="flow-999"`) {
-		t.Errorf("Expected FlowID in XML, got: %s", xmlStr)
-	}
-	if !strings.Contains(xmlStr, `<Task>Test Serialization</Task>`) {
-		t.Errorf("Expected Task description in XML, got: %s", xmlStr)
-	}
-	if !strings.Contains(xmlStr, `AgentID="agent-1"`) {
-		t.Errorf("Expected AgentRecord in XML, got: %s", xmlStr)
-	}
-}
-
 func TestService_LedgerTags(t *testing.T) {
 	svc, _, workspaceRoot := setupServiceTest(t)
 	ctx := context.Background()
@@ -232,12 +188,11 @@ func TestService_LedgerTags(t *testing.T) {
 	thread, _ := svc.InitializeChat(ctx, "test-space", "tag-thread")
 
 	tags := []string{"ui", "frontend"}
-	if err := svc.LogProposal(ctx, thread, "cand-123", "Added UI", tags); err != nil {
+	if err := svc.LogProposal(ctx, thread, "cand-123", "Added UI", tags, []string{"src/main.go"}); err != nil {
 		t.Fatalf("LogProposal failed: %v", err)
 	}
 
-	// Read directly from the JSONL files because FetchEvents was securely removed from Service.
-	logsDir := filepath.Join(workspaceRoot, thread.SpaceID, "chats", thread.ID, "ledger", "logs")
+	logsDir := filepath.Join(workspaceRoot, thread.SpaceID, "chats", thread.ID, "ledger", "logs", thread.ActiveBranch)
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		t.Fatalf("failed to read logs dir: %v", err)

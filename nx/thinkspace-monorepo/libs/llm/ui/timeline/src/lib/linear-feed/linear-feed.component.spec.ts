@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { LinearFeedComponent } from './linear-feed.component';
-import { TimelineFacade } from '../timeline.facade';
+import { TimelineFacade, Turn } from '../timeline.facade';
 import { ChatConnectionService, ChatItem, FlowState } from '@org/llm-state-chat';
 import { signal, WritableSignal } from '@angular/core';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
@@ -8,17 +8,27 @@ import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
 interface MockTimelineFacade {
   viewMode: WritableSignal<'linear' | 'cognitive'>;
   isDebugMode: WritableSignal<boolean>;
+  isEditMode: WritableSignal<boolean>;
   hoveredTag: WritableSignal<string | null>;
   selectedTag: WritableSignal<string | null>;
-  workingMemoryFeed: WritableSignal<ChatItem[]>;
+  selectedTurnIds: WritableSignal<Set<string>>;
+  activeTagFilters: WritableSignal<Set<string>>;
+  visibleFeed: WritableSignal<Turn[]>;
   flowStates: WritableSignal<Map<string, FlowState>>;
   isLoadingHistory: WritableSignal<boolean>;
+  paginationSettings: WritableSignal<{ size: number, prefetchIndex: number }>;
+  uiSettings: {
+    tagFilterMode: WritableSignal<'visual' | 'context'>;
+    bulkActionBarPosition: WritableSignal<'top' | 'bottom'>;
+  };
   isItemDimmed: Mock<(item: ChatItem) => boolean>;
   isItemCollapsed: Mock<(item: ChatItem) => boolean>;
   setHoveredTag: Mock<(tag: string | null) => void>;
   toggleSelectedTag: Mock<(tag: string) => void>;
+  toggleTurnSelection: Mock<(id: string) => void>;
   inspectFlow: Mock<(flowId: string) => void>;
   toggleDebugMode: Mock<() => void>;
+  toggleEditMode: Mock<() => void>;
 }
 
 interface MockConnectionService {
@@ -36,17 +46,39 @@ describe('LinearFeedComponent', () => {
     mockFacade = {
       viewMode: signal('linear'),
       isDebugMode: signal(false),
+      isEditMode: signal(false),
       hoveredTag: signal<string | null>(null),
       selectedTag: signal<string | null>(null),
-      workingMemoryFeed: signal([{ id: '1', type: 'model', content: 'test' } as ChatItem]),
+      selectedTurnIds: signal(new Set<string>()),
+      activeTagFilters: signal(new Set<string>()),
+      visibleFeed: signal([
+        { 
+          id: 'turn-1', 
+          leader: { 
+            id: '1', 
+            type: 'prompt', 
+            content: 'test', 
+            timestamp: Temporal.Now.instant() 
+          } as ChatItem, 
+          blocks: [], 
+          tags: [] 
+        }
+      ]),
       flowStates: signal(new Map()),
       isLoadingHistory: signal(false),
+      paginationSettings: signal({ size: 20, prefetchIndex: 4 }),
+      uiSettings: {
+        tagFilterMode: signal('visual'),
+        bulkActionBarPosition: signal('top')
+      },
       isItemDimmed: vi.fn(() => false),
       isItemCollapsed: vi.fn(() => false),
       setHoveredTag: vi.fn(),
       toggleSelectedTag: vi.fn(),
+      toggleTurnSelection: vi.fn(),
       inspectFlow: vi.fn(),
-      toggleDebugMode: vi.fn()
+      toggleDebugMode: vi.fn(),
+      toggleEditMode: vi.fn()
     };
 
     mockConnection = {
@@ -98,9 +130,25 @@ describe('LinearFeedComponent', () => {
     if (viewport) viewport.scrollState.set('manual');
     fixture.detectChanges();
 
-    mockFacade.workingMemoryFeed.set([
-      { id: '1', type: 'model', content: 'test' } as ChatItem,
-      { id: '2', type: 'model', content: 'new message' } as ChatItem
+    mockFacade.visibleFeed.set([
+      { 
+        id: 'turn-1', 
+        leader: { 
+          id: '1', 
+          type: 'prompt', 
+          content: 'test', 
+          timestamp: Temporal.Now.instant() 
+        } as ChatItem, 
+        blocks: [
+          { 
+            id: '2', 
+            type: 'model', 
+            content: 'new message', 
+            timestamp: Temporal.Now.instant() 
+          } as ChatItem
+        ], 
+        tags: [] 
+      }
     ]);
     
     fixture.detectChanges();
@@ -113,11 +161,20 @@ describe('LinearFeedComponent', () => {
     expect(button.className).toContain('bg-blue-600');
   });
 
-  it('should display the loading spinner when history is being fetched', () => {
+  it('should display the loading skeleton when history is being fetched', () => {
     mockFacade.isLoadingHistory.set(true);
     fixture.detectChanges();
 
-    const loaderText = fixture.nativeElement.textContent;
-    expect(loaderText).toContain('Loading History...');
+    const skeletonBlock = fixture.nativeElement.querySelector('llm-skeleton-block');
+    expect(skeletonBlock).toBeTruthy();
+  });
+
+  it('should display the empty state message when visual filters yield no results', () => {
+    mockFacade.activeTagFilters.set(new Set(['nonexistent']));
+    mockFacade.visibleFeed.set([]);
+    fixture.detectChanges();
+
+    const emptyState = fixture.nativeElement.textContent;
+    expect(emptyState).toContain('No context matches the active visual filters');
   });
 });

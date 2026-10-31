@@ -58,6 +58,11 @@ interface MockTimelineFacade {
   viewMode: WritableSignal<'linear' | 'cognitive'>;
   hoveredTag: WritableSignal<string | null>;
   activeFocus: WritableSignal<DomainAttentionFocus | null>;
+  isEditMode: WritableSignal<boolean>;
+  toggleEditMode: Mock<() => void>;
+  uiSettings: {
+    tagFilterMode: WritableSignal<'visual' | 'context'>;
+  };
 }
 
 interface MockWorkspaceState {
@@ -105,7 +110,12 @@ describe('ChatContainerComponent', () => {
     mockTimelineFacade = {
       viewMode: signal('linear'), 
       hoveredTag: signal<string | null>(null),
-      activeFocus: signal<DomainAttentionFocus | null>({ primaryFocus: ['auth'], relatedContext: [], dormantLenses: [] })
+      activeFocus: signal<DomainAttentionFocus | null>({ primaryFocus: ['auth'], relatedContext: [], dormantLenses: [] }),
+      isEditMode: signal(false),
+      toggleEditMode: vi.fn(),
+      uiSettings: {
+        tagFilterMode: signal('visual')
+      }
     };
     
     mockWorkspace = {

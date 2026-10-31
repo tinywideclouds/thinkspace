@@ -31,18 +31,18 @@ const (
 
 // FlowState is passed to the Flow so it can evaluate what has happened so far.
 type FlowState struct {
-	LLMArguments map[string]any // The original JSON from the Manager
-	Candidates   []BranchResult // Populated after ActionSpawnAgents
-	UserStrategy FlowStrategy   // Populated after ActionRequestStrategy (e.g., "manual", "skip")
-	TargetBranch string         // Populated after ActionManualReview (the branch the user accepted)
+	LLMArguments map[string]any
+	Candidates   []BranchResult
+	UserStrategy FlowStrategy
+	TargetBranch string
 }
 
 // FlowDirective is the command the Flow returns to direct the FlowEngine.
 type FlowDirective struct {
 	Action       FlowAction
-	Tasks        []SubAgentTask // Used for ActionSpawnAgents
-	TargetBranch string         // Used for ActionCommit
-	Error        error          // Used for ActionError
+	Tasks        []SubAgentTask
+	TargetBranch string
+	Error        error
 }
 
 // SubAgentTask defines a single isolated work unit for a sub-agent.
@@ -51,10 +51,10 @@ type SubAgentTask struct {
 	ContextDigest string
 	Instruction   string
 	TargetFiles   []string
-	RetryPrompt   string // Injected by the Flow so the Engine knows how to heal verification errors
+	RetryPrompt   string
 }
 
-// FlowContext provides stable metadata to the FlowEngine for telemetry.
+// FlowContext provides stable metadata to the FlowEngine.
 type FlowContext struct {
 	FlowID         string
 	SpaceID        string
@@ -65,8 +65,6 @@ type FlowContext struct {
 // Flow encapsulates the domain logic for a specific orchestration pattern.
 type Flow interface {
 	Name() string
-
 	MaxSteps() int
-	// Next evaluates the current state and returns the next directive for the FlowEngine.
 	Next(state FlowState) FlowDirective
 }

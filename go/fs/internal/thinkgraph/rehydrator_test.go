@@ -26,7 +26,6 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		ActiveBranch: branchID,
 	}
 
-	// 1. Scaffold physical disk
 	ledgerPath := filepath.Join(workspaceRoot, spaceID, "chats", chatID, "ledger")
 	logsDir := filepath.Join(ledgerPath, "logs", branchID)
 	digestsDir := filepath.Join(ledgerPath, "digests")
@@ -40,10 +39,9 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		event.Timestamp = time.Now().UTC()
 		_ = ledger.AppendEvent(context.Background(), chat, event)
 		originalEvents = append(originalEvents, event)
-		time.Sleep(1 * time.Millisecond) // Ensure deterministic temporal ordering
+		time.Sleep(1 * time.Millisecond)
 	}
 
-	// 2. Scaffold Badger
 	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
 	graph, err := db.NewBadgerGraph(opts)
 	if err != nil {
@@ -51,9 +49,9 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 	}
 	defer graph.Close()
 
-	rehydrator := thinkgraph.NewRehydrator(graph, workspaceRoot)
+	graphStore := thinkgraph.NewGraphStore(graph, nil)
+	rehydrator := thinkgraph.NewRehydrator(graphStore, workspaceRoot)
 
-	// Scenario A: Cold Boot / Hard Mismatch
 	status, diskManifest, graphManifest, err := rehydrator.CheckSync(context.Background(), chat)
 	if err != nil {
 		t.Fatalf("CheckSync failed: %v", err)
@@ -68,7 +66,6 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		t.Errorf("Expected nil graph manifest on cold boot")
 	}
 
-	// Scenario B: Explicit Rebuild
 	err = rehydrator.Rebuild(context.Background(), chat)
 	if err != nil {
 		t.Fatalf("Rebuild failed: %v", err)
@@ -82,18 +79,16 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		t.Errorf("Expected badger to hold 5 events, got %d", graphManifest.TotalEvents)
 	}
 
-	// Verify timeline integrity after rebuild
 	timeline, _ := graph.GetBranchTimeline(context.Background(), chat, branchID)
 	if len(timeline) != 5 {
-		t.Fatalf("Expected timeline to have 5 events, got %d", len(timeline))
+		t.Fatalf("Expected timeline to have 5 nodes, got %d", len(timeline))
 	}
-	for i, ev := range timeline {
-		if ev.ID != originalEvents[i].ID {
-			t.Errorf("Rebuild corrupted event ordering at index %d", i)
+	for i, node := range timeline {
+		if node.ID != originalEvents[i].ID {
+			t.Errorf("Rebuild corrupted node ordering at index %d", i)
 		}
 	}
 
-	// Scenario C: Graph is behind (Fast-Forward scenario)
 	var newEvents []thinkgraph.Event
 	for i := 0; i < 4; i++ {
 		newEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("New Event %d", i))
@@ -113,10 +108,9 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		t.Fatalf("FastForward failed: %v", err)
 	}
 
-	// Verify timeline integrity after fast forward
 	ffTimeline, _ := graph.GetBranchTimeline(context.Background(), chat, branchID)
 	if len(ffTimeline) != 9 {
-		t.Fatalf("Expected timeline to have 9 events, got %d", len(ffTimeline))
+		t.Fatalf("Expected timeline to have 9 nodes, got %d", len(ffTimeline))
 	}
 }
 
@@ -141,12 +135,13 @@ func TestRehydrator_MutationReplay(t *testing.T) {
 	graph, _ := db.NewBadgerGraph(opts)
 	defer graph.Close()
 
-	rehydrator := thinkgraph.NewRehydrator(graph, tempDir)
+	graphStore := thinkgraph.NewGraphStore(graph, nil)
+	rehydrator := thinkgraph.NewRehydrator(graphStore, tempDir)
 	_ = rehydrator.Rebuild(context.Background(), chat)
 
 	t1, _ := graph.GetBranchTimeline(context.Background(), chat, "main")
 	if len(t1) != 1 {
-		t.Fatalf("Expected 1 event, got %d", len(t1))
+		t.Fatalf("Expected 1 node, got %d", len(t1))
 	}
 
 	if t1[0].Content != "Updated content!" {

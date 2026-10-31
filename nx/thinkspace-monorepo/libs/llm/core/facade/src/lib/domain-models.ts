@@ -3,17 +3,45 @@ export interface SpaceInfo {
   name: string;
 }
 
-export interface DomainGraphEvent {
+export type GraphEventType = 'prompt' | 'model' | 'system' | 'file_delta' | 'flow_execution';
+
+export interface BaseGraphEvent {
   id: string;
-  timestamp: string;
-  type: string;
-  content: string;
+  timestamp: Temporal.Instant; // Mapped to native Temporal API
+  tags: string[];
+  tombstoned: boolean;
   metadata: Record<string, string>;
   edges: Record<string, string>;
   branchId?: string;
 }
 
-export interface DomainDigestMeta {
+export interface MessageGraphEvent extends BaseGraphEvent {
+  type: 'prompt' | 'model' | 'system';
+  content: string; 
+}
+
+export interface FileDeltaGraphEvent extends BaseGraphEvent {
+  type: 'file_delta';
+  content: string; 
+  path: string;
+  previewSnippet: string;
+  fileRef: string;
+  parentId?: string;
+}
+
+export interface FlowExecutionGraphEvent extends BaseGraphEvent {
+  type: 'flow_execution';
+  content: string; 
+  flowId: string;
+  status: string;
+}
+
+export type GraphEvent = 
+  | MessageGraphEvent 
+  | FileDeltaGraphEvent 
+  | FlowExecutionGraphEvent;
+
+export interface DigestMeta {
   id: string;
   summary: string;
   isSticky: boolean;
@@ -25,39 +53,39 @@ export interface FileContextMetaData {
   tokenCount: number;
 }
 
-export interface DomainAttentionFocus {
+export interface AttentionFocus {
   primaryFocus: string[];
   relatedContext: string[];
   dormantLenses: string[];
 }
 
-export interface DomainPreviewContext {
+export interface PreviewContext {
   spaceId: string;
   chatId: string;
   managerSystemPrompt: string;
   stickyDigests: string[];
   recentHistory: string[];
   fileContexts: FileContextMetaData[];
-  focus: DomainAttentionFocus;
+  focus: AttentionFocus;
 }
 
-export interface DomainTelemetryEvent {
+export interface TelemetryEvent {
   type: 'telemetry_event';
   channel: string;
   id: string;
   eventType: string;
-  timestamp: string;
+  timestamp: Temporal.Instant; // Mapped to native Temporal API
   message: string;
   summary: string;
-  payload: any;
+  payload: Record<string, unknown>;
 }
 
-export interface DomainBranchTopology {
+export interface BranchTopology {
   parentBranch: string;
   forkPoint: string;
 }
 
-export type DomainEvent =
+export type AppEvent =
   | { type: 'chat_stream'; text: string }
   | { type: 'request_strategy'; active: boolean }
   | { type: 'request_review'; branch: string }
@@ -65,20 +93,20 @@ export type DomainEvent =
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
   | { 
       type: 'sync_history'; 
-      recentEvents: DomainGraphEvent[]; 
-      digests: Record<string, DomainDigestMeta>; 
-      focus: DomainAttentionFocus; 
+      recentEvents: GraphEvent[]; 
+      digests: Record<string, DigestMeta>; 
+      focus: AttentionFocus; 
       nextCursor: string; 
       hasMore: boolean;
       activeBranch: string;
-      branches: Record<string, DomainBranchTopology>;
+      branches: Record<string, BranchTopology>;
     }
-  | { type: 'preview_context'; context: DomainPreviewContext }
+  | { type: 'preview_context'; context: PreviewContext }
   | { type: 'agent_stream'; agentId: number; text: string }
-  | { type: 'streamed_graph_event'; event: DomainGraphEvent }
-  | DomainTelemetryEvent;
+  | { type: 'streamed_graph_event'; event: GraphEvent }
+  | TelemetryEvent;
 
-export enum DomainDelegationStrategy {
+export enum DelegationStrategy {
   SKIP = 1,
   MANUAL = 2,
   REVIEW = 3,
