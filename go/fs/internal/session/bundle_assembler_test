@@ -1,0 +1,102 @@
+package session
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+	"uuid"
+)
+
+func TestBundleAssembler_FilterActiveDigests(t *testing.T) {
+	primaryTags := map[string]bool{"backend": true, "database": true}
+	relatedTags := map[string]bool{"ui": true}
+
+	globalDigest := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{}}
+	backendDigest := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{"backend", "performance"}}
+	uiDigest := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{"ui"}}
+	unrelatedDigest := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{"marketing"}}
+
+	allDigests := []thinkgraph.DigestMeta{globalDigest, backendDigest, uiDigest, unrelatedDigest}
+
+	active := filterActiveDigests(allDigests, primaryTags, relatedTags)
+
+	if len(active) != 3 {
+		t.Fatalf("Expected exactly 3 active digests, got %d", len(active))
+	}
+
+	foundGlobal := false
+	foundUnrelated := false
+	for _, d := range active {
+		if d.ID == globalDigest.ID {
+			foundGlobal = true
+		}
+		if d.ID == unrelatedDigest.ID {
+			foundUnrelated = true
+		}
+	}
+
+	if !foundGlobal {
+		t.Errorf("Global digest (no tags) should always be active")
+	}
+	if foundUnrelated {
+		t.Errorf("Unrelated digest should have been filtered out")
+	}
+}
+
+func TestBundleAssembler_FilterActiveContexts(t *testing.T) {
+	primaryTags := map[string]bool{"api": true}
+	relatedTags := map[string]bool{}
+
+	globalContext := thinkgraph.SpaceContext{ID: uuid.NewV7(), Tags: []string{}}
+	apiContext := thinkgraph.SpaceContext{ID: uuid.NewV7(), Tags: []string{"api"}}
+	dbContext := thinkgraph.SpaceContext{ID: uuid.NewV7(), Tags: []string{"database"}}
+
+	allContexts := []thinkgraph.SpaceContext{globalContext, apiContext, dbContext}
+
+	active := filterActiveContexts(allContexts, primaryTags, relatedTags)
+
+	if len(active) != 2 {
+		t.Fatalf("Expected exactly 2 active contexts, got %d", len(active))
+	}
+}
+
+func TestBundleAssembler_FormatPersona(t *testing.T) {
+	t.Run("Executes Template Successfully", func(t *testing.T) {
+		rawPrompt := "Welcome. Here are your routing options:\n{{.AvailableThinkStates}}"
+		available := "- golang: Go dev\n- concept: Ideation"
+		activeState := "intake"
+
+		result := formatPersona(nil, rawPrompt, available, activeState)
+
+		if !strings.Contains(result, available) {
+			t.Errorf("Expected injected template variables to be present in prompt. Got:\n%s", result)
+		}
+		if !strings.Contains(result, "operating in the 'intake' think state") {
+			t.Errorf("Expected global rule to append active state.")
+		}
+	})
+
+	t.Run("Handles Fallback for Missing Summary", func(t *testing.T) {
+		rawPrompt := "{{.AvailableThinkStates}}"
+
+		result := formatPersona(nil, rawPrompt, "", "intake")
+
+		if !strings.Contains(result, "No specialized think states configured") {
+			t.Errorf("Expected fallback string for empty summary, got:\n%s", result)
+		}
+	})
+
+	t.Run("Fails Gracefully on Invalid Template", func(t *testing.T) {
+		rawPrompt := "Invalid {{.Missing closing bracket"
+
+		result := formatPersona(nil, rawPrompt, "summary", "golang")
+
+		if !strings.Contains(result, "Invalid {{.Missing") {
+			t.Errorf("Expected raw prompt to survive template parse failure, got:\n%s", result)
+		}
+		if !strings.Contains(result, "operating in the 'golang' think state") {
+			t.Errorf("Expected global rules to still append safely.")
+		}
+	})
+}

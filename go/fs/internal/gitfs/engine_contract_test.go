@@ -14,7 +14,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type EngineFactory func(dir string, sharedCodebase bool) workspace.ChatEngine
+type EngineFactory func(dir string, sharedCodebase bool) workspace.ChatVersioner
 
 func getGitBranch(t *testing.T, dir string) string {
 	cmd := exec.Command("git", "branch", "--show-current")
@@ -26,7 +26,7 @@ func getGitBranch(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-func setupTestEnvironment(t *testing.T, factory EngineFactory, sharedCodebase bool) (context.Context, string, workspace.ChatEngine, string, string) {
+func setupTestEnvironment(t *testing.T, factory EngineFactory, sharedCodebase bool) (context.Context, string, workspace.ChatVersioner, string, string) {
 	ctx := context.Background()
 	mainDir := t.TempDir()
 	engine := factory(mainDir, sharedCodebase)
@@ -48,8 +48,8 @@ func setupTestEnvironment(t *testing.T, factory EngineFactory, sharedCodebase bo
 
 func TestChatEngines(t *testing.T) {
 	engines := map[string]EngineFactory{
-		"GoGitEngine":  func(dir string, shared bool) workspace.ChatEngine { return gitfs.NewGoGitEngine(dir, shared) },
-		"GoExecEngine": func(dir string, shared bool) workspace.ChatEngine { return gitfs.NewGoExecEngine(dir, shared) },
+		"GoGitEngine":  func(dir string, shared bool) workspace.ChatVersioner { return gitfs.NewGoGitEngine(dir, shared) },
+		"GoExecEngine": func(dir string, shared bool) workspace.ChatVersioner { return gitfs.NewGoExecEngine(dir, shared) },
 	}
 
 	for name, factory := range engines {

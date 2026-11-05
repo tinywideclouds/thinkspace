@@ -17,7 +17,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
-type EngineFactory func(repoRoot string) ChatEngine
+type EngineFactory func(repoRoot string) ChatVersioner
 
 type ServiceManager struct {
 	logger        *slog.Logger
@@ -123,8 +123,62 @@ func (manager *ServiceManager) UpdateSpaceState(spaceID string, updateFn func(*S
 		return fmt.Errorf("marshaling space state: %w", err)
 	}
 
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating space directory: %w", err)
+	}
+
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("writing space state: %w", err)
+	}
+
+	return nil
+}
+
+func (manager *ServiceManager) GetSpaceSettings(spaceID string) (SpaceSettings, error) {
+	var settings SpaceSettings
+	path := filepath.Join(manager.baseRoot, spaceID, "settings.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Provide safe defaults if the user hasn't explicitly saved settings yet
+			return SpaceSettings{
+				ReviewPolicy: ReviewPolicySettings{
+					Active:         true,
+					MinTokens:      200,
+					IncludePersona: false,
+				},
+				Bundle: BundleSettings{
+					MaxWorkingMemoryEvents: 50,
+					IncludeMapbookOnBoot:   true,
+				},
+			}, nil
+		}
+		return settings, err
+	}
+	err = json.Unmarshal(data, &settings)
+	return settings, err
+}
+
+func (manager *ServiceManager) UpdateSpaceSettings(spaceID string, updateFn func(*SpaceSettings)) error {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+
+	settings, _ := manager.GetSpaceSettings(spaceID)
+
+	updateFn(&settings)
+
+	path := filepath.Join(manager.baseRoot, spaceID, "settings.json")
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling space settings: %w", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("creating space directory: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing space settings: %w", err)
 	}
 
 	return nil

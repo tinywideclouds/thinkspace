@@ -198,8 +198,8 @@ func TestMarshalRequestTransition(t *testing.T) {
 		t.Fatalf("expected 'requestTransition' wrapper in JSON output, got: %s", string(data))
 	}
 
-	if reqRaw["targetDomain"] != "golang" {
-		t.Errorf("expected targetDomain 'golang', got %v", reqRaw["targetDomain"])
+	if reqRaw["targetThinkState"] != "golang" {
+		t.Errorf("expected targetThinkState 'golang', got %v", reqRaw["targetThinkState"])
 	}
 	if reqRaw["reasoning"] != "need to compile" {
 		t.Errorf("expected reasoning 'need to compile', got %v", reqRaw["reasoning"])

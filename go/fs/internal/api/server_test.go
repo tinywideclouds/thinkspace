@@ -16,12 +16,20 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
 type mockModelClient struct{}
 
-func (m *mockModelClient) GenerateContentStream(ctx context.Context, model string, bundle cognition.ThinkBundle, tools []llm.ToolDef) iter.Seq2[llm.StreamChunk, error] {
+func (m *mockModelClient) GenerateContentStream(
+	ctx context.Context,
+	model string,
+	bundle cognition.ThinkBundle,
+	registry *tools.Registry,
+	config spaces.ThinkStateConfig,
+) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {}
 }
 
@@ -47,7 +55,7 @@ func setupTestServer(t *testing.T) (*http.ServeMux, string, *workspace.ServiceMa
 	}
 
 	yamlContent := `golang:
-  type: space
+  type: thinkstate
   name: test-domain
   system_prompt: "You are a test assistant."
   roles:
@@ -73,12 +81,14 @@ fanout:
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	factory := func(repoRoot string) workspace.ChatEngine { return nil }
+	factory := func(repoRoot string) workspace.ChatVersioner { return nil }
 	manager := workspace.NewServiceManager(logger, baseRoot, factory, nil, nil)
 
 	mockClient := &mockModelClient{}
 	dummyFlowInstance := &dummyFlow{}
 	digestManager := session.NewDigestManager(logger, mockClient, session.DigestConfig{})
+
+	turnManager := session.NewManager(logger, registry, manager, mockClient, dummyFlowInstance, digestManager)
 
 	mux := http.NewServeMux()
 
@@ -86,7 +96,7 @@ fanout:
 	mgmtAPI := api.NewManagementAPI(registry, manager, appConfig)
 	mgmtAPI.RegisterHandlers(mux)
 
-	wsServer := api.NewServer(logger, registry, manager, dummyFlowInstance, digestManager, mockClient)
+	wsServer := api.NewServer(logger, registry, manager, turnManager)
 	wsServer.RegisterHandlers(mux)
 
 	return mux, "golang", manager

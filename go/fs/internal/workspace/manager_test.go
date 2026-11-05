@@ -39,7 +39,7 @@ func TestServiceManager_LazyLoading(t *testing.T) {
 	baseRoot := t.TempDir()
 
 	var capturedRoots []string
-	factory := func(repoRoot string) workspace.ChatEngine {
+	factory := func(repoRoot string) workspace.ChatVersioner {
 		capturedRoots = append(capturedRoots, repoRoot)
 		return &mockFactoryEngine{repoRoot: repoRoot}
 	}
@@ -71,7 +71,7 @@ func TestServiceManager_ChatManagement(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	baseRoot := t.TempDir()
 
-	manager := workspace.NewServiceManager(logger, baseRoot, func(r string) workspace.ChatEngine { return nil }, nil, nil)
+	manager := workspace.NewServiceManager(logger, baseRoot, func(r string) workspace.ChatVersioner { return nil }, nil, nil)
 	ctx := context.Background()
 
 	spaceID := "golang"
@@ -119,5 +119,53 @@ func TestServiceManager_ChatManagement(t *testing.T) {
 	}
 	if chats[2].ID != explicitMeta.ID {
 		t.Errorf("Expected oldest chat last in list")
+	}
+}
+
+func TestServiceManager_SpaceSettingsManagement(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	baseRoot := t.TempDir()
+
+	manager := workspace.NewServiceManager(logger, baseRoot, func(r string) workspace.ChatVersioner { return nil }, nil, nil)
+	spaceID := "golang"
+
+	// 1. Test Default / Missing Settings
+	settings, err := manager.GetSpaceSettings(spaceID)
+	if err != nil {
+		t.Fatalf("Expected safe defaults for missing settings, got error: %v", err)
+	}
+	if !settings.ReviewPolicy.Active {
+		t.Errorf("Expected default ReviewPolicy.Active to be true")
+	}
+	if settings.ReviewPolicy.MinTokens != 200 {
+		t.Errorf("Expected default ReviewPolicy.MinTokens to be 200, got %d", settings.ReviewPolicy.MinTokens)
+	}
+	if settings.ReviewPolicy.IncludePersona {
+		t.Errorf("Expected default ReviewPolicy.IncludePersona to be false")
+	}
+
+	// 2. Test Updating Settings
+	err = manager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+		s.ReviewPolicy.Active = false
+		s.ReviewPolicy.MinTokens = 500
+		s.ReviewPolicy.IncludePersona = true
+	})
+	if err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
+
+	// 3. Test Reading Updated Settings
+	updated, err := manager.GetSpaceSettings(spaceID)
+	if err != nil {
+		t.Fatalf("GetSpaceSettings failed after update: %v", err)
+	}
+	if updated.ReviewPolicy.Active {
+		t.Errorf("Expected ReviewPolicy.Active to be false after update")
+	}
+	if updated.ReviewPolicy.MinTokens != 500 {
+		t.Errorf("Expected ReviewPolicy.MinTokens to be 500, got %d", updated.ReviewPolicy.MinTokens)
+	}
+	if !updated.ReviewPolicy.IncludePersona {
+		t.Errorf("Expected ReviewPolicy.IncludePersona to be true after update")
 	}
 }

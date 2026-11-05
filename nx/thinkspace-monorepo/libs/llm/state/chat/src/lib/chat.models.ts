@@ -1,3 +1,5 @@
+import { AgentRecord } from '@org/llm-core-facade';
+
 export type ChatItemType = 'prompt' | 'model' | 'system' | 'file_delta' | 'flow_execution';
 
 export interface BaseChatItem {
@@ -19,7 +21,11 @@ export interface FlowExecutionChatItem extends BaseChatItem {
   type: 'flow_execution';
   content: string; // summary
   flowId: string;
-  status: 'running' | 'completed' | string;
+  taskId: string;
+  task: string;
+  status: 'UNSPECIFIED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | string;
+  error: string;
+  agents: AgentRecord[];
 }
 
 export interface FileDeltaChatItem extends BaseChatItem {

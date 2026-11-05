@@ -23,7 +23,7 @@ import (
 type agentResult struct {
 	candidateID string
 	err         error
-	record      flows.AgentRecordPayload
+	record      flows.AgentRecord
 	passed      bool
 	trace       string
 }
@@ -54,7 +54,7 @@ func NewFlowEngine(
 	}
 }
 
-func (e *FlowEngine) Run(
+func (engine *FlowEngine) Run(
 	ctx context.Context,
 	chatSession *thinkgraph.Chat,
 	space spaces.ThinkState,
@@ -74,18 +74,30 @@ func (e *FlowEngine) Run(
 
 		switch directive.Action {
 		case flows.ActionSpawnAgents:
-			// Dispatch durable graph node for flow initialization
-			ev := thinkgraph.NewEvent(flows.EventFlowStarted, flowContext.FlowSummary)
-			payload := flows.FlowStartedPayload{
-				FlowID:      flowContext.FlowID,
-				TaskID:      chatSession.ID,
-				FlowSummary: flowContext.FlowSummary,
-				AgentCount:  len(directive.Tasks),
+			id, err := uuid.Parse(flowContext.FlowID)
+			if err != nil {
+				return fmt.Errorf("invalid flow ID format: %w", err)
 			}
-			ev.Data, _ = json.Marshal(payload)
-			_ = e.dispatcher.AppendEvent(ctx, chatSession, ev)
 
-			candidates, err := e.spawnAgents(ctx, chatSession, space, flowContext, directive.Tasks)
+			ev := thinkgraph.Event{
+				ID:        id,
+				Type:      flows.EventFlowLifecycle,
+				Timestamp: time.Now().UTC(),
+				Content:   fmt.Sprintf("Flow started: %s", flowContext.FlowSummary),
+			}
+			configPayload := flows.FlowData{
+				FlowID:     flowContext.FlowID,
+				TaskID:     chatSession.ID,
+				TaskPrompt: flowContext.FlowSummary,
+			}
+			ev.Data, _ = json.Marshal(configPayload)
+
+			if err := engine.dispatcher.AppendEvent(ctx, chatSession, ev); err != nil {
+				engine.logger.ErrorContext(ctx, "failed to append flow lifecycle event", "error", err)
+				return fmt.Errorf("failed to initialize flow in graph: %w", err)
+			}
+
+			candidates, err := engine.spawnAgents(ctx, chatSession, space, flowContext, directive.Tasks, id, ui)
 			if err != nil {
 				return err
 			}
@@ -95,6 +107,52 @@ func (e *FlowEngine) Run(
 			strategy := ui.ChooseNextStep()
 			state.UserStrategy = strategy
 
+		case flows.ActionSynthesize:
+			engine.logger.InfoContext(ctx, "synthesizing candidates into refined solution")
+			engine.emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "flow_status",
+				Timestamp: time.Now(),
+				Message:   "Preparing candidate dossier for Manager synthesis...",
+			})
+
+			if len(directive.Tasks) == 0 {
+				return fmt.Errorf("synthesis requires a refine prompt instruction")
+			}
+
+			var dossier strings.Builder
+			dossier.WriteString(directive.Tasks[0].Instruction + "\n\n")
+
+			if rawTasks, ok := state.LLMArguments["agent_tasks"].([]any); ok && len(rawTasks) > 0 {
+				if tm, isMap := rawTasks[0].(map[string]any); isMap {
+					if originalDigest, ok := tm["context_digest"].(string); ok && originalDigest != "" {
+						dossier.WriteString("### Original Task Context\n")
+						dossier.WriteString(originalDigest + "\n\n")
+					}
+				}
+			}
+
+			dossier.WriteString("### Candidate Dossier\n")
+			for _, c := range state.Candidates {
+				status := "PASSED"
+				if !c.Passed {
+					status = "FAILED"
+				}
+				dossier.WriteString(fmt.Sprintf("\n--- Candidate Branch: %s (Status: %s) ---\n", c.CandidateID, status))
+				if c.Instruction != "" {
+					dossier.WriteString(fmt.Sprintf("**Sub-Task Instruction:** %s\n", c.Instruction))
+				}
+				if c.Trace != "" {
+					dossier.WriteString(fmt.Sprintf("**Verification Error Trace:**\n```\n%s\n```\n", c.Trace))
+				}
+				if c.RawPayload != "" {
+					dossier.WriteString(fmt.Sprintf("**Raw Sub-Agent Output:**\n```\n%s\n```\n", c.RawPayload))
+				}
+			}
+
+			// Bounce back to the orchestrator layer cleanly
+			return &flows.SynthesisRequest{CompiledPrompt: dossier.String()}
+
 		case flows.ActionManualReview:
 			acceptedBranch := ""
 			for _, cand := range state.Candidates {
@@ -103,18 +161,31 @@ func (e *FlowEngine) Run(
 					break
 				}
 				branchName := strings.TrimPrefix(cand.CandidateID, "candidate/")
-				_ = e.service.ResolveCandidate(ctx, chatSession, branchName, false, "Rejected via manual review")
+				if err := engine.service.ResolveCandidate(ctx, chatSession, branchName, false, "Rejected via manual review"); err != nil {
+					engine.logger.ErrorContext(ctx, "failed to reject candidate", "candidate", branchName, "error", err)
+				}
 			}
 			state.TargetBranch = acceptedBranch
 
 		case flows.ActionCommit:
 			branchName := strings.TrimPrefix(directive.TargetBranch, "candidate/")
-			return e.service.ResolveCandidate(ctx, chatSession, branchName, true, "Accepted by user")
+			return engine.service.ResolveCandidate(ctx, chatSession, branchName, true, "Accepted by user")
 
 		case flows.ActionFinish:
 			return nil
 
 		case flows.ActionError:
+			engine.logger.ErrorContext(ctx, "flow directive returned error",
+				"flow", flow.Name(),
+				"error", directive.Error,
+			)
+			for _, c := range state.Candidates {
+				engine.logger.ErrorContext(ctx, "candidate verification failure detail",
+					"candidate_id", c.CandidateID,
+					"passed", c.Passed,
+					"trace", c.Trace,
+				)
+			}
 			return directive.Error
 
 		default:
@@ -125,107 +196,172 @@ func (e *FlowEngine) Run(
 	return fmt.Errorf("flow '%s' exceeded its maximum execution limit of %d steps without resolving", flow.Name(), maxSteps)
 }
 
-func (e *FlowEngine) spawnAgents(
+func (engine *FlowEngine) spawnAgents(
 	ctx context.Context,
 	chatSession *thinkgraph.Chat,
 	space spaces.ThinkState,
 	flowContext flows.FlowContext,
 	tasks []flows.SubAgentTask,
+	flowUUID uuid.UUID,
+	ui UserInterface,
 ) ([]flows.BranchResult, error) {
+
+	engine.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_start",
+		Timestamp: time.Now(),
+		Message:   "Starting Flow Execution",
+		Summary:   flowContext.FlowSummary,
+		Payload:   flows.FlowTelemetry{FlowID: flowContext.FlowID, TaskID: chatSession.ID, AgentCount: len(tasks)}.ToMap(),
+	})
+
+	var tokenChan chan<- workspace.AgentToken
+	if ui != nil {
+		tokenChan = ui.GetAgentTokenChannel()
+	}
 
 	results := make(chan agentResult, len(tasks))
 
 	for i, task := range tasks {
-		// Dispatch durable event for each agent spawned
-		ev := thinkgraph.NewEvent(flows.EventAgentSpawned, task.Instruction)
-		spawnPayload := flows.AgentSpawnedPayload{
-			FlowID:      flowContext.FlowID,
-			AgentID:     task.AgentID,
-			Instruction: task.Instruction,
-		}
-		ev.Data, _ = json.Marshal(spawnPayload)
-		_ = e.dispatcher.AppendEvent(ctx, chatSession, ev)
-
 		go func(agentIndex int, t flows.SubAgentTask) {
-			results <- e.runSingleAgent(ctx, chatSession, space, flowContext, t, agentIndex)
+			results <- engine.runSingleAgent(ctx, chatSession, space, flowContext, t, agentIndex, tokenChan)
 		}(i+1, task)
 	}
 
 	var branches []flows.BranchResult
-	var records []flows.AgentRecordPayload
+	var records []flows.AgentRecord
 	var errMsgs []string
 
 	for i := 0; i < len(tasks); i++ {
 		res := <-results
 		if res.err != nil {
+			engine.logger.ErrorContext(ctx, "agent execution encountered internal error",
+				"candidate_id", res.candidateID,
+				"error", res.err,
+			)
 			errMsgs = append(errMsgs, res.err.Error())
 		} else {
+			engine.logger.InfoContext(ctx, "agent execution completed",
+				"candidate_id", res.candidateID,
+				"passed", res.passed,
+				"has_trace", res.trace != "",
+			)
+			if !res.passed && res.trace != "" {
+				engine.logger.WarnContext(ctx, "agent verification failed trace",
+					"candidate_id", res.candidateID,
+					"trace", res.trace,
+				)
+			}
 			branches = append(branches, flows.BranchResult{
 				CandidateID: res.candidateID,
 				Passed:      res.passed,
 				Trace:       res.trace,
+				RawPayload:  res.record.RawPayload,
+				Instruction: res.record.Instruction,
 			})
 			records = append(records, res.record)
+		}
+
+		statePayload := flows.FlowExecutionState{
+			Status:  flows.FlowStatusRunning,
+			Summary: "Agents executing...",
+			Agents:  records,
+		}
+		stateBytes, _ := json.Marshal(statePayload)
+		mut := thinkgraph.MutationEvent{
+			TargetID:  flowUUID,
+			Type:      thinkgraph.MutationUpdate,
+			Timestamp: time.Now().UTC(),
+			Data:      stateBytes,
+		}
+
+		if err := engine.dispatcher.SaveMutation(ctx, chatSession, mut); err != nil {
+			engine.logger.ErrorContext(ctx, "failed to save flow mutation during execution", "flow_id", flowUUID, "error", err)
 		}
 	}
 
 	if len(errMsgs) > 0 {
+		statePayload := flows.FlowExecutionState{
+			Status:  flows.FlowStatusFailed,
+			Summary: "System errors aborted execution.",
+			Error:   strings.Join(errMsgs, " ; "),
+			Agents:  records,
+		}
+		stateBytes, _ := json.Marshal(statePayload)
+		mut := thinkgraph.MutationEvent{
+			TargetID:  flowUUID,
+			Type:      thinkgraph.MutationUpdate,
+			Timestamp: time.Now().UTC(),
+			Data:      stateBytes,
+		}
+
+		if err := engine.dispatcher.SaveMutation(ctx, chatSession, mut); err != nil {
+			engine.logger.ErrorContext(ctx, "failed to save failure mutation", "flow_id", flowUUID, "error", err)
+		}
+
 		return nil, fmt.Errorf("fatal system errors aborted execution: %s", strings.Join(errMsgs, " ; "))
 	}
 
 	summary := fmt.Sprintf("Generated %d candidate branches.", len(branches))
 
-	// Dispatch final durable FlowCompleted payload to the graph (replaces FlowReceipt XML)
-	ev := thinkgraph.NewEvent(flows.EventFlowCompleted, summary)
-	compPayload := flows.FlowCompletedPayload{
-		FlowID:  flowContext.FlowID,
-		TaskID:  chatSession.ID,
-		Task:    "Task Execution",
+	statePayload := flows.FlowExecutionState{
+		Status:  flows.FlowStatusCompleted,
 		Summary: summary,
 		Agents:  records,
 	}
-	ev.Data, _ = json.Marshal(compPayload)
-	_ = e.dispatcher.AppendEvent(ctx, chatSession, ev)
+	stateBytes, _ := json.Marshal(statePayload)
+	mut := thinkgraph.MutationEvent{
+		TargetID:  flowUUID,
+		Type:      thinkgraph.MutationUpdate,
+		Timestamp: time.Now().UTC(),
+		Data:      stateBytes,
+	}
+
+	if err := engine.dispatcher.SaveMutation(ctx, chatSession, mut); err != nil {
+		engine.logger.ErrorContext(ctx, "failed to save final completion mutation", "flow_id", flowUUID, "error", err)
+	}
 
 	return branches, nil
 }
 
-func (e *FlowEngine) runSingleAgent(
+func (engine *FlowEngine) runSingleAgent(
 	ctx context.Context,
 	chatSession *thinkgraph.Chat,
 	space spaces.ThinkState,
 	flowContext flows.FlowContext,
 	task flows.SubAgentTask,
 	agentIndex int,
+	tokenChan chan<- workspace.AgentToken,
 ) agentResult {
 
-	// Ephemeral Telemetry: Used purely for UI rendering, not saved
-	e.emitter.Emit(task.AgentID, telemetry.Event{
+	engine.emitter.Emit(task.AgentID, telemetry.Event{
 		ID:        uuid.NewV7(),
 		Type:      "flow_status",
 		Timestamp: time.Now(),
 		Message:   "Agent spawning and parsing context",
+		Payload:   flows.AgentTelemetry{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Instruction: task.Instruction}.ToMap(),
 	})
 
 	candidateID := fmt.Sprintf("%s-%s-%s", chatSession.ID, flowContext.FlowID, task.AgentID)
-	sandbox, err := e.service.SpawnSandbox(ctx, chatSession.ID, candidateID)
+	sandbox, err := engine.service.SpawnSandbox(ctx, chatSession.ID, candidateID)
 	if err != nil {
-		return agentResult{err: err}
+		return agentResult{candidateID: candidateID, err: err}
 	}
 	defer sandbox.TearDown(ctx)
 
-	workbenchItems, err := e.workbench.Build(ctx, sandbox, task.TargetFiles)
+	workbenchItems, err := engine.workbench.Build(ctx, sandbox, task.TargetFiles)
 	if err != nil {
-		e.emitter.Emit(task.AgentID, telemetry.Event{
+		engine.emitter.Emit(task.AgentID, telemetry.Event{
 			ID:        uuid.NewV7(),
 			Type:      "flow_error",
 			Timestamp: time.Now(),
 			Message:   err.Error(),
+			Payload:   flows.AgentTelemetry{FlowID: flowContext.FlowID, AgentIndex: agentIndex}.ToMap(),
 		})
-		return agentResult{err: err}
+		return agentResult{candidateID: candidateID, err: err}
 	}
 
-	rawMapbook, _ := space.Mapbook().GenerateLayers(ctx, e.service.WorkspaceRoot())
+	rawMapbook, _ := space.Mapbook().GenerateLayers(ctx, engine.service.WorkspaceRoot())
 	stringMaps := make(map[string]string)
 	for k, v := range rawMapbook {
 		stringMaps[string(k)] = v
@@ -246,11 +382,11 @@ func (e *FlowEngine) runSingleAgent(
 		Workbench: workbenchItems,
 	}
 
-	passed, finalTrace := e.attemptLoop(ctx, sandbox, bundle, flowContext, task, agentIndex, space.Verifier())
+	passed, finalTrace := engine.attemptLoop(ctx, sandbox, bundle, flowContext, task, agentIndex, space.Verifier(), tokenChan)
 
 	traceBytes, _ := sandbox.ReadFile(ctx, "trace.jsonl")
 
-	record := flows.AgentRecordPayload{
+	record := flows.AgentRecord{
 		AgentID:           task.AgentID,
 		Passed:            passed,
 		Instruction:       task.Instruction,
@@ -259,11 +395,19 @@ func (e *FlowEngine) runSingleAgent(
 	}
 
 	if err := sandbox.DeliverForReview(ctx); err != nil {
-		return agentResult{err: err}
+		return agentResult{candidateID: candidateID, err: err}
 	}
 
-	diff, _ := e.service.ReadCandidate(ctx, chatSession, candidateID)
+	diff, _ := engine.service.ReadCandidate(ctx, chatSession, candidateID)
 	record.StateDelta = diff
+
+	engine.emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_complete",
+		Timestamp: time.Now(),
+		Message:   "Flow pipeline completed",
+		Payload:   flows.AgentTelemetry{FlowID: flowContext.FlowID, AgentIndex: agentIndex, CandidateID: candidateID, Passed: passed}.ToMap(),
+	})
 
 	return agentResult{
 		candidateID: fmt.Sprintf("candidate/%s", candidateID),
@@ -273,7 +417,7 @@ func (e *FlowEngine) runSingleAgent(
 	}
 }
 
-func (e *FlowEngine) attemptLoop(
+func (engine *FlowEngine) attemptLoop(
 	ctx context.Context,
 	sandbox workspace.CandidateSandbox,
 	bundle cognition.ThinkBundle,
@@ -281,6 +425,7 @@ func (e *FlowEngine) attemptLoop(
 	task flows.SubAgentTask,
 	agentIndex int,
 	verifier spaces.Verifier,
+	tokenChan chan<- workspace.AgentToken,
 ) (bool, string) {
 
 	var finalTrace string
@@ -296,39 +441,64 @@ func (e *FlowEngine) attemptLoop(
 			}
 		}
 
-		e.emitter.Emit(task.AgentID, telemetry.Event{
+		engine.emitter.Emit(task.AgentID, telemetry.Event{
 			ID:        uuid.NewV7(),
 			Type:      "flow_status",
 			Timestamp: time.Now(),
 			Message:   "Executing instructions...",
+			Payload:   flows.AgentTelemetry{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Attempt: attempt}.ToMap(),
 		})
 
-		err := e.executor(ctx, bundle, sandbox, agentIndex, nil)
+		engine.logger.DebugContext(ctx, "sub-agent execution starting",
+			"agent_id", task.AgentID,
+			"attempt", attempt,
+		)
+
+		err := engine.executor(ctx, bundle, sandbox, agentIndex, tokenChan)
 		if err != nil {
+			engine.logger.ErrorContext(ctx, "sub-agent LLM executor failed",
+				"agent_id", task.AgentID,
+				"attempt", attempt,
+				"error", err,
+			)
 			return false, fmt.Sprintf("Execution Error: %v", err)
 		}
 
-		_ = sandbox.ApplyDraft(ctx, fmt.Sprintf("attempt %d", attempt))
+		if err := sandbox.ApplyDraft(ctx, fmt.Sprintf("attempt %d", attempt)); err != nil {
+			engine.logger.ErrorContext(ctx, "failed to apply draft", "agent", task.AgentID, "error", err)
+		}
 
-		e.emitter.Emit(task.AgentID, telemetry.Event{
+		engine.emitter.Emit(task.AgentID, telemetry.Event{
 			ID:        uuid.NewV7(),
 			Type:      "flow_status",
 			Timestamp: time.Now(),
 			Message:   "Running tests and verification...",
+			Payload:   flows.AgentTelemetry{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Attempt: attempt}.ToMap(),
 		})
 
 		err = verifier.Verify(ctx, sandbox)
 		if err == nil {
+			engine.logger.InfoContext(ctx, "sub-agent passed verification",
+				"agent_id", task.AgentID,
+				"attempt", attempt,
+			)
 			return true, ""
 		}
 
 		finalTrace = err.Error()
 
-		e.emitter.Emit(task.AgentID, telemetry.Event{
+		engine.logger.WarnContext(ctx, "sub-agent attempt failed verification",
+			"agent_id", task.AgentID,
+			"attempt", attempt,
+			"error_trace", finalTrace,
+		)
+
+		engine.emitter.Emit(task.AgentID, telemetry.Event{
 			ID:        uuid.NewV7(),
 			Type:      "flow_error",
 			Timestamp: time.Now(),
 			Message:   "Verification failed",
+			Payload:   flows.AgentTelemetry{FlowID: flowContext.FlowID, AgentIndex: agentIndex, Attempt: attempt, Trace: finalTrace}.ToMap(),
 		})
 	}
 

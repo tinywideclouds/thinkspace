@@ -1,5 +1,5 @@
 import { Injectable, computed, inject } from '@angular/core';
-import { CognitiveStore, TimelineStore, FlowStore } from '@org/llm-state-chat';
+import { CognitiveStore, TimelineStore, FlowStore, FlowExecutionChatItem } from '@org/llm-state-chat';
 
 @Injectable({ providedIn: 'root' })
 export class CognitiveGraphFacade {
@@ -23,8 +23,8 @@ export class CognitiveGraphFacade {
   });
 
   // Actions
-  public inspectFlow(flowId: string): void {
-    this.flow.inspectFlow(flowId);
+  public inspectFlow(item: FlowExecutionChatItem): void {
+    this.flow.inspectFlow(item);
   }
 
   // Node Evaluation

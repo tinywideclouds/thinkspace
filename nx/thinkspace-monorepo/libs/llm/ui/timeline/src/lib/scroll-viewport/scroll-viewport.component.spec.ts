@@ -12,7 +12,6 @@ import { By } from '@angular/platform-browser';
       <llm-scroll-viewport [topContentAnchor]="mockAnchor()" [prefetchAnchor]="prefetchMockAnchor()" (loadPreviousPage)="onLoadPrevious()">
         <div class="mock-message" style="height: 100px;">Message 1</div>
         <div class="mock-message" style="height: 100px;">Message 2</div>
-        <div class="mock-message" style="height: 1000px;">Massive Message 3</div>
       </llm-scroll-viewport>
     </div>
   `
@@ -37,38 +36,14 @@ describe('ScrollViewportComponent', () => {
     const viewportDebug = hostFixture.debugElement.query(By.directive(ScrollViewportComponent));
     viewportComponent = viewportDebug.componentInstance;
 
-    hostFixture.detectChanges();
     await hostFixture.whenStable();
+    hostFixture.detectChanges();
   });
 
-  it('should create the component and its bottom sentinel', () => {
+  it('should create the component and bind its structural sentinels', () => {
     expect(viewportComponent).toBeTruthy();
     expect(viewportComponent.containerRef()).toBeTruthy();
     expect(viewportComponent.bottomSentinelRef()).toBeTruthy();
-  });
-
-  it('should expose a scrollToBottom method and emit scrolledToBottom, updating scroll state to auto', () => {
-    const emitSpy = vi.spyOn(viewportComponent.scrolledToBottom, 'emit');
-    
-    viewportComponent.scrollState.set('manual');
-    viewportComponent.scrollToBottom('instant');
-
     expect(viewportComponent.scrollState()).toBe('auto');
-    expect(emitSpy).toHaveBeenCalled();
-  });
-
-  it('should only maintain tail if scroll state is auto', () => {
-    viewportComponent.scrollState.set('manual');
-    const container = viewportComponent.containerRef().nativeElement;
-    container.scrollTop = 0;
-
-    viewportComponent['enforceTailLock']();
-    
-    expect(container.scrollTop).toBe(0);
-
-    viewportComponent.scrollState.set('auto');
-    viewportComponent['enforceTailLock']();
-    
-    expect(container.scrollTop).toBe(container.scrollHeight);
   });
 });

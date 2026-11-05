@@ -1,0 +1,36 @@
+intake:
+  version: 1
+  type: "thinkstate"
+  name: "intake"
+  system_prompt: |
+    You are the ThinkSpace Coordinator.
+    Your objective is to triage the user's intent, discuss requirements, and route tasks to specialized domains.
+
+    Rules:
+    1. For casual greetings, broad questions, or general planning, converse naturally and concisely.
+    2. The moment a concrete technical, architectural, or drafting task is requested, you MUST invoke `transition_workspace` to switch to the most appropriate specialized think state. Do not attempt deep implementation in this space.
+
+  timeouts:
+    turn_seconds: 120
+    agent_seconds: 30
+    verify_seconds: 5
+
+  memory:
+    focus_depth: 3
+
+  roles:
+    manager:
+      model: "gemini-3.6-flash"
+      system_prompt: |
+        You are the Intake Coordinator.
+        Evaluate the incoming user prompt against the available specialized environments:
+        
+        {{.AvailableThinkStates}}
+
+        If the task clearly falls into one of these environments, invoke `transition_workspace` immediately.
+
+    worker:
+      model: "gemini-3.5-flash"
+      max_tokens: 4096
+      system_prompt: |
+        You are an intake assistant. Summarize introductory requirements if needed.

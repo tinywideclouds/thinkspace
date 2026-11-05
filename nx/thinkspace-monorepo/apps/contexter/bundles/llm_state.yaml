@@ -22,4 +22,5 @@ files:
   - libs/llm/state/chat/src/lib/thinkspace-state.service.ts
   - libs/llm/state/chat/src/lib/ui-settings.service.spec.ts
   - libs/llm/state/chat/src/lib/ui-settings.service.ts
+  - libs/llm/state/chat/src/lib/cognitive.store.spec.ts
 last_context: llm_state_20.md

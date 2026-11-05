@@ -31,8 +31,8 @@ import { ChatFlowCardComponent } from '@org/llm-ui-core';
           <div [class.opacity-30]="facade.isItemDimmed(item)" [class.h-2]="facade.isItemCollapsed(item)" class="transition-all duration-300 overflow-hidden">
             @if (!facade.isItemCollapsed(item)) {
               <llm-chat-flow-card 
-                [flow]="facade.flowStates().get(item.flowId)" 
-                [summary]="item.content"
+                [item]="item"
+                [liveFlow]="facade.flowStates().get(item.flowId)" 
                 (inspect)="facade.inspectFlow($event)">
               </llm-chat-flow-card>
             }

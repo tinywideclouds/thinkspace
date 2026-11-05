@@ -3,6 +3,7 @@ import {
   WSEvent, 
   WSEventSchema,
   MessageType,
+  FlowStatus,
   DelegationStrategy as ProtoDelegationStrategy,
   GraphEvent as ProtoGraphEvent
 } from '@org/llm-core-protos';
@@ -16,6 +17,15 @@ import {
 
 export class LlmFacade {
   
+  private static mapFlowStatus(status: FlowStatus): 'UNSPECIFIED' | 'RUNNING' | 'COMPLETED' | 'FAILED' {
+    switch (status) {
+      case FlowStatus.RUNNING: return 'RUNNING';
+      case FlowStatus.COMPLETED: return 'COMPLETED';
+      case FlowStatus.FAILED: return 'FAILED';
+      default: return 'UNSPECIFIED';
+    }
+  }
+
   private static mapGraphEvent(protoEvent: ProtoGraphEvent): GraphEvent | null {
     if (!protoEvent.payload || protoEvent.payload.case === undefined) {
       console.warn(`[LlmFacade] GraphEvent ${protoEvent.id} has no valid payload.`);
@@ -67,7 +77,18 @@ export class LlmFacade {
           type: 'flow_execution',
           content: protoEvent.payload.value.summary,
           flowId: protoEvent.payload.value.flowId,
-          status: protoEvent.payload.value.status
+          taskId: protoEvent.payload.value.taskId,
+          task: protoEvent.payload.value.task,
+          status: this.mapFlowStatus(protoEvent.payload.value.status),
+          error: protoEvent.payload.value.error,
+          agents: protoEvent.payload.value.agents.map(a => ({
+            agentId: a.agentId,
+            passed: a.passed,
+            instruction: a.instruction,
+            rawPayload: a.rawPayload,
+            verificationTrace: a.verificationTrace,
+            stateDelta: a.stateDelta
+          }))
         };
 
       default:
@@ -97,7 +118,7 @@ export class LlmFacade {
       case 'requestTransition':
         return { 
           type: 'request_transition', 
-          targetDomain: protocolBufferEvent.payload.value.targetDomain, 
+          targetThinkState: protocolBufferEvent.payload.value.targetThinkState, 
           reasoning: protocolBufferEvent.payload.value.reasoning 
         };
       

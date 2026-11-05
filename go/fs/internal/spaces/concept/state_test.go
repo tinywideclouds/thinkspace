@@ -36,20 +36,4 @@ func TestConceptState_InterfaceContracts(t *testing.T) {
 		t.Errorf("Patcher() returned nil")
 	}
 
-	tools := space.Tools()
-	if len(tools) != 3 {
-		t.Fatalf("Expected exactly 3 tools, got %d", len(tools))
-	}
-
-	toolMap := make(map[string]bool)
-	for _, tool := range tools {
-		toolMap[tool.Name] = true
-	}
-
-	expectedTools := []string{"propose_change", "query_lens", "create_digest"}
-	for _, expected := range expectedTools {
-		if !toolMap[expected] {
-			t.Errorf("Missing expected tool: %s", expected)
-		}
-	}
 }

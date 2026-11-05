@@ -19,6 +19,13 @@ enum MessageType {
   SYSTEM = 3;
 }
 
+enum FlowStatus {
+  FLOW_STATUS_UNSPECIFIED = 0;
+  FLOW_STATUS_RUNNING = 1;
+  FLOW_STATUS_COMPLETED = 2;
+  FLOW_STATUS_FAILED = 3;
+}
+
 // --- Shared Types ---
 message SpaceInfo {
   string id = 1;
@@ -44,12 +51,14 @@ message CandidateResolution {
   string reason = 3;
 }
 
-message FlowCompleted {
+message FlowExecution {
   string flow_id = 1;
   string task_id = 2;
   string task = 3;
-  string summary = 4;
-  repeated AgentRecordPayload agents = 5;
+  FlowStatus status = 4;
+  string summary = 5;
+  string error = 6;
+  repeated AgentRecordPayload agents = 7;
 }
 
 message AgentRecordPayload {
@@ -59,6 +68,15 @@ message AgentRecordPayload {
   string raw_payload = 4;
   string verification_trace = 5;
   string state_delta = 6;
+}
+
+// RESTORED: The missing FileDelta message
+message FileDelta {
+  string summary = 1;
+  string path = 2;
+  string preview_snippet = 3;
+  string file_ref = 4;
+  string parent_id = 5;
 }
 
 // The generic core memory block, mirroring `thinkgraph.Node` exactly.
@@ -77,7 +95,8 @@ message GraphEvent {
     Message message = 8;
     CandidateProposal candidate_proposal = 9;
     CandidateResolution candidate_resolution = 10;
-    FlowCompleted flow_completed = 11;
+    FlowExecution flow_execution = 11;
+    FileDelta file_delta = 12; // RESTORED
   }
 }
 
@@ -145,7 +164,7 @@ message RequestReviewPayload {
 }
 
 message RequestTransitionPayload {
-  string target_domain = 1;
+  string target_think_state = 1;
   string reasoning = 2;
 }
 

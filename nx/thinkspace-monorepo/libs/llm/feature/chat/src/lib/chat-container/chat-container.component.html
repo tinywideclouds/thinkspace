@@ -109,7 +109,7 @@
             </llm-context-inspector>
           } @else if (cognitive.pendingTransition(); as transition) {
             <llm-chat-transition-prompt 
-              [targetDomain]="transition.targetDomain"
+              [targetDomain]="transition.targetThinkState"
               [reasoning]="transition.reasoning"
               (transitionDecided)="connection.submitTransitionDecision($event)">
             </llm-chat-transition-prompt>
@@ -151,10 +151,10 @@
   </div>
 
   <!-- Modals -->
-  @if (flow.inspectedReceipt()) {
+  @if (flow.inspectedFlow(); as flowItem) {
     <llm-flow-inspector 
-      [receiptXml]="flow.inspectedReceipt()!"
-      (close)="flow.inspectedReceipt.set(null)">
+      [flowItem]="flowItem"
+      (inspectorClosed)="flow.inspectedFlow.set(null)">
     </llm-flow-inspector>
   }
 </div>

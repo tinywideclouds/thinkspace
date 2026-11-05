@@ -1,13 +1,14 @@
 import { Injectable, signal } from '@angular/core';
 import { TelemetryEvent } from '@org/llm-core-facade';
-import { FlowState, LogItem, TimelineEntry } from './chat.models';
+import { FlowState, LogItem, TimelineEntry, FlowAgentState, FlowExecutionChatItem } from './chat.models';
 
 @Injectable({ providedIn: 'root' })
 export class FlowStore {
-  public flowStates = signal<Map<string, FlowState>>(new Map());
+  public flowStates = signal(new Map<string, FlowState>());
   public systemLogs = signal<LogItem[]>([]);
-  public retainLogs = signal<boolean>(false);
-  public inspectedReceipt = signal<string | null>(null);
+  public retainLogs = signal(false);
+  
+  public inspectedFlow = signal<FlowExecutionChatItem | null>(null);
 
   public appendSystemLog(level: string, message: string): void {
     this.systemLogs.update(logs => [
@@ -26,14 +27,17 @@ export class FlowStore {
   }
 
   public processTelemetry(event: TelemetryEvent): void {
+    const payload = event.payload || {};
+
     if (event.channel === 'manager') {
       this.appendSystemLog('INFO', event.message || event.summary || event.eventType);
       
-      const flowId = event.payload['flow_id'] as string;
+      const flowId = typeof payload['flow_id'] === 'string' ? payload['flow_id'] : '';
       if (flowId) {
         if (event.eventType === 'flow_start') {
-           const taskId = event.payload['task_id'] as string || 'unknown';
-           const agentCount = (event.payload['agent_count'] as number) || 0;
+           const taskId = typeof payload['task_id'] === 'string' ? payload['task_id'] : 'unknown';
+           const agentCount = typeof payload['agent_count'] === 'number' ? payload['agent_count'] : 0;
+           
            this.flowStates.update(map => {
              const newMap = new Map(map);
              newMap.set(flowId, {
@@ -42,7 +46,7 @@ export class FlowStore {
                agentCount,
                completedCount: 0,
                status: 'running',
-               agents: new Map()
+               agents: new Map<string, FlowAgentState>()
              });
              return newMap;
            });
@@ -61,8 +65,8 @@ export class FlowStore {
     }
 
     // Agent channel telemetry
-    const flowId = event.payload['flow_id'] as string;
-    const agentId = event.payload['agent_id'] as string;
+    const flowId = typeof payload['flow_id'] === 'string' ? payload['flow_id'] : '';
+    const agentId = typeof payload['agent_id'] === 'string' ? payload['agent_id'] : '';
     if (!flowId || !agentId) return;
 
     this.flowStates.update(map => {
@@ -71,20 +75,21 @@ export class FlowStore {
       if (!flow) return newMap;
 
       const agents = new Map(flow.agents);
-      let agent = agents.get(agentId);
+      const existingAgent = agents.get(agentId);
 
-      if (!agent) {
-        agent = {
-          agentId,
-          agentIndex: (event.payload['agent_index'] as number) || 0,
-          instruction: (event.payload['instruction'] as string) || '',
-          status: 'running',
-          attempt: 1,
-          trace: '',
-          passed: false,
-          timeline: []
-        };
-      }
+      const agentIndex = typeof payload['agent_index'] === 'number' ? payload['agent_index'] : 0;
+      const instruction = typeof payload['instruction'] === 'string' ? payload['instruction'] : '';
+
+      const agent: FlowAgentState = existingAgent || {
+        agentId,
+        agentIndex,
+        instruction,
+        status: 'running',
+        attempt: 1,
+        trace: '',
+        passed: false,
+        timeline: []
+      };
 
       const timelineEntry: TimelineEntry = {
         id: event.id || crypto.randomUUID(),
@@ -94,15 +99,15 @@ export class FlowStore {
       };
 
       if (event.eventType === 'agent_status') {
-         agent.status = (event.payload['status'] as string) || agent.status;
+         agent.status = typeof payload['status'] === 'string' ? payload['status'] : agent.status;
       } else if (event.eventType === 'agent_complete') {
          agent.status = 'completed';
-         agent.passed = !!event.payload['passed'];
-         agent.trace = (event.payload['trace'] as string) || '';
+         agent.passed = Boolean(payload['passed']);
+         agent.trace = typeof payload['trace'] === 'string' ? payload['trace'] : '';
       } else if (event.eventType === 'agent_error') {
          agent.status = 'error';
          agent.passed = false;
-         agent.trace = (event.payload['trace'] as string) || '';
+         agent.trace = typeof payload['trace'] === 'string' ? payload['trace'] : '';
       }
 
       agent.timeline = [...agent.timeline, timelineEntry];
@@ -113,22 +118,9 @@ export class FlowStore {
     });
   }
 
-  public inspectFlow(flowId: string): void {
-    console.log(`[FlowStore] Inspecting flow ${flowId}`);
-    const mockReceipt = `<?xml version="1.0" encoding="UTF-8"?>
-    <FlowReceipt FlowID="${flowId}" TaskID="task-1" Timestamp="${new Date().toISOString()}">
-      <Task>Inspected Task</Task>
-      <Summary>Flow execution summary for ${flowId}</Summary>
-      <Agents>
-        <Agent AgentID="agent-1" Passed="true">
-          <Instruction>Execute flow tasks based on provided instructions.</Instruction>
-          <RawPayload>{}</RawPayload>
-          <VerificationTrace>[VERIFY] check dependencies: SUCCESS</VerificationTrace>
-          <StateDelta></StateDelta>
-        </Agent>
-      </Agents>
-    </FlowReceipt>`;
-    this.inspectedReceipt.set(mockReceipt);
+  public inspectFlow(item: FlowExecutionChatItem): void {
+    console.log(`[FlowStore] Inspecting flow ${item.flowId}`);
+    this.inspectedFlow.set(item);
   }
 
   public resetTurn(): void {
@@ -138,7 +130,7 @@ export class FlowStore {
   }
 
   public clearSession(): void {
-    this.flowStates.set(new Map());
+    this.flowStates.set(new Map<string, FlowState>());
     this.systemLogs.set([]);
   }
 }

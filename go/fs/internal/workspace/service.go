@@ -13,16 +13,17 @@ import (
 	"strings"
 	"time"
 
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
-	"uuid"
 )
 
 var ErrGraphMismatch = errors.New("physical ledger mismatch detected (Git history was altered). The fast-graph index must be rebuilt")
 
 type Service struct {
 	logger        *slog.Logger
-	engine        ChatEngine
+	engine        ChatVersioner
 	workspaceRoot string
 	dispatcher    *thinkgraph.Dispatcher
 	emitter       telemetry.Emitter
@@ -30,7 +31,7 @@ type Service struct {
 
 func NewService(
 	logger *slog.Logger,
-	engine ChatEngine,
+	engine ChatVersioner,
 	workspaceRoot string,
 	dispatcher *thinkgraph.Dispatcher,
 	emitter telemetry.Emitter,
@@ -100,8 +101,12 @@ func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*
 				return nil, fmt.Errorf("fast-forward failed: %w", err)
 			}
 		} else if status == thinkgraph.SyncStatusMismatch {
-			s.logger.WarnContext(ctx, "Hard mismatch detected between BadgerDB and Git disk", "chat_id", chatID)
-			return nil, ErrGraphMismatch
+			s.logger.WarnContext(ctx, "History divergence detected between BadgerDB and disk; rebuilding graph index from ledger", "chat_id", chatID)
+			if err := rehydrator.Rebuild(ctx, chat); err != nil {
+				s.logger.ErrorContext(ctx, "failed rebuilding graph index from ledger", "chat_id", chatID, "error", err)
+				return nil, fmt.Errorf("rebuilding graph index: %w", err)
+			}
+			s.logger.InfoContext(ctx, "successfully rebuilt graph index from ledger", "chat_id", chatID)
 		}
 	} else {
 		_, _ = thinkgraph.LoadOrRebuildManifest(ledgerPath, "main")
@@ -216,7 +221,7 @@ func (s *Service) LogProposal(ctx context.Context, c *thinkgraph.Chat, candidate
 	event := thinkgraph.NewEvent(EventCandidateProposal, description)
 	event.Tags = tags
 
-	payload := CandidateProposalPayload{
+	payload := CandidateProposal{
 		CandidateID: candidateID,
 		Description: description,
 		Files:       fileList,
@@ -234,7 +239,7 @@ func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.Chat, candida
 
 	event := thinkgraph.NewEvent(EventCandidateResolution, fmt.Sprintf("Proposal %s %s. Reason: %s", candidateID, status, reason))
 
-	payload := CandidateResolutionPayload{
+	payload := CandidateResolution{
 		CandidateID: candidateID,
 		Accepted:    accepted,
 		Reason:      reason,

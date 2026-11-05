@@ -1,0 +1,147 @@
+[
+  {
+    "offsetMs": 200,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "durable-success-1",
+          "timestamp": "2026-10-23T12:00:00Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "flowExecution": {
+            "flowId": "flow-succ-1",
+            "taskId": "task-succ-1",
+            "task": "I am assigning 2 agents to explore adding JWT authentication to our existing golang service.",
+            "status": 1,
+            "error": "",
+            "summary": "Orchestrating agents to implement JWT auth...",
+            "agents": []
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 300,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "manager",
+        "event": {
+          "id": "tel-s1",
+          "type": "flow_start",
+          "timestamp": "2026-10-23T12:00:00Z",
+          "message": "",
+          "summary": "Starting JWT refactor",
+          "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"task_id\": \"task-succ-1\", \"agent_count\": 2}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 1000,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "agent",
+        "event": {
+          "id": "tel-s2",
+          "type": "agent_status",
+          "timestamp": "2026-10-23T12:00:01Z",
+          "message": "Writing token generation logic...",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"agent_id\": \"jwt-writer\", \"agent_index\": 0, \"instruction\": \"Write JWT logic\", \"status\": \"running\"}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 2500,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "agent",
+        "event": {
+          "id": "tel-s3",
+          "type": "agent_complete",
+          "timestamp": "2026-10-23T12:00:02Z",
+          "message": "Token logic complete",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"agent_id\": \"jwt-writer\", \"passed\": true, \"trace\": \"[SYSTEM] Generated auth.go successfully.\"}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 3000,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "agent",
+        "event": {
+          "id": "tel-s4",
+          "type": "agent_status",
+          "timestamp": "2026-10-23T12:00:03Z",
+          "message": "Integrating middleware...",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"agent_id\": \"middleware-writer\", \"agent_index\": 1, \"instruction\": \"Protect /api routes\", \"status\": \"running\"}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 4500,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "agent",
+        "event": {
+          "id": "tel-s5",
+          "type": "agent_complete",
+          "timestamp": "2026-10-23T12:00:04Z",
+          "message": "Middleware integrated",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"agent_id\": \"middleware-writer\", \"passed\": true, \"trace\": \"[SYSTEM] Routes protected.\"}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 5000,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "durable-success-1",
+          "timestamp": "2026-10-23T12:00:05Z",
+          "tags": ["auth", "middleware"],
+          "tombstoned": false,
+          "metadata": {},
+          "flowExecution": {
+            "flowId": "flow-succ-1",
+            "taskId": "task-succ-1",
+            "task": "I am assigning 2 agents to explore adding JWT authentication to our existing golang service.",
+            "status": 2,
+            "error": "",
+            "summary": "Successfully implemented JWT authentication. The token generation logic was isolated in `auth.go`, and the middleware was seamlessly integrated into the Gin router to protect all `/api/v1` routes.",
+            "agents": [
+              { "agentId": "jwt-writer", "passed": true, "instruction": "Write JWT logic", "verificationTrace": "[SYSTEM] Generated auth.go successfully." },
+              { "agentId": "middleware-writer", "passed": true, "instruction": "Protect /api routes", "verificationTrace": "[SYSTEM] Routes protected." }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 5100,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "manager",
+        "event": {
+          "id": "tel-s6",
+          "type": "flow_complete",
+          "timestamp": "2026-10-23T12:00:05Z",
+          "message": "",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"passed\": true}"
+        }
+      }
+    }
+  }
+]

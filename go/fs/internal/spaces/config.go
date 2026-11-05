@@ -60,13 +60,11 @@ type ToolCreateDigestConfig struct {
 }
 
 type ToolProposeChangeConfig struct {
-	Description                  string `yaml:"description"`
-	AssignedTagsDescription      string `yaml:"assigned_tags_description"`
-	AgentCountDescription        string `yaml:"agent_count_description"`
-	AgentInstructionsDescription string `yaml:"agent_instructions_description"`
-	ContextDigestDescription     string `yaml:"context_digest_description"`
-	InstructionDescription       string `yaml:"instruction_description"`
-	TargetFilesDescription       string `yaml:"target_files_description"`
+	Description              string `yaml:"description"`
+	AgentCountDescription    string `yaml:"agent_count_description"`
+	ContextDigestDescription string `yaml:"context_digest_description"`
+	InstructionDescription   string `yaml:"instruction_description"`
+	TargetFilesDescription   string `yaml:"target_files_description"`
 }
 
 type ToolQueryLensConfig struct {

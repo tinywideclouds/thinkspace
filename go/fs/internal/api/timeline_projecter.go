@@ -10,6 +10,21 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
+// mapFlowStatus exhaustively guarantees type safety across the architectural boundary,
+// preventing silent drift between the domain enums and transport protobufs.
+func mapFlowStatus(domainStatus flows.FlowStatus) pb.FlowStatus {
+	switch domainStatus {
+	case flows.FlowStatusRunning:
+		return pb.FlowStatus_FLOW_STATUS_RUNNING
+	case flows.FlowStatusCompleted:
+		return pb.FlowStatus_FLOW_STATUS_COMPLETED
+	case flows.FlowStatusFailed:
+		return pb.FlowStatus_FLOW_STATUS_FAILED
+	default:
+		return pb.FlowStatus_FLOW_STATUS_UNSPECIFIED
+	}
+}
+
 // ProjectTimeline iterates over raw generic graph nodes, extracts the strongly typed domain payloads,
 // and maps them natively into Protobuf envelopes to maintain strict transport type safety.
 func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
@@ -41,7 +56,7 @@ func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
 				},
 			}
 		case workspace.EventCandidateProposal:
-			var payload workspace.CandidateProposalPayload
+			var payload workspace.CandidateProposal
 			if err := json.Unmarshal(n.Data, &payload); err != nil {
 				continue
 			}
@@ -63,7 +78,7 @@ func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
 				},
 			}
 		case workspace.EventCandidateResolution:
-			var payload workspace.CandidateResolutionPayload
+			var payload workspace.CandidateResolution
 			if err := json.Unmarshal(n.Data, &payload); err != nil {
 				continue
 			}
@@ -74,14 +89,19 @@ func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
 					Reason:      payload.Reason,
 				},
 			}
-		case flows.EventFlowCompleted:
-			var payload flows.FlowCompletedPayload
-			if err := json.Unmarshal(n.Data, &payload); err != nil {
+		case flows.EventFlowLifecycle:
+			var config flows.FlowData
+			if err := json.Unmarshal(n.Data, &config); err != nil {
 				continue
 			}
 
+			var state flows.FlowExecutionState
+			if len(n.MaterializedState) > 0 {
+				_ = json.Unmarshal(n.MaterializedState, &state)
+			}
+
 			var agents []*pb.AgentRecordPayload
-			for _, a := range payload.Agents {
+			for _, a := range state.Agents {
 				agents = append(agents, &pb.AgentRecordPayload{
 					AgentId:           a.AgentID,
 					Passed:            a.Passed,
@@ -92,17 +112,18 @@ func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
 				})
 			}
 
-			ev.Payload = &pb.GraphEvent_FlowCompleted{
-				FlowCompleted: &pb.FlowCompleted{
-					FlowId:  payload.FlowID,
-					TaskId:  payload.TaskID,
-					Task:    payload.Task,
-					Summary: payload.Summary,
+			ev.Payload = &pb.GraphEvent_FlowExecution{
+				FlowExecution: &pb.FlowExecution{
+					FlowId:  config.FlowID,
+					TaskId:  config.TaskID,
+					Task:    config.TaskPrompt,
+					Status:  mapFlowStatus(state.Status),
+					Summary: state.Summary,
+					Error:   state.Error,
 					Agents:  agents,
 				},
 			}
 		default:
-			// thinkgraph.EventDigest, flows.EventFlowStarted, flows.EventAgentSpawned, EventFileUpdate
 			ev.Payload = &pb.GraphEvent_Message{
 				Message: &pb.Message{
 					Type: pb.MessageType_SYSTEM,

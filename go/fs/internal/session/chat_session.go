@@ -8,15 +8,17 @@ import (
 	"sync"
 	"time"
 
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"uuid"
 )
 
 type ChatSession struct {
@@ -30,13 +32,13 @@ type ChatSession struct {
 	workspaceManager *workspace.ServiceManager
 	workspaceService *workspace.Service
 	modelClient      llm.ModelClient
-	contextProjecter *thinkgraph.ContextProjecter
+	bundleAssembler  *BundleAssembler
 	fanOutFlow       flows.Flow
 	digestManager    *DigestManager
+	reviewPolicy     ContextReviewPolicy
 }
 
-// OpenChat acts as the factory, reading physical state exactly once.
-func OpenChat(
+func NewChatSession(
 	ctx context.Context,
 	logger *slog.Logger,
 	registry *config.Registry,
@@ -50,13 +52,34 @@ func OpenChat(
 	workspaceService := workspaceManager.GetService(spaceID)
 
 	if _, err := workspaceService.InitializeChat(ctx, spaceID, chatID); err != nil {
+		logger.ErrorContext(ctx, "failed initializing chat boundaries", "space_id", spaceID, "chat_id", chatID, "error", err)
 		return nil, fmt.Errorf("initializing chat boundaries: %w", err)
 	}
 
 	meta, err := workspaceManager.GetChatMeta(spaceID, chatID)
 	if err != nil {
+		logger.ErrorContext(ctx, "failed loading chat meta", "space_id", spaceID, "chat_id", chatID, "error", err)
 		return nil, fmt.Errorf("loading chat meta: %w", err)
 	}
+
+	if meta.ActiveThinkState == "" {
+		if spaceState, stateErr := workspaceManager.GetSpaceState(spaceID); stateErr == nil && spaceState.ThinkState != "" {
+			meta.ActiveThinkState = spaceState.ThinkState
+		} else {
+			meta.ActiveThinkState = "intake"
+		}
+		_ = workspaceManager.UpdateChatMeta(spaceID, chatID, func(m *workspace.ChatMeta) {
+			m.ActiveThinkState = meta.ActiveThinkState
+		})
+	}
+
+	assembler := NewBundleAssembler(
+		logger,
+		workspaceManager.GraphRepository(),
+		thinkgraph.NewContextProjecter(),
+		registry,
+		workspaceService.WorkspaceRoot(),
+	)
 
 	return &ChatSession{
 		SpaceID:          spaceID,
@@ -67,23 +90,51 @@ func OpenChat(
 		workspaceManager: workspaceManager,
 		workspaceService: workspaceService,
 		modelClient:      modelClient,
-		contextProjecter: thinkgraph.NewContextProjecter(),
+		bundleAssembler:  assembler,
 		fanOutFlow:       fanOutFlow,
 		digestManager:    digestManager,
+		reviewPolicy:     NewTokenThresholdPolicy(),
 	}, nil
+}
+
+func (s *ChatSession) Mu() *sync.RWMutex {
+	return &s.mu
+}
+
+func (s *ChatSession) SetReviewPolicy(policy ContextReviewPolicy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if policy == nil {
+		policy = NewTokenThresholdPolicy()
+	}
+	s.reviewPolicy = policy
 }
 
 func (s *ChatSession) flushMeta() error {
 	s.mu.RLock()
-	activeDomain := s.Meta.ActiveDomain
-	initializedDomains := s.Meta.InitializedDomains
+	activeThinkState := s.Meta.ActiveThinkState
+	initializedThinkStates := s.Meta.InitializedThinkStates
 	digestionHorizon := s.Meta.DigestionHorizon
 	evaluationHorizon := s.Meta.EvaluationHorizon
 	s.mu.RUnlock()
 
 	return s.workspaceManager.UpdateChatMeta(s.SpaceID, s.ChatID, func(m *workspace.ChatMeta) {
-		m.ActiveDomain = activeDomain
-		m.InitializedDomains = initializedDomains
+		m.ActiveThinkState = activeThinkState
+		m.InitializedThinkStates = initializedThinkStates
+		m.DigestionHorizon = digestionHorizon
+		m.EvaluationHorizon = evaluationHorizon
+	})
+}
+
+func (s *ChatSession) flushMetaLocked() error {
+	activeThinkState := s.Meta.ActiveThinkState
+	initializedThinkStates := s.Meta.InitializedThinkStates
+	digestionHorizon := s.Meta.DigestionHorizon
+	evaluationHorizon := s.Meta.EvaluationHorizon
+
+	return s.workspaceManager.UpdateChatMeta(s.SpaceID, s.ChatID, func(m *workspace.ChatMeta) {
+		m.ActiveThinkState = activeThinkState
+		m.InitializedThinkStates = initializedThinkStates
 		m.DigestionHorizon = digestionHorizon
 		m.EvaluationHorizon = evaluationHorizon
 	})
@@ -102,13 +153,18 @@ func (s *ChatSession) buildTopology() map[string]thinkgraph.BranchTopology {
 func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, error) {
 	s.mu.RLock()
 	activeBranch := s.Meta.ActiveBranch
-	domain := s.Meta.ActiveDomain
+	activeThinkState := s.Meta.ActiveThinkState
+	digestionHorizon := s.Meta.DigestionHorizon
 	s.mu.RUnlock()
 
 	chatObj := &thinkgraph.Chat{ID: s.ChatID, SpaceID: s.SpaceID, ActiveBranch: activeBranch}
 
-	thinkState, _ := s.registry.GetDomain(domain)
-	_, graphData, err := s.assembleBundle(ctx, chatObj, thinkState)
+	thinkState, ok := s.registry.GetThinkState(activeThinkState)
+	if !ok {
+		s.logger.WarnContext(ctx, "failed resolving think state for graph data", "thinkState", activeThinkState)
+	}
+
+	_, graphData, err := s.bundleAssembler.Assemble(ctx, chatObj, s.buildTopology(), digestionHorizon, activeThinkState, thinkState)
 	return graphData, err
 }
 
@@ -120,9 +176,12 @@ func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInt
 	chatObj := &thinkgraph.Chat{ID: s.ChatID, SpaceID: s.SpaceID, ActiveBranch: activeBranch}
 
 	if promptText != "" {
+		s.logger.InfoContext(ctx, "processing user prompt", "chat_id", s.ChatID, "prompt", promptText)
 		if err := s.workspaceService.LogUserPrompt(ctx, chatObj, promptText); err != nil {
+			s.logger.ErrorContext(ctx, "failed logging user prompt to ledger", "chat_id", s.ChatID, "error", err)
 			return fmt.Errorf("logging user prompt: %w", err)
 		}
+		s.logger.InfoContext(ctx, "successfully logged user prompt to ledger", "chat_id", s.ChatID)
 	}
 
 	for {
@@ -134,286 +193,187 @@ func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInt
 		})
 
 		s.mu.Lock()
-		if s.Meta.ActiveDomain == "" {
-			spaceState, _ := s.workspaceManager.GetSpaceState(s.SpaceID)
-			s.Meta.ActiveDomain = spaceState.Domain
-			_ = s.flushMeta()
+		if s.Meta.ActiveThinkState == "" {
+			spaceState, err := s.workspaceManager.GetSpaceState(s.SpaceID)
+			if err != nil {
+				s.logger.WarnContext(ctx, "failed reading space state during active think state resolution", "space_id", s.SpaceID, "error", err)
+			}
+			s.Meta.ActiveThinkState = spaceState.ThinkState
+			if flushErr := s.flushMetaLocked(); flushErr != nil {
+				s.logger.WarnContext(ctx, "failed flushing meta with resolved think state", "error", flushErr)
+			}
 		}
-		activeDomain := s.Meta.ActiveDomain
+		activeThinkState := s.Meta.ActiveThinkState
+		digestionHorizon := s.Meta.DigestionHorizon
 		s.mu.Unlock()
 
-		thinkState, ok := s.registry.GetDomain(activeDomain)
+		s.logger.InfoContext(ctx, "resolving think state from registry", "space_id", s.SpaceID, "active_think_state", activeThinkState)
+		thinkState, ok := s.registry.GetThinkState(activeThinkState)
 		if !ok {
-			return fmt.Errorf("domain configuration not found: %s", activeDomain)
+			s.logger.ErrorContext(ctx, "think state configuration not found in registry", "space_id", s.SpaceID, "think_state", activeThinkState)
+			return fmt.Errorf("think state configuration not found: %s", activeThinkState)
 		}
 
-		bundle, graphData, err := s.assembleBundle(ctx, chatObj, thinkState)
+		s.logger.InfoContext(ctx, "assembling context bundle", "think_state", activeThinkState, "branch", activeBranch)
+		bundle, graphData, err := s.bundleAssembler.Assemble(ctx, chatObj, s.buildTopology(), digestionHorizon, activeThinkState, thinkState)
 		if err != nil {
-			return err
+			s.logger.ErrorContext(ctx, "failed assembling bundle", "error", err)
+			return fmt.Errorf("assembling bundle: %w", err)
 		}
 
-		var recentHistory []string
-		for _, mem := range bundle.Trajectory.WorkingMemory {
-			recentHistory = append(recentHistory, fmt.Sprintf("[%s] %s", mem.Role, mem.Content))
+		settings, err := s.workspaceManager.GetSpaceSettings(s.SpaceID)
+		if err != nil {
+			s.logger.WarnContext(ctx, "failed to read space settings, using safe defaults", "error", err)
+			settings = workspace.SpaceSettings{
+				ReviewPolicy: workspace.ReviewPolicySettings{
+					Active:         true,
+					MinTokens:      200,
+					IncludePersona: false,
+				},
+			}
 		}
 
-		var fileContexts []FileContext
-		for _, item := range bundle.Workbench {
-			fileContexts = append(fileContexts, FileContext{
-				Path:       item.Path,
-				Level:      "injected",
-				TokenCount: item.TokenCount,
-			})
+		s.mu.RLock()
+		policy := s.reviewPolicy
+		s.mu.RUnlock()
+		if policy == nil {
+			policy = NewTokenThresholdPolicy()
 		}
 
-		turnCtx := TurnContext{
-			SpaceID:             s.SpaceID,
-			ChatID:              s.ChatID,
-			ManagerSystemPrompt: bundle.Rules.Persona,
-			StickyDigests:       bundle.Trajectory.LongTermMemory,
-			RecentHistory:       recentHistory,
-			FileContexts:        fileContexts,
-			Focus:               graphData.Focus,
-		}
+		shouldReview := policy.ShouldReview(settings, &bundle, graphData.Focus)
+		s.logger.InfoContext(ctx, "evaluated context review policy",
+			"context_review_active", settings.ReviewPolicy.Active,
+			"min_tokens", settings.ReviewPolicy.MinTokens,
+			"include_persona", settings.ReviewPolicy.IncludePersona,
+			"should_review", shouldReview,
+			"working_memory_count", len(bundle.Trajectory.WorkingMemory),
+			"workbench_files_count", len(bundle.Workbench),
+		)
 
-		decision := ui.ReviewContext(turnCtx)
-		if !decision.Approved {
-			s.logger.Info("Turn cancelled by user during context review")
+		if !s.contextReview(ctx, shouldReview, &bundle, graphData, ui) {
 			return nil
 		}
 
-		if decision.RetainedFilePaths != nil {
-			retainedPaths := make(map[string]bool)
-			for _, p := range decision.RetainedFilePaths {
-				retainedPaths[p] = true
-			}
-			var prunedWorkbench []cognition.WorkbenchItem
-			for _, item := range bundle.Workbench {
-				if retainedPaths[item.Path] {
-					prunedWorkbench = append(prunedWorkbench, item)
-				}
-			}
-			bundle.Workbench = prunedWorkbench
-		}
-
-		if decision.RetainedHistoryIndices != nil {
-			retainedIndices := make(map[int]bool)
-			for _, idx := range decision.RetainedHistoryIndices {
-				retainedIndices[idx] = true
-			}
-			var prunedMemory []cognition.TrajectoryEvent
-			for i, item := range bundle.Trajectory.WorkingMemory {
-				if retainedIndices[i] {
-					prunedMemory = append(prunedMemory, item)
-				}
-			}
-			bundle.Trajectory.WorkingMemory = prunedMemory
-		}
-
 		executor := llm.NewSubAgentExecutor(s.logger, s.modelClient, thinkState.Config().Roles.Worker.Model, thinkState.Patcher())
-		spaceConfig, _ := s.registry.GetConfig(activeDomain)
+		spaceConfig, ok := s.registry.GetConfig(activeThinkState)
+		if !ok {
+			s.logger.ErrorContext(ctx, "think state config not found in registry", "think_state", activeThinkState)
+			return fmt.Errorf("config not found for think state: %s", activeThinkState)
+		}
 
-		// Inject the new Dispatcher dependency into the FlowEngine alongside the Emitter
+		registry := tools.NewRegistry()
+
+		var validStates []string
+		for k := range s.registry.GetAllConfigs() {
+			validStates = append(validStates, k)
+		}
+		registry.Register(tools.NewTransitionThinkStateTool(validStates))
+
 		flowEngine := NewFlowEngine(s.logger, s.workspaceService, executor, s.workspaceService.Dispatcher(), emitter)
-		coordinator := NewCoordinator(s.logger, s.workspaceService, s.modelClient, emitter, flowEngine, s.fanOutFlow, s.digestManager, s.SpaceID, spaceConfig.WorkerSystemPrompt())
 
-		err = coordinator.RunAgentLoop(ctx, chatObj, s, thinkState, bundle, ui, s.buildToolRegistry(thinkState))
+		// The Coordinator is now injected with the UI directly.
+		turnCoordinator := NewTurnCoordinator(s.logger, s.workspaceService, s.modelClient, emitter, flowEngine, s.fanOutFlow, s.digestManager, s.SpaceID, spaceConfig.WorkerSystemPrompt(), spaceConfig.Roles.Worker.Model, registry, thinkState, ui)
+
+		registry.Register(tools.NewProposeChangeTool(turnCoordinator))
+		registry.Register(tools.NewQueryLensTool(turnCoordinator))
+		registry.Register(tools.NewCreateDigestTool(turnCoordinator))
+
+		s.logger.InfoContext(ctx, "invoking turn coordinator agent loop")
+		err = turnCoordinator.RunAgentLoop(ctx, chatObj, s, thinkState, bundle)
 
 		s.evaluateAndTriggerDigestion(ctx, chatObj, thinkState.Config().Memory)
 
-		if transitionReq, isTransition := err.(*TransitionRequest); isTransition {
-			if rebootErr := s.handleTransition(ctx, chatObj, transitionReq.TargetDomain, ui); rebootErr != nil {
+		if transitionReq, isTransition := err.(*tools.TransitionThinkStateRequest); isTransition {
+			s.logger.InfoContext(ctx, "domain transition requested by LLM", "target", transitionReq.TargetThinkState)
+			if rebootErr := s.handleTransition(ctx, chatObj, transitionReq.TargetThinkState, ui); rebootErr != nil {
+				s.logger.ErrorContext(ctx, "domain transition failed", "error", rebootErr)
 				return rebootErr
 			}
 			continue
 		}
 
+		if err != nil {
+			s.logger.ErrorContext(ctx, "turn execution completed with error", "error", err)
+		} else {
+			s.logger.InfoContext(ctx, "turn execution completed successfully")
+		}
 		return err
 	}
 }
 
-func (s *ChatSession) assembleBundle(ctx context.Context, chatObj *thinkgraph.Chat, thinkState spaces.ThinkState) (cognition.ThinkBundle, *thinkgraph.GraphData, error) {
-	graphRepository := s.workspaceManager.GraphRepository()
-	traversalEngine := thinkgraph.NewTraversalEngine(graphRepository)
-	var volatileEvents []thinkgraph.Node
-	primaryTags := make(map[string]bool)
-	relatedTags := make(map[string]bool)
-
-	focusDepth := 3
-	if thinkState != nil {
-		focusDepth = thinkState.Config().Memory.FocusDepth
-	}
-
-	s.mu.RLock()
-	digestionHorizon := s.Meta.DigestionHorizon
-	s.mu.RUnlock()
-
-	err := traversalEngine.WalkTimelineReverse(ctx, chatObj, s.buildTopology(), func(node thinkgraph.Node) bool {
-		if node.ID == digestionHorizon {
-			return false
-		}
-
-		volatileEvents = append(volatileEvents, node)
-
-		if len(volatileEvents) <= focusDepth {
-			for _, tag := range node.Tags {
-				primaryTags[tag] = true
-			}
-		} else {
-			for _, tag := range node.Tags {
-				relatedTags[tag] = true
-			}
-		}
-
-		if len(volatileEvents) >= 50 {
-			return false
-		}
+func (s *ChatSession) contextReview(ctx context.Context, shouldReview bool, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
+	if !shouldReview {
+		s.logger.DebugContext(ctx, "bypassing UI context review")
 		return true
-	})
-	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("walking timeline: %w", err)
 	}
 
-	for i, j := 0, len(volatileEvents)-1; i < j; i, j = i+1, j-1 {
-		volatileEvents[i], volatileEvents[j] = volatileEvents[j], volatileEvents[i]
+	turnContext := ProjectTurnContext(s.SpaceID, s.ChatID, bundle, graphData.Focus)
+	s.logger.InfoContext(ctx, "blocking for UI context review", "preview_id", turnContext.PreviewID)
+
+	decision := ui.ReviewContext(turnContext)
+	if !decision.Approved {
+		s.logger.InfoContext(ctx, "turn cancelled by user during context review")
+		return false
 	}
 
-	allStickyDigests, err := graphRepository.GetStickyDigests(ctx, chatObj)
-	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching digests: %w", err)
-	}
+	s.logger.InfoContext(ctx, "context approved by UI, applying retentions")
 
-	allSpaceContexts, err := graphRepository.GetSpaceContexts(ctx, chatObj)
-	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching space contexts: %w", err)
-	}
-
-	manifest := thinkgraph.NewChatManifest()
-
-	var activeDigests []thinkgraph.DigestMeta
-	for _, d := range allStickyDigests {
-		if len(d.Tags) == 0 {
-			activeDigests = append(activeDigests, d)
-			manifest.Digests[d.ID] = d
-			continue
+	if decision.RetainedFilePaths != nil {
+		retainedPaths := make(map[string]bool)
+		for _, p := range decision.RetainedFilePaths {
+			retainedPaths[p] = true
 		}
-		isActive := false
-		for _, tag := range d.Tags {
-			if primaryTags[tag] || relatedTags[tag] {
-				isActive = true
-				break
+		var prunedWorkbench []cognition.WorkbenchItem
+		for _, item := range bundle.Workbench {
+			if retainedPaths[item.Path] {
+				prunedWorkbench = append(prunedWorkbench, item)
 			}
 		}
-		if isActive {
-			activeDigests = append(activeDigests, d)
-			manifest.Digests[d.ID] = d
-		}
+		bundle.Workbench = prunedWorkbench
 	}
 
-	for _, sc := range allSpaceContexts {
-		if len(sc.Tags) == 0 {
-			manifest.SpaceContexts[sc.ID] = sc
-			continue
-		}
-		isActive := false
-		for _, tag := range sc.Tags {
-			if primaryTags[tag] || relatedTags[tag] {
-				isActive = true
-				break
+	if decision.RetainedHistoryIndices != nil {
+		retainedIndices := make(map[int]bool)
+		retainedCatalyst := false
+		catalystIndex := len(bundle.Trajectory.WorkingMemory)
+
+		for _, idx := range decision.RetainedHistoryIndices {
+			retainedIndices[idx] = true
+			if idx == catalystIndex {
+				retainedCatalyst = true
 			}
 		}
-		if isActive {
-			manifest.SpaceContexts[sc.ID] = sc
+
+		if bundle.Trajectory.Catalyst.Content != "" && !retainedCatalyst {
+			s.logger.WarnContext(ctx, "catalyst (user prompt) explicitly unchecked by user; aborting turn")
+			return false
 		}
+
+		var prunedMemory []cognition.TrajectoryEvent
+		for i, item := range bundle.Trajectory.WorkingMemory {
+			if retainedIndices[i] {
+				prunedMemory = append(prunedMemory, item)
+			}
+		}
+		bundle.Trajectory.WorkingMemory = prunedMemory
 	}
 
-	focus := thinkgraph.AttentionFocus{
-		PrimaryFocus:   mapKeys(primaryTags),
-		RelatedContext: mapKeys(relatedTags),
-		DormantLenses:  []string{},
-	}
+	s.logger.DebugContext(ctx, "final bundle prepared for orchestrator",
+		"working_memory_count", len(bundle.Trajectory.WorkingMemory),
+		"catalyst_present", bundle.Trajectory.Catalyst.Content != "",
+		"workbench_files_count", len(bundle.Workbench),
+		"long_term_memory_count", len(bundle.Trajectory.LongTermMemory),
+	)
 
-	graphData := &thinkgraph.GraphData{
-		Timeline: volatileEvents,
-		Digests:  activeDigests,
-		Focus:    focus,
-	}
-
-	if thinkState == nil {
-		return cognition.ThinkBundle{}, graphData, nil
-	}
-
-	rawMapbook, err := thinkState.Mapbook().GenerateLayers(ctx, s.workspaceService.WorkspaceRoot())
-	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("generating mapbook layers: %w", err)
-	}
-
-	stringMaps := make(map[string]string)
-	for k, v := range rawMapbook {
-		stringMaps[string(k)] = v
-	}
-
-	var catalystNode *thinkgraph.Node
-	if len(volatileEvents) > 0 {
-		last := volatileEvents[len(volatileEvents)-1]
-		catalystNode = &last
-		volatileEvents = volatileEvents[:len(volatileEvents)-1]
-	}
-
-	trajectoryRequest := thinkgraph.ContextRequest{
-		Manifest:     manifest,
-		RecentEvents: volatileEvents,
-		Catalyst:     catalystNode,
-		Focus:        focus,
-	}
-
-	// Uses the new ContextProjecter to safely ignore heavy MaterializedState diffs
-	trajectory, err := s.contextProjecter.Build(ctx, trajectoryRequest)
-	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("assembling trajectory: %w", err)
-	}
-
-	systemPrompt := thinkState.Config().ManagerSystemPrompt()
-	s.mu.RLock()
-	domain := s.Meta.ActiveDomain
-	s.mu.RUnlock()
-
-	systemPrompt += fmt.Sprintf("\n\n[GLOBAL SYSTEM RULE]: You are currently operating in the '%s' domain. You may use the `transition_workspace` tool to switch to a different domain if the user's task requires different tools or a different directory structure.", domain)
-	systemPrompt += "\n[TAXONOMY RULE]: Use precise semantic tagging. Apply existing tags from the active context to maintain a cohesive knowledge graph over time."
-
-	bundle := cognition.ThinkBundle{
-		Rules:      cognition.SystemRules{Persona: systemPrompt},
-		Mapbook:    cognition.Mapbook{Maps: stringMaps},
-		Trajectory: trajectory,
-		Workbench:  []cognition.WorkbenchItem{},
-	}
-
-	if err := thinkState.EnrichBundle(ctx, &bundle, focus, s.workspaceService.WorkspaceRoot()); err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("enriching bundle: %w", err)
-	}
-
-	return bundle, graphData, nil
-}
-
-func (s *ChatSession) buildToolRegistry(thinkState spaces.ThinkState) []llm.ToolDef {
-	tools := thinkState.Tools()
-	tools = append(tools, llm.ToolDef{
-		Name:        "transition_workspace",
-		Description: "Transition the workspace to a different domain environment.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"target_domain": map[string]any{"type": "string"},
-				"reasoning":     map[string]any{"type": "string"},
-			},
-			"required": []string{"target_domain", "reasoning"},
-		},
-	})
-	return tools
+	return true
 }
 
 func (s *ChatSession) evaluateAndTriggerDigestion(ctx context.Context, chatObj *thinkgraph.Chat, memoryConfig spaces.MemoryConfig) {
 	graphRepository := s.workspaceManager.GraphRepository()
+	if graphRepository == nil {
+		return
+	}
+
 	traversalEngine := thinkgraph.NewTraversalEngine(graphRepository)
 	timeline, err := traversalEngine.GetFullTimeline(ctx, chatObj, s.buildTopology())
 	if err != nil || len(timeline) == 0 {
@@ -478,59 +438,76 @@ func (s *ChatSession) evaluateAndTriggerDigestion(ctx context.Context, chatObj *
 
 	s.mu.Lock()
 	s.Meta.EvaluationHorizon = newEvalHorizonEvent.ID
+	if err := s.flushMetaLocked(); err != nil {
+		s.logger.WarnContext(ctx, "failed flushing meta during digestion evaluation", "error", err)
+	}
 	s.mu.Unlock()
-	_ = s.flushMeta()
 
-	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		defer cancel()
-
-		s.mu.RLock()
-		domain := s.Meta.ActiveDomain
-		s.mu.RUnlock()
-
-		thinkState, _ := s.registry.GetDomain(domain)
-		workerModel := thinkState.Config().Roles.Worker.Model
-		workerPersona := thinkState.Config().WorkerSystemPrompt()
-
-		count, digestErr := s.digestManager.CreateBackgroundDigest(
-			bgCtx,
-			s.workspaceService,
-			chatObj,
-			targetWindow,
-			activeBuffer,
-			forceDigest,
-			workerModel,
-			workerPersona,
-		)
-		if digestErr != nil {
-			s.logger.Error("Background digestion failed", "error", digestErr)
-			return
-		}
-
-		if count > 0 {
-			s.mu.Lock()
-			s.Meta.DigestionHorizon = targetWindowHorizonEvent.ID
-			s.mu.Unlock()
-			_ = s.flushMeta()
-			s.logger.Info("Digestion Horizon advanced", "new_horizon", targetWindowHorizonEvent.ID, "digests_created", count)
-		}
-	}()
+	go s.executeBackgroundDigestion(chatObj, targetWindow, activeBuffer, forceDigest, targetWindowHorizonEvent.ID)
 }
 
-func (s *ChatSession) handleTransition(ctx context.Context, chatObj *thinkgraph.Chat, targetDomain string, ui UserInterface) error {
-	targetSpace, exists := s.registry.GetDomain(targetDomain)
+func (s *ChatSession) executeBackgroundDigestion(
+	chatObj *thinkgraph.Chat,
+	targetWindow []thinkgraph.Event,
+	activeBuffer []thinkgraph.Event,
+	forceDigest bool,
+	targetWindowHorizonEventID uuid.UUID,
+) {
+	bgCtx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	s.mu.RLock()
+	activeThinkState := s.Meta.ActiveThinkState
+	s.mu.RUnlock()
+
+	thinkState, ok := s.registry.GetThinkState(activeThinkState)
+	if !ok {
+		s.logger.Error("Background digestion aborted: think state not found", "think_state", activeThinkState)
+		return
+	}
+
+	workerModel := thinkState.Config().Roles.Worker.Model
+	workerPersona := thinkState.Config().WorkerSystemPrompt()
+
+	count, digestErr := s.digestManager.CreateBackgroundDigest(
+		bgCtx,
+		s.workspaceService,
+		chatObj,
+		targetWindow,
+		activeBuffer,
+		forceDigest,
+		workerModel,
+		workerPersona,
+	)
+	if digestErr != nil {
+		s.logger.Error("Background digestion failed", "error", digestErr)
+		return
+	}
+
+	if count > 0 {
+		s.mu.Lock()
+		s.Meta.DigestionHorizon = targetWindowHorizonEventID
+		if flushErr := s.flushMetaLocked(); flushErr != nil {
+			s.logger.Warn("Failed flushing meta after digestion horizon advancement", "error", flushErr)
+		}
+		s.mu.Unlock()
+		s.logger.Info("Digestion Horizon advanced", "new_horizon", targetWindowHorizonEventID, "digests_created", count)
+	}
+}
+
+func (s *ChatSession) handleTransition(ctx context.Context, chatObj *thinkgraph.Chat, targetThinkState string, ui UserInterface) error {
+	targetSpace, exists := s.registry.GetThinkState(targetThinkState)
 	if !exists {
-		ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Error:** Domain '%s' does not exist in registry. Transition aborted.\n", targetDomain))
-		return fmt.Errorf("invalid transition target: %s", targetDomain)
+		ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Error:** Think state '%s' does not exist in registry. Transition aborted.\n", targetThinkState))
+		return fmt.Errorf("invalid transition target: %s", targetThinkState)
 	}
 
 	chatDir := filepath.Join(s.workspaceService.WorkspaceRoot(), s.SpaceID, "chats", chatObj.ID)
 
 	s.mu.Lock()
 	hasInitialized := false
-	for _, d := range s.Meta.InitializedDomains {
-		if d == targetDomain {
+	for _, d := range s.Meta.InitializedThinkStates {
+		if d == targetThinkState {
 			hasInitialized = true
 			break
 		}
@@ -539,23 +516,19 @@ func (s *ChatSession) handleTransition(ctx context.Context, chatObj *thinkgraph.
 	if !hasInitialized {
 		if initErr := targetSpace.Initialize(ctx, chatDir); initErr != nil {
 			s.mu.Unlock()
-			return fmt.Errorf("failed to initialize domain %s: %w", targetDomain, initErr)
+			return fmt.Errorf("failed to initialize domain %s: %w", targetThinkState, initErr)
 		}
-		s.Meta.InitializedDomains = append(s.Meta.InitializedDomains, targetDomain)
+		s.Meta.InitializedThinkStates = append(s.Meta.InitializedThinkStates, targetThinkState)
 	}
 
-	s.Meta.ActiveDomain = targetDomain
+	s.Meta.ActiveThinkState = targetThinkState
+	if err := s.flushMetaLocked(); err != nil {
+		s.logger.WarnContext(ctx, "failed to flush meta after domain transition", "error", err)
+	}
 	s.mu.Unlock()
-	_ = s.flushMeta()
 
-	s.workspaceService.LogDigest(ctx, chatObj, fmt.Sprintf("Workspace transitioned to %s domain.", targetDomain), []string{"system"}, false, nil)
-	return nil
-}
-
-func mapKeys(m map[string]bool) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+	if err := s.workspaceService.LogDigest(ctx, chatObj, fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState), []string{"system"}, false, nil); err != nil {
+		s.logger.WarnContext(ctx, "failed logging transition digest", "error", err)
 	}
-	return keys
+	return nil
 }

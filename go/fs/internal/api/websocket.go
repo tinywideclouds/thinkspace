@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/coder/websocket"
@@ -15,6 +16,7 @@ type WebSocketUI struct {
 	ctx            context.Context
 	conn           *websocket.Conn
 	writeMu        sync.Mutex
+	logger         *slog.Logger
 	strategyChan   chan flows.FlowStrategy
 	reviewChan     chan bool
 	approveChan    chan session.ContextApprovalDecision
@@ -22,10 +24,14 @@ type WebSocketUI struct {
 	tokenChan      chan<- workspace.AgentToken
 }
 
-func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- workspace.AgentToken) *WebSocketUI {
+func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- workspace.AgentToken, logger *slog.Logger) *WebSocketUI {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &WebSocketUI{
 		ctx:            ctx,
 		conn:           conn,
+		logger:         logger,
 		strategyChan:   make(chan flows.FlowStrategy),
 		reviewChan:     make(chan bool),
 		approveChan:    make(chan session.ContextApprovalDecision),
@@ -34,8 +40,11 @@ func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- 
 	}
 }
 
-func (ui *WebSocketUI) ConfirmTransition(targetDomain string, reasoning string) bool {
-	if data, err := MarshalRequestTransition(targetDomain, reasoning); err == nil {
+func (ui *WebSocketUI) ConfirmTransition(targetThinkState string, reasoning string) bool {
+	data, err := MarshalRequestTransition(targetThinkState, reasoning)
+	if err != nil {
+		ui.logger.ErrorContext(ui.ctx, "failed marshaling request transition", "error", err)
+	} else {
 		ui.sendBytes(data)
 	}
 	return <-ui.transitionChan
@@ -44,7 +53,9 @@ func (ui *WebSocketUI) ConfirmTransition(targetDomain string, reasoning string) 
 func (ui *WebSocketUI) sendBytes(data []byte) {
 	ui.writeMu.Lock()
 	defer ui.writeMu.Unlock()
-	_ = ui.conn.Write(ui.ctx, websocket.MessageText, data)
+	if err := ui.conn.Write(ui.ctx, websocket.MessageText, data); err != nil {
+		ui.logger.WarnContext(ui.ctx, "failed writing bytes to websocket connection", "error", err)
+	}
 }
 
 func (ui *WebSocketUI) SendSyncHistory(data []byte) {
@@ -52,27 +63,39 @@ func (ui *WebSocketUI) SendSyncHistory(data []byte) {
 }
 
 func (ui *WebSocketUI) OnTextChunk(text string) {
-	if data, err := MarshalChatStream(text); err == nil {
-		ui.sendBytes(data)
+	data, err := MarshalChatStream(text)
+	if err != nil {
+		ui.logger.ErrorContext(ui.ctx, "failed marshaling chat stream text chunk", "error", err)
+		return
 	}
+	ui.sendBytes(data)
 }
 
 func (ui *WebSocketUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
-	if data, err := MarshalPreviewContext(ctxData); err == nil {
+	data, err := MarshalPreviewContext(ctxData)
+	if err != nil {
+		ui.logger.ErrorContext(ui.ctx, "failed marshaling preview context for review", "error", err)
+	} else {
 		ui.sendBytes(data)
 	}
 	return <-ui.approveChan
 }
 
 func (ui *WebSocketUI) ChooseNextStep() flows.FlowStrategy {
-	if data, err := MarshalRequestStrategy(); err == nil {
+	data, err := MarshalRequestStrategy()
+	if err != nil {
+		ui.logger.ErrorContext(ui.ctx, "failed marshaling request strategy", "error", err)
+	} else {
 		ui.sendBytes(data)
 	}
 	return <-ui.strategyChan
 }
 
 func (ui *WebSocketUI) ReviewCandidate(branch string) bool {
-	if data, err := MarshalRequestReview(branch); err == nil {
+	data, err := MarshalRequestReview(branch)
+	if err != nil {
+		ui.logger.ErrorContext(ui.ctx, "failed marshaling request review", "error", err)
+	} else {
 		ui.sendBytes(data)
 	}
 	return <-ui.reviewChan

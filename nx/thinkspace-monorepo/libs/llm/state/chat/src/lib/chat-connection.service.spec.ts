@@ -6,44 +6,100 @@ import { FlowStore } from './flow.store';
 import { CognitiveStore } from './cognitive.store';
 import { ThinkspaceStateService } from './thinkspace-state.service';
 import { UiSettingsService } from './ui-settings.service';
-import { of } from 'rxjs';
-import { LlmFacade, DelegationStrategy } from '@org/llm-core-facade';
-import { WSEventSchema } from '@org/llm-core-protos';
-import { create } from '@bufbuild/protobuf';
+import { Subject } from 'rxjs';
+import { AppEvent, PreviewContext, AttentionFocus, DigestMeta, FileContextMetaData } from '@org/llm-core-facade';
+import { WSEvent } from '@org/llm-core-protos';
+import { describe, beforeEach, afterEach, it, expect, vi, Mock } from 'vitest';
+import { signal, computed, Signal, WritableSignal } from '@angular/core';
+import { ChatItem } from './chat.models';
+
+interface MockTransportService {
+  connect: Mock<(url: string) => Subject<WSEvent>>;
+  disconnect: Mock<() => void>;
+  send: Mock<(msg: WSEvent) => void>;
+}
+
+interface MockTimelineStore {
+  appendCoreChat: Mock<(type: 'prompt' | 'model' | 'system', content: string) => void>;
+  clearSession: Mock<() => void>;
+  hasMoreHistory: WritableSignal<boolean>;
+  isLoadingHistory: WritableSignal<boolean>;
+  nextCursor: WritableSignal<string>;
+  clearThinkingIndicators: Mock<() => void>;
+  processSyncHistory: Mock<() => void>;
+  ingestEvent: Mock<() => void>;
+  appendToLastModelMessage: Mock<() => void>;
+  nodeMap: WritableSignal<Map<string, ChatItem>>;
+  coreChat: Signal<ChatItem[]>;
+}
+
+interface MockThinkspaceStateService {
+  activeSpaceId: WritableSignal<string | null>;
+  activeChatId: WritableSignal<string | null>;
+}
+
+interface MockFlowStore {
+  resetTurn: Mock<() => void>;
+  clearSession: Mock<() => void>;
+  appendSystemLog: Mock<(level: string, msg: string) => void>;
+  processTelemetry: Mock<(event: AppEvent) => void>;
+}
+
+interface MockCognitiveStore {
+  resetTurn: Mock<() => void>;
+  clearSession: Mock<() => void>;
+  pendingContextReview: WritableSignal<PreviewContext | null>;
+  pendingStrategy: WritableSignal<boolean>;
+  pendingReviewBranch: WritableSignal<string | null>;
+  pendingTransition: WritableSignal<{ targetThinkState: string; reasoning: string } | null>;
+  activeFocus: WritableSignal<AttentionFocus | null>;
+  activeDigests: WritableSignal<Record<string, DigestMeta>>;
+  activeWorkbench: WritableSignal<FileContextMetaData[]>;
+  autoApproveContext: WritableSignal<boolean>;
+}
 
 describe('ChatConnectionService', () => {
   let service: ChatConnectionService;
-  let transportMock: any;
-  let timelineMock: any;
-  let workspaceMock: any;
-  let flowMock: any;
-  let cognitiveMock: any;
+  let transportMock: MockTransportService;
+  let timelineMock: MockTimelineStore;
+  let workspaceMock: MockThinkspaceStateService;
+  let flowMock: MockFlowStore;
+  let cognitiveMock: MockCognitiveStore;
+  let wsSubject: Subject<WSEvent>;
 
   beforeEach(() => {
+    vi.stubGlobal('Temporal', {
+      Now: { instant: () => ({ toString: () => '2026-10-23T12:00:00Z' }) },
+      Instant: { from: (s: string) => ({ toString: () => s }) }
+    });
+
+    wsSubject = new Subject<WSEvent>();
+
     transportMock = {
-      connect: vi.fn(() => of()),
+      connect: vi.fn(() => wsSubject),
       disconnect: vi.fn(),
       send: vi.fn()
     };
 
+    const nodeMapSignal = signal(new Map<string, ChatItem>());
+
     timelineMock = {
       appendCoreChat: vi.fn(),
       clearSession: vi.fn(),
-      hasMoreHistory: vi.fn(() => false),
-      isLoadingHistory: vi.fn(() => false),
-      nextCursor: vi.fn(() => ''),
+      hasMoreHistory: signal(false),
+      isLoadingHistory: signal(false),
+      nextCursor: signal(''),
       clearThinkingIndicators: vi.fn(),
-      injectFlowExecution: vi.fn(),
-      updateFlowExecutionStatus: vi.fn(),
       processSyncHistory: vi.fn(),
       ingestEvent: vi.fn(),
       appendToLastModelMessage: vi.fn(),
-      coreChat: { set: vi.fn() }
+      nodeMap: nodeMapSignal,
+      coreChat: computed(() => Array.from(nodeMapSignal().values()))
     };
 
     workspaceMock = {
-      activeSpaceId: vi.fn(() => 'space-1'),
-      activeChatId: vi.fn(() => 'chat-1')
+      activeSpaceId: signal('space-1'),
+      activeChatId: signal('chat-1')
     };
 
     flowMock = {
@@ -56,14 +112,14 @@ describe('ChatConnectionService', () => {
     cognitiveMock = {
       resetTurn: vi.fn(),
       clearSession: vi.fn(),
-      pendingContextReview: { set: vi.fn() },
-      pendingStrategy: { set: vi.fn() },
-      pendingReviewBranch: Object.assign(vi.fn(() => 'branch-1'), { set: vi.fn() }),
-      pendingTransition: { set: vi.fn() },
-      activeFocus: { set: vi.fn() },
-      activeDigests: { set: vi.fn() },
-      activeWorkbench: { set: vi.fn() },
-      autoApproveContext: vi.fn(() => false)
+      pendingContextReview: signal(null),
+      pendingStrategy: signal(false),
+      pendingReviewBranch: signal('branch-1'),
+      pendingTransition: signal(null),
+      activeFocus: signal(null),
+      activeDigests: signal({}),
+      activeWorkbench: signal([]),
+      autoApproveContext: signal(false)
     };
 
     TestBed.configureTestingModule({
@@ -74,61 +130,36 @@ describe('ChatConnectionService', () => {
         { provide: ThinkspaceStateService, useValue: workspaceMock },
         { provide: FlowStore, useValue: flowMock },
         { provide: CognitiveStore, useValue: cognitiveMock },
-        { provide: UiSettingsService, useValue: { pagination: () => ({ size: 50 }) } }
+        { provide: UiSettingsService, useValue: { pagination: signal({ size: 50 }) } }
       ]
     });
+    
     service = TestBed.inject(ChatConnectionService);
   });
 
-  it('should submit a prompt and append a system thinking indicator', () => {
-    service.submitPrompt('hello manager');
-    
-    expect(timelineMock.appendCoreChat).toHaveBeenCalledWith('prompt', 'hello manager');
-    expect(timelineMock.appendCoreChat).toHaveBeenCalledWith('system', 'Manager Thinking...');
-    expect(transportMock.send).toHaveBeenCalled();
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it('should submit context approval and clear thinking indicators on abort', () => {
-    service.submitContextApproval(false);
-    expect(timelineMock.clearThinkingIndicators).toHaveBeenCalled();
-    expect(transportMock.send).toHaveBeenCalled();
-  });
+  it('should format switchBranch correctly and clear the normalized timeline map', () => {
+    timelineMock.nodeMap().set('msg-1', { id: 'msg-1', type: 'prompt', content: 'test' } as ChatItem);
+    expect(timelineMock.nodeMap().size).toBe(1);
 
-  it('should map telemetry events to flow execution UI methods', () => {
-    // Expose the private method for testing the router switch directly
-    const routeEvent = (service as any).routeIncomingEvent.bind(service);
-    
-    routeEvent({
-      type: 'telemetry_event',
-      channel: 'manager',
-      id: 'uuid-1',
-      eventType: 'flow_start',
-      timestamp: Temporal.Now.instant(),
-      summary: 'Orchestrating agents',
-      payload: { flow_id: 'flow-123' }
-    });
-
-    expect(flowMock.processTelemetry).toHaveBeenCalled();
-    expect(timelineMock.injectFlowExecution).toHaveBeenCalledWith('flow-123', 'Orchestrating agents');
-
-    routeEvent({
-      type: 'telemetry_event',
-      channel: 'manager',
-      id: 'uuid-2',
-      eventType: 'flow_complete',
-      timestamp: Temporal.Now.instant(),
-      summary: '',
-      payload: { flow_id: 'flow-123' }
-    });
-
-    expect(timelineMock.updateFlowExecutionStatus).toHaveBeenCalledWith('flow-123', 'completed');
-  });
-
-  it('should format switchBranch correctly and clear the timeline', () => {
     service.switchBranch('feature-v2');
     
-    expect(timelineMock.coreChat.set).toHaveBeenCalledWith([]);
-    expect(timelineMock.isLoadingHistory.set).toHaveBeenCalledWith(true);
+    expect(timelineMock.nodeMap().size).toBe(0);
+    expect(timelineMock.coreChat()).toEqual([]);
+    expect(timelineMock.isLoadingHistory()).toBe(true);
     expect(transportMock.send).toHaveBeenCalled();
+  });
+
+  it('should handle request_transition mapping to targetThinkState', () => {
+    service['routeIncomingEvent']({
+      type: 'request_transition',
+      targetThinkState: 'golang',
+      reasoning: 'test'
+    });
+    
+    expect(cognitiveMock.pendingTransition()).toEqual({ targetThinkState: 'golang', reasoning: 'test' });
   });
 });

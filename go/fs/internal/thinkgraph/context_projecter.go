@@ -36,16 +36,16 @@ func (a *ContextProjecter) extractContent(node Node) string {
 			if err := json.Unmarshal(node.Data, &m); err == nil && m.Content != "" {
 				return m.Content
 			}
-		// Notice we safely ignore MaterializedState (diffs). We just want the semantic summary.
-		case "flow_completed":
-			return fmt.Sprintf("[System: A sub-agent flow completed. Result: %s]", node.Content)
+		// Safely ignore MaterializedState diffs. Just extract semantic summary.
+		case "flow_lifecycle":
+			return fmt.Sprintf("[System: A sub-agent flow is executing or completed. Result: %s]", node.Content)
 		case "candidate_proposal":
 			return fmt.Sprintf("[System: A file change was proposed. Description: %s]", node.Content)
 		case "candidate_resolution":
 			return fmt.Sprintf("[System: The user resolved a proposal. Result: %s]", node.Content)
 		}
 	}
-	return node.Content // Fallback to raw text content
+	return node.Content
 }
 
 func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cognition.Trajectory, error) {

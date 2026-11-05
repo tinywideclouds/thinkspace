@@ -10,7 +10,7 @@
           "timestamp": "2026-10-20T10:00:00Z",
           "message": "",
           "summary": "Executing long-running background task...",
-          "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"agent_count\": 1}"
+          "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"task_id\": \"task-del-1\", \"agent_count\": 1}"
         }
       }
     }

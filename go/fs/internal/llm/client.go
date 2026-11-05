@@ -5,6 +5,8 @@ import (
 	"iter"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 )
 
 type UsageMetadata struct {
@@ -24,19 +26,12 @@ type ToolCall struct {
 	Args map[string]any
 }
 
-type ToolDef struct {
-	Name        string
-	Description string
-	Parameters  map[string]any
-	Required    []string
-}
-
-// ModelClient defines the domain-agnostic interface for streaming LLM generation.
 type ModelClient interface {
 	GenerateContentStream(
 		ctx context.Context,
 		model string,
 		bundle cognition.ThinkBundle,
-		tools []ToolDef,
+		registry *tools.Registry,
+		config spaces.ThinkStateConfig,
 	) iter.Seq2[StreamChunk, error]
 }

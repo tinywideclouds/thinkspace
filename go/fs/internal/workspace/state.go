@@ -2,8 +2,8 @@ package workspace
 
 import "context"
 
-// ChatEngine manages the long-term, permanent Git history of conversational threads.
-type ChatEngine interface {
+// ChatVersioner manages the long-term, permanent history of conversational threads. This is not git - we use git as an implementation detail, but the interface abstracts away the underlying VCS. It is responsible for initializing new chats, managing candidate sandboxes, and handling the acceptance or rejection of proposed changes.
+type ChatVersioner interface {
 	// InitChat establishes the base state for a new conversational thread.
 	InitChat(ctx context.Context, chatID string) error
 

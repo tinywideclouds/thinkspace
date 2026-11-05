@@ -29,11 +29,24 @@ export interface FileDeltaGraphEvent extends BaseGraphEvent {
   parentId?: string;
 }
 
+export interface AgentRecord {
+  agentId: string;
+  passed: boolean;
+  instruction: string;
+  rawPayload: string;
+  verificationTrace: string;
+  stateDelta: string;
+}
+
 export interface FlowExecutionGraphEvent extends BaseGraphEvent {
   type: 'flow_execution';
   content: string; 
   flowId: string;
-  status: string;
+  taskId: string;
+  task: string;
+  status: 'UNSPECIFIED' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  error: string;
+  agents: AgentRecord[];
 }
 
 export type GraphEvent = 
@@ -89,7 +102,7 @@ export type AppEvent =
   | { type: 'chat_stream'; text: string }
   | { type: 'request_strategy'; active: boolean }
   | { type: 'request_review'; branch: string }
-  | { type: 'request_transition'; targetDomain: string; reasoning: string }
+  | { type: 'request_transition'; targetThinkState: string; reasoning: string }
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
   | { 
       type: 'sync_history'; 

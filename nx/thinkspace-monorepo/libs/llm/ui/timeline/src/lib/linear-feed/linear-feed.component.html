@@ -29,7 +29,7 @@
       <llm-skeleton-block></llm-skeleton-block>
     }
 
-    <!-- Empty State for Visual Filtering (Proper Logic) -->
+    <!-- Empty State for Visual Filtering -->
     @if (facade.uiSettings.tagFilterMode() === 'visual' && facade.activeTagFilters().size > 0 && facade.visibleFeed().length === 0 && !facade.isLoadingHistory()) {
       <div class="flex flex-col items-center justify-center h-48 text-gray-400 font-mono text-sm">
         <span class="text-2xl mb-2">📭</span>
@@ -37,6 +37,7 @@
       </div>
     }
 
+    <!-- Strict tracking by ID prevents DOM thrashing during Flow Execution upserts -->
     @for (turn of facade.visibleFeed(); track turn.id) {
       <llm-turn-group
         [isEditMode]="facade.isEditMode()"
@@ -45,6 +46,7 @@
         (selectionToggled)="facade.toggleTurnSelection(turn.id)">
         
         <llm-block-router [chatItem]="turn.leader"></llm-block-router>
+        
         @for (block of turn.blocks; track block.id) {
           <llm-block-router [chatItem]="block"></llm-block-router>
         }

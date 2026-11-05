@@ -15,6 +15,8 @@ type BranchResult struct {
 	CandidateID string
 	Passed      bool
 	Trace       string
+	RawPayload  string
+	Instruction string
 }
 
 // FlowAction defines the toolkit of capabilities the FlowEngine knows how to execute.
@@ -23,11 +25,21 @@ type FlowAction string
 const (
 	ActionSpawnAgents     FlowAction = "spawn_agents"
 	ActionRequestStrategy FlowAction = "request_strategy"
+	ActionSynthesize      FlowAction = "synthesize"
 	ActionManualReview    FlowAction = "manual_review"
 	ActionCommit          FlowAction = "commit"
 	ActionFinish          FlowAction = "finish"
 	ActionError           FlowAction = "error"
 )
+
+// SynthesisRequest acts as a control-flow signal to bounce execution back to the Manager LLM.
+type SynthesisRequest struct {
+	CompiledPrompt string
+}
+
+func (s *SynthesisRequest) Error() string {
+	return "manager synthesis requested"
+}
 
 // FlowState is passed to the Flow so it can evaluate what has happened so far.
 type FlowState struct {

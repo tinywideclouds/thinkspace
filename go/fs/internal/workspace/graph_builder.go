@@ -10,10 +10,10 @@ import (
 // WorkspaceGraphBuilder inflates events into materialized graph nodes.
 // It intercepts Candidate Proposals to hydrate the Node's MaterializedState with Git diffs.
 type WorkspaceGraphBuilder struct {
-	engine ChatEngine
+	engine ChatVersioner
 }
 
-func NewWorkspaceGraphBuilder(engine ChatEngine) *WorkspaceGraphBuilder {
+func NewWorkspaceGraphBuilder(engine ChatVersioner) *WorkspaceGraphBuilder {
 	return &WorkspaceGraphBuilder{
 		engine: engine,
 	}
@@ -25,7 +25,7 @@ func (b *WorkspaceGraphBuilder) Build(ctx context.Context, c *thinkgraph.Chat, e
 	}
 
 	if ev.Type == EventCandidateProposal {
-		var payload CandidateProposalPayload
+		var payload CandidateProposal
 		if err := json.Unmarshal(ev.Data, &payload); err == nil {
 			// Hydrate the Git diff from the physical ChatEngine
 			diff, err := b.engine.ReadCandidateDiff(ctx, c.ID, payload.CandidateID)

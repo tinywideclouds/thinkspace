@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { TimelineFacade } from './timeline.facade';
-import { TimelineStore, FlowStore, CognitiveStore, ThinkspaceStateService, ChatItem, FlowState, UiSettingsService } from '@org/llm-state-chat';
+import { TimelineStore, FlowStore, CognitiveStore, ThinkspaceStateService, ChatItem, FlowState, UiSettingsService, FlowExecutionChatItem } from '@org/llm-state-chat';
 import { signal, WritableSignal } from '@angular/core';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
 import { AttentionFocus, DigestMeta } from '@org/llm-core-facade';
@@ -12,7 +12,7 @@ interface MockTimelineStore {
 
 interface MockFlowStore {
   flowStates: WritableSignal<Map<string, FlowState>>;
-  inspectFlow: Mock<(flowId: string) => void>;
+  inspectFlow: Mock<(item: FlowExecutionChatItem) => void>;
 }
 
 interface MockCognitiveStore {

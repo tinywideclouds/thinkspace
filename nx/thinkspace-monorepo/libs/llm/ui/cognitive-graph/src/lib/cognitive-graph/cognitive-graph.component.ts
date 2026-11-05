@@ -101,8 +101,8 @@ import { ChatItem, FlowExecutionChatItem } from '@org/llm-state-chat';
               @if (item.type === 'flow_execution') {
                 @let flowItem = asFlowExecution(item);
                 <llm-chat-flow-card 
-                  [flow]="facade.flowStates().get(flowItem.flowId)" 
-                  [summary]="flowItem.content"
+                  [item]="flowItem"
+                  [liveFlow]="facade.flowStates().get(flowItem.flowId)" 
                   (inspect)="facade.inspectFlow($event)">
                 </llm-chat-flow-card>
               } @else {
@@ -128,7 +128,7 @@ import { ChatItem, FlowExecutionChatItem } from '@org/llm-state-chat';
 export class CognitiveGraphComponent {
   public facade = inject(CognitiveGraphFacade);
   
-  nodeSelected = output<string>();
+  public nodeSelected = output<string>();
 
   public asFlowExecution(item: ChatItem): FlowExecutionChatItem {
     return item as FlowExecutionChatItem;

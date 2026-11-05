@@ -15,9 +15,9 @@ var defaultConfigs embed.FS
 
 // DevSkeleton defines the local developer environment seeding parameters.
 type DevSkeleton struct {
-	Space  string `yaml:"space"`
-	Chat   string `yaml:"chat"`
-	Domain string `yaml:"domain"`
+	Space      string `yaml:"space"`
+	Chat       string `yaml:"chat"`
+	ThinkState string `yaml:"think_state"`
 }
 
 // ConfigVersion is used to quickly peek at a block's version for migration
@@ -28,7 +28,7 @@ type ConfigVersion struct {
 // ScaffoldDefaults writes default configuration files to the disk if they do not already exist.
 // It also checks the version of existing files and upgrades them if the embedded version is newer.
 func ScaffoldDefaults(logger *slog.Logger, configurationsDirectory string) {
-	filesToScaffold := []string{"golang.yaml", "concept.yaml", "fanout.yaml", "digest.yaml"}
+	filesToScaffold := []string{"golang.yaml", "concept.yaml", "intake.yaml", "fanout.yaml", "digest.yaml"}
 
 	for _, filename := range filesToScaffold {
 		targetPath := filepath.Join(configurationsDirectory, filename)

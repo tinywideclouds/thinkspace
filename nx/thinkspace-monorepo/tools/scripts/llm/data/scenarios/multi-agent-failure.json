@@ -1,0 +1,147 @@
+[
+  {
+    "offsetMs": 200,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "durable-err-1",
+          "timestamp": "2026-10-23T12:05:00Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "flowExecution": {
+            "flowId": "flow-err-1",
+            "taskId": "task-err-1",
+            "task": "I am assigning 2 agents to safely refactor the database connection pool limits to handle increased load.",
+            "status": 1,
+            "error": "",
+            "summary": "Orchestrating agents to refactor database pool...",
+            "agents": []
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 300,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "manager",
+        "event": {
+          "id": "tel-e1",
+          "type": "flow_start",
+          "timestamp": "2026-10-23T12:05:00Z",
+          "message": "",
+          "summary": "Starting DB pool refactor",
+          "payloadJson": "{\"flow_id\": \"flow-err-1\", \"task_id\": \"task-err-1\", \"agent_count\": 2}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 1000,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "agent",
+        "event": {
+          "id": "tel-e2",
+          "type": "agent_status",
+          "timestamp": "2026-10-23T12:05:01Z",
+          "message": "Updating connection config...",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-err-1\", \"agent_id\": \"db-config\", \"agent_index\": 0, \"instruction\": \"Update connection limits\", \"status\": \"running\"}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 2500,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "agent",
+        "event": {
+          "id": "tel-e3",
+          "type": "agent_complete",
+          "timestamp": "2026-10-23T12:05:03Z",
+          "message": "Config updated",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-err-1\", \"agent_id\": \"db-config\", \"passed\": true, \"trace\": \"[SYSTEM] db_config.go updated.\"}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 3000,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "agent",
+        "event": {
+          "id": "tel-e4",
+          "type": "agent_status",
+          "timestamp": "2026-10-23T12:05:03Z",
+          "message": "Applying connection limits...",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-err-1\", \"agent_id\": \"pool-manager\", \"agent_index\": 1, \"instruction\": \"Apply config to pgxpool\", \"status\": \"running\"}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 4500,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "agent",
+        "event": {
+          "id": "tel-e5",
+          "type": "agent_error",
+          "timestamp": "2026-10-23T12:05:04Z",
+          "message": "Verification failed",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-err-1\", \"agent_id\": \"pool-manager\", \"passed\": false, \"trace\": \"[VERIFY] go build ./...: FAILED\\nsrc/db/pool.go:42: undefined: env.DB_MAX_IDLE\"}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 5000,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "durable-err-1",
+          "timestamp": "2026-10-23T12:05:05Z",
+          "tags": ["database"],
+          "tombstoned": false,
+          "metadata": {},
+          "flowExecution": {
+            "flowId": "flow-err-1",
+            "taskId": "task-err-1",
+            "task": "I am assigning 2 agents to safely refactor the database connection pool limits to handle increased load.",
+            "status": 3,
+            "error": "The verification step failed because the new database connection pool configuration references an undefined environment variable 'DB_MAX_IDLE' in `pool.go`.",
+            "summary": "Database refactor failed during connection logic updates. The workspace has been rolled back to its previous safe state.",
+            "agents": [
+              { "agentId": "db-config", "passed": true, "instruction": "Update connection limits", "verificationTrace": "[SYSTEM] db_config.go updated." },
+              { "agentId": "pool-manager", "passed": false, "instruction": "Apply config to pgxpool", "verificationTrace": "[VERIFY] go build ./...: FAILED\nsrc/db/pool.go:42: undefined: env.DB_MAX_IDLE" }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 5100,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "manager",
+        "event": {
+          "id": "tel-e6",
+          "type": "flow_complete",
+          "timestamp": "2026-10-23T12:05:05Z",
+          "message": "",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"flow-err-1\", \"passed\": false}"
+        }
+      }
+    }
+  }
+]

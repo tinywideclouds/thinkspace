@@ -4,14 +4,15 @@ import {
   ChatConnectionService, 
   FlowStore, 
   CognitiveStore, 
-  WorkspaceStateService,
+  ThinkspaceStateService,
   FlowState,
-  LogItem
+  LogItem,
+  FlowExecutionChatItem
 } from '@org/llm-state-chat';
 import { 
-  DomainPreviewContext, 
+  PreviewContext, 
   FileContextMetaData, 
-  DomainAttentionFocus 
+  AttentionFocus 
 } from '@org/llm-core-facade';
 import { TimelineFacade } from '@org/llm-ui-timeline';
 import { signal, WritableSignal } from '@angular/core';
@@ -41,13 +42,13 @@ interface MockFlowStore {
   systemLogs: WritableSignal<LogItem[]>;
   flowStates: WritableSignal<Map<string, FlowState>>;
   retainLogs: WritableSignal<boolean>;
-  inspectedReceipt: WritableSignal<string | null>;
+  inspectedFlow: WritableSignal<FlowExecutionChatItem | null>;
   manualClearLogs: Mock<() => void>;
 }
 
 interface MockCognitiveStore {
   activeWorkbench: WritableSignal<FileContextMetaData[]>;
-  pendingContextReview: WritableSignal<DomainPreviewContext | null>;
+  pendingContextReview: WritableSignal<PreviewContext | null>;
   pendingTransition: WritableSignal<{targetDomain: string, reasoning: string} | null>;
   pendingStrategy: WritableSignal<boolean>;
   pendingReviewBranch: WritableSignal<string | null>;
@@ -57,7 +58,7 @@ interface MockCognitiveStore {
 interface MockTimelineFacade {
   viewMode: WritableSignal<'linear' | 'cognitive'>;
   hoveredTag: WritableSignal<string | null>;
-  activeFocus: WritableSignal<DomainAttentionFocus | null>;
+  activeFocus: WritableSignal<AttentionFocus | null>;
   isEditMode: WritableSignal<boolean>;
   toggleEditMode: Mock<() => void>;
   uiSettings: {
@@ -94,13 +95,13 @@ describe('ChatContainerComponent', () => {
       systemLogs: signal<LogItem[]>([]), 
       flowStates: signal(new Map<string, FlowState>()), 
       retainLogs: signal(false), 
-      inspectedReceipt: signal<string | null>(null), 
+      inspectedFlow: signal<FlowExecutionChatItem | null>(null), 
       manualClearLogs: vi.fn() 
     };
     
     mockCognitive = { 
       activeWorkbench: signal<FileContextMetaData[]>([]), 
-      pendingContextReview: signal<DomainPreviewContext | null>(null),
+      pendingContextReview: signal<PreviewContext | null>(null),
       pendingTransition: signal<{targetDomain: string, reasoning: string} | null>(null), 
       pendingStrategy: signal(false),
       pendingReviewBranch: signal<string | null>(null), 
@@ -110,7 +111,7 @@ describe('ChatContainerComponent', () => {
     mockTimelineFacade = {
       viewMode: signal('linear'), 
       hoveredTag: signal<string | null>(null),
-      activeFocus: signal<DomainAttentionFocus | null>({ primaryFocus: ['auth'], relatedContext: [], dormantLenses: [] }),
+      activeFocus: signal<AttentionFocus | null>({ primaryFocus: ['auth'], relatedContext: [], dormantLenses: [] }),
       isEditMode: signal(false),
       toggleEditMode: vi.fn(),
       uiSettings: {
@@ -133,7 +134,7 @@ describe('ChatContainerComponent', () => {
         { provide: ChatConnectionService, useValue: mockConnection },
         { provide: FlowStore, useValue: mockFlow },
         { provide: CognitiveStore, useValue: mockCognitive },
-        { provide: WorkspaceStateService, useValue: mockWorkspace },
+        { provide: ThinkspaceStateService, useValue: mockWorkspace },
         { provide: TimelineFacade, useValue: mockTimelineFacade }
       ]
     }).compileComponents();

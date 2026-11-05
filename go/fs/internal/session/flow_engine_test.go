@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
-	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
@@ -77,7 +77,6 @@ type feMockThinkSpace struct {
 
 func (m *feMockThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
 func (m *feMockThinkSpace) Config() spaces.ThinkStateConfig                        { return spaces.ThinkStateConfig{} }
-func (m *feMockThinkSpace) Tools() []llm.ToolDef                                   { return nil }
 func (m *feMockThinkSpace) Patcher() workspace.Patcher                             { return nil }
 func (m *feMockThinkSpace) Verifier() spaces.Verifier                              { return m }
 func (m *feMockThinkSpace) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
@@ -112,6 +111,9 @@ type feMockUI struct {
 	transitionToReturn bool
 	capturedReasoning  string
 }
+
+// GetAgentTokenChannel implements [session.UserInterface].
+func (ui *feMockUI) GetAgentTokenChannel() chan<- workspace.AgentToken { return nil }
 
 func (u *feMockUI) OnTextChunk(text string) {}
 
@@ -169,7 +171,7 @@ func TestFlowEngine_FanOutIntegration(t *testing.T) {
 			},
 		},
 	}
-	flowContext := flows.FlowContext{FlowID: "flow-123", SpaceID: "golang", BaseAgentRules: "Worker Persona"}
+	flowContext := flows.FlowContext{FlowID: uuid.NewV7().String(), SpaceID: "golang", BaseAgentRules: "Worker Persona"}
 
 	err := flowEngine.Run(context.Background(), chatSession, space, fanOutFlow, args, flowContext, ui)
 	if err != nil {
@@ -219,7 +221,8 @@ func TestFlowEngine_FailFast_HallucinatedFile(t *testing.T) {
 		},
 	}
 
-	err := flowEngine.Run(context.Background(), chatSession, &feMockThinkSpace{}, fanOutFlow, args, flows.FlowContext{}, nil)
+	flowContext := flows.FlowContext{FlowID: uuid.NewV7().String()}
+	err := flowEngine.Run(context.Background(), chatSession, &feMockThinkSpace{}, fanOutFlow, args, flowContext, nil)
 
 	if err == nil {
 		t.Fatalf("expected flow to fail-fast on missing file, but it succeeded")

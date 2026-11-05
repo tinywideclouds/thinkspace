@@ -30,6 +30,7 @@ func main() {
 	engineType := flag.String("engine", "gogit", "State engine backend ('gogit' or 'exec')")
 
 	useSkeleton := flag.Bool("use-skeleton", false, "DEV SHORTCUT: Seed local directories using the internal skeleton configuration")
+	cleanDB := flag.Bool("clean", false, "DEV SHORTCUT: Wipe local BadgerDB graph index on startup for a fresh clean state")
 	flag.Parse()
 
 	rootMode := true
@@ -56,6 +57,13 @@ func main() {
 	configurationsDirectory := filepath.Join(baseRoot, "configs")
 	dbPath := filepath.Join(baseRoot, ".graphdb")
 
+	if *cleanDB {
+		logger.Info("🧹 Clean flag active: wiping BadgerDB graph index directory", "path", dbPath)
+		if err := os.RemoveAll(dbPath); err != nil {
+			logger.Warn("Failed removing existing database directory", "error", err)
+		}
+	}
+
 	_ = os.MkdirAll(configurationsDirectory, 0755)
 	if err := os.MkdirAll(dbPath, 0755); err != nil {
 		logger.Error("Failed to create database directory", "error", err)
@@ -72,7 +80,7 @@ func main() {
 	}
 	defer graphDB.Close()
 
-	factory := func(repoRoot string) workspace.ChatEngine {
+	factory := func(repoRoot string) workspace.ChatVersioner {
 		if *engineType == "exec" {
 			return gitfs.NewGoExecEngine(repoRoot, rootMode)
 		}
@@ -111,12 +119,15 @@ func main() {
 	}
 	digestManager := session.NewDigestManager(logger, modelClient, digestCfg)
 
+	// Inject the central TurnManager orchestrator
+	turnManager := session.NewManager(logger, registry, serviceManager, modelClient, fanOutFlow, digestManager)
+
 	mux := http.NewServeMux()
 
 	managementAPI := api.NewManagementAPI(registry, serviceManager, appConfig)
 	managementAPI.RegisterHandlers(mux)
 
-	webSocketServer := api.NewServer(logger, registry, serviceManager, fanOutFlow, digestManager, modelClient)
+	webSocketServer := api.NewServer(logger, registry, serviceManager, turnManager)
 	webSocketServer.RegisterHandlers(mux)
 
 	serverAddress := fmt.Sprintf(":%d", *port)

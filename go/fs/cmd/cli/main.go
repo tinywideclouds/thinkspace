@@ -29,7 +29,7 @@ func main() {
 	chatName := flag.String("chat", "unit-circle-test", "The name of the initial exploration thread")
 	engineType := flag.String("engine", "gogit", "State engine backend to use ('gogit' or 'exec')")
 	spaceName := flag.String("space", "sandbox", "The think space to use")
-	domainName := flag.String("domain", "golang", "The domain configuration to load")
+	thinkStateName := flag.String("thinkstate", "intake", "The ThinkState configuration to load")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -78,7 +78,7 @@ func main() {
 	}
 	defer graphDB.Close()
 
-	engineFactory := func(repoRoot string) workspace.ChatEngine {
+	engineFactory := func(repoRoot string) workspace.ChatVersioner {
 		if *engineType == "exec" {
 			return gitfs.NewGoExecEngine(repoRoot, true)
 		}
@@ -95,7 +95,7 @@ func main() {
 	}
 
 	_ = serviceManager.UpdateSpaceState(*spaceName, func(s *workspace.SpaceState) {
-		s.Domain = *domainName
+		s.ThinkState = *thinkStateName
 	})
 
 	fmt.Printf("📂 Workspace root: %s\n", repositoryRoot)
@@ -116,17 +116,17 @@ func main() {
 		}
 
 		_ = serviceManager.UpdateChatMeta(*spaceName, meta.ID, func(m *workspace.ChatMeta) {
-			m.ActiveDomain = *domainName
+			m.ActiveThinkState = *thinkStateName
 		})
 	}
 
 	var promptText string
 	if isNewThread {
-		fmt.Printf("🌱 Creating new exploration thread: %s (Domain: %s)\n", meta.ID, *domainName)
+		fmt.Printf("🌱 Creating new exploration thread: %s (ThinkState: %s)\n", meta.ID, *thinkStateName)
 		promptText = "Hello! Let's explore some concepts."
 		fmt.Printf("💬 Initial Prompt: %s\n", promptText)
 	} else {
-		fmt.Printf("📖 Resuming exploration thread: %s (Active Domain: %s)\n", meta.ID, meta.ActiveDomain)
+		fmt.Printf("📖 Resuming exploration thread: %s (Active ThinkState: %s)\n", meta.ID, meta.ActiveThinkState)
 
 		fmt.Print("\n> ")
 		reader := bufio.NewReader(os.Stdin)
@@ -151,17 +151,15 @@ func main() {
 	}
 	digestManager := session.NewDigestManager(logger, modelClient, digestCfg)
 
-	chatSession, err := session.OpenChat(ctx, logger, registry, serviceManager, modelClient, fanOutFlow, digestManager, *spaceName, meta.ID)
-	if err != nil {
-		logger.Error("Execution turn failed to open session", "error", err)
-		os.Exit(1)
-	}
+	// Inject the central TurnManager orchestrator
+	turnManager := session.NewManager(logger, registry, serviceManager, modelClient, fanOutFlow, digestManager)
 
 	userInterface := cli.NewTerminalUI()
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	if err := chatSession.RunTurn(ctx, promptText, userInterface, emitter); err != nil {
+	// Execute turn directly through the Manager
+	if err := turnManager.RunTurn(ctx, *spaceName, meta.ID, promptText, userInterface, emitter); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)
 	}

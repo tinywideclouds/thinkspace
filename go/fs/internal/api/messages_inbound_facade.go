@@ -18,7 +18,7 @@ func UnmarshalInbound(data []byte) (*InboundEvent, error) {
 	switch payload := pbEvent.Payload.(type) {
 	case *pb.WSEvent_SubmitPrompt:
 		domainEvent.Type = "submit_prompt"
-		domainEvent.SubmitPrompt = &SubmitPromptPayload{
+		domainEvent.SubmitPrompt = &SubmitPrompt{
 			Text:    payload.SubmitPrompt.Text,
 			SpaceID: payload.SubmitPrompt.SpaceId,
 			ChatID:  payload.SubmitPrompt.ChatId,
@@ -38,10 +38,10 @@ func UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		default:
 			strategy = flows.StrategyManual
 		}
-		domainEvent.SelectStrategy = &SelectStrategyPayload{StrategyID: strategy}
+		domainEvent.SelectStrategy = &SelectStrategy{StrategyID: strategy}
 	case *pb.WSEvent_ReviewDecision:
 		domainEvent.Type = "review_decision"
-		domainEvent.ReviewDecision = &ReviewDecisionPayload{
+		domainEvent.ReviewDecision = &ReviewDecision{
 			Branch:   payload.ReviewDecision.Branch,
 			Accepted: payload.ReviewDecision.Accepted,
 		}
@@ -53,19 +53,19 @@ func UnmarshalInbound(data []byte) (*InboundEvent, error) {
 			indices = append(indices, int(idx))
 		}
 
-		domainEvent.ApproveContext = &ApproveContextPayload{
+		domainEvent.ApproveContext = &ApproveContext{
 			Approved:               payload.ApproveContext.Approved,
 			RetainedFilePaths:      payload.ApproveContext.RetainedFilePaths,
 			RetainedHistoryIndices: indices,
 		}
 	case *pb.WSEvent_TransitionDecision:
 		domainEvent.Type = "transition_decision"
-		domainEvent.TransitionDecision = &TransitionDecisionPayload{
+		domainEvent.TransitionDecision = &TransitionDecision{
 			Approved: payload.TransitionDecision.Approved,
 		}
 	case *pb.WSEvent_LoadHistory:
 		domainEvent.Type = "load_history"
-		domainEvent.LoadHistory = &LoadHistoryPayload{
+		domainEvent.LoadHistory = &LoadHistory{
 			SpaceID: payload.LoadHistory.SpaceId,
 			ChatID:  payload.LoadHistory.ChatId,
 			Cursor:  payload.LoadHistory.Cursor,
@@ -73,14 +73,14 @@ func UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		}
 	case *pb.WSEvent_ForkChat:
 		domainEvent.Type = "fork_chat"
-		domainEvent.ForkChat = &ForkChatPayload{
+		domainEvent.ForkChat = &ForkChat{
 			SpaceID:       payload.ForkChat.SpaceId,
 			ChatID:        payload.ForkChat.ChatId,
 			TargetEventID: payload.ForkChat.TargetEventId,
 		}
 	case *pb.WSEvent_InlineEdit:
 		domainEvent.Type = "inline_edit"
-		domainEvent.InlineEdit = &InlineEditPayload{
+		domainEvent.InlineEdit = &InlineEdit{
 			SpaceID:       payload.InlineEdit.SpaceId,
 			ChatID:        payload.InlineEdit.ChatId,
 			TargetEventID: payload.InlineEdit.TargetEventId,
@@ -88,7 +88,7 @@ func UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		}
 	case *pb.WSEvent_SwitchBranch:
 		domainEvent.Type = "switch_branch"
-		domainEvent.SwitchBranch = &SwitchBranchPayload{
+		domainEvent.SwitchBranch = &SwitchBranch{
 			SpaceID:      payload.SwitchBranch.SpaceId,
 			ChatID:       payload.SwitchBranch.ChatId,
 			TargetBranch: payload.SwitchBranch.TargetBranch,

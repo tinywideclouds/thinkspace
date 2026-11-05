@@ -22,7 +22,11 @@ export class ChatConnectionService {
     this.transport.connect(url).subscribe({
       next: (protocolBufferEvent) => {
         const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
-        if (domainEvent) this.routeIncomingEvent(domainEvent);
+        if (domainEvent) {
+          this.routeIncomingEvent(domainEvent);
+        } else {
+          console.warn('[DEBUG ChatConnection] LlmFacade.toDomain returned null for:', protocolBufferEvent);
+        }
       },
       error: (err) => {
         this.flow.appendSystemLog('ERROR', `Connection error: ${err}`);
@@ -132,7 +136,8 @@ export class ChatConnectionService {
     const chatId = this.workspace.activeChatId();
     if (!spaceId || !chatId) return;
 
-    this.timeline.coreChat.set([]);
+    // Fixed: Target the new normalized nodeMap instead of the read-only computed coreChat array
+    this.timeline.nodeMap.set(new Map());
     this.timeline.isLoadingHistory.set(true);
 
     this.transport.send(LlmFacade.createSwitchBranch(spaceId, chatId, targetBranch));
@@ -171,13 +176,6 @@ export class ChatConnectionService {
 
       case 'telemetry_event':
         this.flow.processTelemetry(event);
-        if (event.channel === 'manager') {
-          if (event.eventType === 'flow_start') {
-            this.timeline.injectFlowExecution(event.payload['flow_id'] as string, event.summary || 'Orchestrating Agents...');
-          } else if (event.eventType === 'flow_complete') {
-            this.timeline.updateFlowExecutionStatus(event.payload['flow_id'] as string, 'completed');
-          }
-        }
         break;
 
       case 'request_strategy':
@@ -187,7 +185,10 @@ export class ChatConnectionService {
         this.cognitive.pendingReviewBranch.set(event.branch);
         break;
       case 'request_transition':
-        this.cognitive.pendingTransition.set({ targetDomain: event.targetDomain, reasoning: event.reasoning });
+        this.cognitive.pendingTransition.set({ 
+          targetThinkState: event.targetThinkState, 
+          reasoning: event.reasoning 
+        });
         break;
     }
   }

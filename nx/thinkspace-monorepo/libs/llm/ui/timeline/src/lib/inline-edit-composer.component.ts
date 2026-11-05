@@ -51,7 +51,7 @@ export class InlineEditComposerComponent {
   constructor() {
     effect(() => {
       this.editText.set(this.initialText());
-    }, { allowSignalWrites: true });
+    }, { });
 
     afterNextRender(() => {
       const el = this.inputRef()?.nativeElement;

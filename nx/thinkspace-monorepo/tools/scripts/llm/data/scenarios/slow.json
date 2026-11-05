@@ -10,7 +10,7 @@
           "timestamp": "2026-10-20T10:00:00Z",
           "message": "",
           "summary": "Simulating massive streaming response...",
-          "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"agent_count\": 1}"
+          "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"task_id\": \"task-slow-1\", \"agent_count\": 1}"
         }
       }
     }

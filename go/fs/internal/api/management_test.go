@@ -24,7 +24,7 @@ func setupManagementAPI(t *testing.T) (*http.ServeMux, *workspace.ServiceManager
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	baseRoot := t.TempDir()
 
-	factory := func(repoRoot string) workspace.ChatEngine { return nil }
+	factory := func(repoRoot string) workspace.ChatVersioner { return nil }
 
 	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
 	graphDB, _ := db.NewBadgerGraph(opts)
@@ -69,14 +69,14 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 	_ = os.MkdirAll(configsDir, 0755)
 
 	yamlContent := `golang:
-  type: space
+  type: thinkstate
   name: "Golang Domain"
 `
 	_ = os.WriteFile(filepath.Join(configsDir, "golang.yaml"), []byte(yamlContent), 0644)
 	registry := config.NewRegistry()
 	_ = registry.LoadDirectory(configsDir)
 
-	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatEngine { return nil }, nil, nil)
+	manager := workspace.NewServiceManager(logger, baseRoot, func(string) workspace.ChatVersioner { return nil }, nil, nil)
 	appCfg := workspace.AppConfig{SupportedDomains: []string{"golang"}}
 
 	mgmtAPI := api.NewManagementAPI(registry, manager, appCfg)
@@ -85,7 +85,7 @@ func TestManagementAPI_GetSpaces(t *testing.T) {
 
 	opSpace := "sandbox-operational"
 	_ = os.MkdirAll(filepath.Join(baseRoot, opSpace), 0755)
-	_ = manager.UpdateSpaceState(opSpace, func(s *workspace.SpaceState) { s.Domain = "golang" })
+	_ = manager.UpdateSpaceState(opSpace, func(s *workspace.SpaceState) { s.ThinkState = "golang" })
 
 	unconfigSpace := "sandbox-unconfigured"
 	_ = os.MkdirAll(filepath.Join(baseRoot, unconfigSpace), 0755)
@@ -154,7 +154,6 @@ func TestManagementAPI_GetEvents(t *testing.T) {
 	event3 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Third test event")
 	event3.Timestamp = time.Now()
 
-	// Use AppendNode correctly
 	_ = manager.GraphRepository().AppendNode(context.Background(), chat, thinkgraph.Node{Event: event1})
 	_ = manager.GraphRepository().AppendNode(context.Background(), chat, thinkgraph.Node{Event: event2})
 	_ = manager.GraphRepository().AppendNode(context.Background(), chat, thinkgraph.Node{Event: event3})

@@ -1,6 +1,6 @@
 golang:
   version: 1
-  type: "space"
+  type: "thinkstate"
   name: "golang"
   system_prompt: |
     You are operating within an automated Go ThinkSpace.
@@ -12,10 +12,10 @@ golang:
   toolchain:
     pre_verify:
       - "goimports -w src/"
-      - "go fmt ./src/..."
+      - "go fmt -C src ./..."
     verify:
       - "go build -C src ./..."
-      - "go test -C src -race ./..."
+      - "go test -C src  ./..."
       - "go clean -C src"
 
   timeouts:

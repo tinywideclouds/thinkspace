@@ -16,7 +16,7 @@ func TestParseConfigBytes(t *testing.T) {
 			name: "Golang Space",
 			yaml: `
 golang:
-  type: "space"
+  type: "thinkstate"
   name: "Golang Environment"
   system_prompt: "Base rules"
   roles:
@@ -26,7 +26,7 @@ golang:
       system_prompt: "Must use /src"
 `,
 			validate: func(t *testing.T, parsed *config.ParsedConfig) {
-				cfg, ok := parsed.Spaces["golang"]
+				cfg, ok := parsed.ThinkStates["golang"]
 				if !ok {
 					t.Fatalf("missing golang space")
 				}

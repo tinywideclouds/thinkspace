@@ -160,6 +160,42 @@ export class MockTransportService {
 
   private handleFakeTurn(promptText: string): void {
     const flowId = crypto.randomUUID();
+    const taskId = 'task-' + flowId.substring(0, 5);
+    const durableEventId = crypto.randomUUID();
+
+    // 1. Drop the durable anchor into the timeline first
+    setTimeout(() => {
+      const startAnchor = create(WSEventSchema, {
+        payload: {
+          case: 'streamedGraphEvent',
+          value: {
+            event: {
+              id: durableEventId,
+              timestamp: new Date().toISOString(),
+              tags: [],
+              tombstoned: false,
+              metadata: {},
+              payload: {
+                case: 'flowExecution',
+                value: {
+                  summary: 'Orchestrating agents...',
+                  flowId: flowId,
+                  taskId: taskId,
+                  task: 'Synthesize Response',
+                  status: 1, // FlowStatus.RUNNING
+                  error: '',
+                  agents: []
+                }
+              }
+            }
+          }
+        }
+      });
+      console.log('[DEBUG MockTransport] Emitting Start Anchor:', startAnchor);
+      this.inbound$.next(startAnchor);
+    }, 100);
+
+    // 2. Fire the ephemeral telemetry for the live overlay
     setTimeout(() => {
       this.inbound$.next(fromJson(WSEventSchema, {
         telemetryEvent: {
@@ -170,18 +206,20 @@ export class MockTransportService {
             timestamp: new Date().toISOString(),
             message: '',
             summary: 'Synthesizing response...',
-            payloadJson: JSON.stringify({ flow_id: flowId, agent_count: 1 })
+            payloadJson: JSON.stringify({ flow_id: flowId, task_id: taskId, agent_count: 1 })
           }
         }
       } as JsonValue));
     }, 200);
 
+    // 3. Emit standard model response
     setTimeout(() => {
       this.inbound$.next(fromJson(WSEventSchema, {
         chatStream: { text: `Mock response to: "${promptText}"` }
       } as JsonValue));
     }, 800);
 
+    // 4. Complete the live telemetry
     setTimeout(() => {
       this.inbound$.next(fromJson(WSEventSchema, {
         telemetryEvent: {
@@ -197,6 +235,45 @@ export class MockTransportService {
         }
       } as JsonValue));
     }, 1200);
+
+    // 5. Update the durable anchor to COMPLETED
+    setTimeout(() => {
+      const endAnchor = create(WSEventSchema, {
+        payload: {
+          case: 'streamedGraphEvent',
+          value: {
+            event: {
+              id: durableEventId, 
+              timestamp: new Date().toISOString(),
+              tags: [],
+              tombstoned: false,
+              metadata: {},
+              payload: {
+                case: 'flowExecution',
+                value: {
+                  summary: 'Response synthesized successfully.',
+                  flowId: flowId,
+                  taskId: taskId,
+                  task: 'Synthesize Response',
+                  status: 2, // FlowStatus.COMPLETED
+                  error: '',
+                  agents: [{
+                    agentId: 'mock-agent',
+                    passed: true,
+                    instruction: 'Write answer',
+                    rawPayload: '{}',
+                    verificationTrace: '[SYSTEM] OK',
+                    stateDelta: ''
+                  }]
+                }
+              }
+            }
+          }
+        }
+      });
+      console.log('[DEBUG MockTransport] Emitting End Anchor:', endAnchor);
+      this.inbound$.next(endAnchor);
+    }, 1300);
   }
 
   private showMockSnackbar(message: string): void {

@@ -120,12 +120,12 @@ func MarshalRequestReview(branch string) ([]byte, error) {
 	return protoMarshaler.Marshal(event)
 }
 
-func MarshalRequestTransition(targetDomain string, reasoning string) ([]byte, error) {
+func MarshalRequestTransition(targetThinkState string, reasoning string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_RequestTransition{
 			RequestTransition: &pb.RequestTransitionPayload{
-				TargetDomain: targetDomain,
-				Reasoning:    reasoning,
+				TargetThinkState: targetThinkState,
+				Reasoning:        reasoning,
 			},
 		},
 	}

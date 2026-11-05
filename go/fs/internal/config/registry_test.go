@@ -7,7 +7,6 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
-	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -19,7 +18,6 @@ type mockRegistryThinkSpace struct {
 }
 
 func (m *mockRegistryThinkSpace) Config() spaces.ThinkStateConfig                        { return m.cfg }
-func (m *mockRegistryThinkSpace) Tools() []llm.ToolDef                                   { return nil }
 func (m *mockRegistryThinkSpace) Verifier() spaces.Verifier                              { return nil }
 func (m *mockRegistryThinkSpace) Mapbook() spaces.Mapbook                                { return nil }
 func (m *mockRegistryThinkSpace) Patcher() workspace.Patcher                             { return nil }
@@ -33,10 +31,10 @@ func TestRegistry_Methods(t *testing.T) {
 		"config.yaml": &fstest.MapFile{
 			Data: []byte(`
 golang:
-  type: "space"
+  type: "thinkstate"
   name: "Golang Environment"
 concept:
-  type: "space"
+  type: "thinkstate"
   name: "concept"
 fanout:
   type: "flow"
@@ -62,10 +60,10 @@ digest:
 		t.Errorf("GetConfig: Expected Name 'Golang Environment', got %q", spaceCfg.Name)
 	}
 
-	// Test Domain instantiation mapping
-	_, ok = registry.GetDomain("concept")
+	// Test ThinkState instantiation mapping
+	_, ok = registry.GetThinkState("concept")
 	if !ok {
-		t.Errorf("GetDomain: Expected to find 'concept' domain instantiated")
+		t.Errorf("GetThinkState: Expected to find 'concept' think state instantiated")
 	}
 
 	// Test Flow decoding
@@ -96,17 +94,17 @@ func TestRegistry_ManualRegistration(t *testing.T) {
 	cfg := spaces.ThinkStateConfig{Name: "Mock Domain"}
 	mockSpace := &mockRegistryThinkSpace{cfg: cfg}
 
-	// Explicitly register the domain and config (used in tests)
-	registry.RegisterDomain("mock-domain", mockSpace)
+	// Explicitly register the think state and config (used in tests)
+	registry.RegisterThinkState("mock-domain", mockSpace)
 	registry.RegisterConfig("mock-domain", cfg)
 
-	// Verify Domain Injection
-	retrievedSpace, ok := registry.GetDomain("mock-domain")
+	// Verify ThinkState Injection
+	retrievedSpace, ok := registry.GetThinkState("mock-domain")
 	if !ok {
-		t.Fatalf("Expected to find manually registered domain")
+		t.Fatalf("Expected to find manually registered think state")
 	}
 	if retrievedSpace.Config().Name != "Mock Domain" {
-		t.Errorf("Expected domain name 'Mock Domain', got '%s'", retrievedSpace.Config().Name)
+		t.Errorf("Expected think state name 'Mock Domain', got '%s'", retrievedSpace.Config().Name)
 	}
 
 	// Verify Config Injection

@@ -30,7 +30,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		}
 
 		tokenChan := make(chan workspace.AgentToken, 10)
-		ui = api.NewWebSocketUI(r.Context(), conn, tokenChan)
+		ui = api.NewWebSocketUI(r.Context(), conn, tokenChan, nil)
 		close(uiReady)
 
 		<-r.Context().Done()
@@ -134,16 +134,16 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 
 	var transPayload struct {
 		RequestTransition struct {
-			TargetDomain string `json:"targetDomain"`
-			Reasoning    string `json:"reasoning"`
+			TargetThinkState string `json:"targetThinkState"`
+			Reasoning        string `json:"reasoning"`
 		} `json:"requestTransition"`
 	}
 
 	if err := json.Unmarshal(data, &transPayload); err != nil {
 		t.Fatalf("failed to unmarshal transition request: %v (data: %s)", err, string(data))
 	}
-	if transPayload.RequestTransition.TargetDomain != "golang" {
-		t.Errorf("expected golang, got %s", transPayload.RequestTransition.TargetDomain)
+	if transPayload.RequestTransition.TargetThinkState != "golang" {
+		t.Errorf("expected golang, got %s", transPayload.RequestTransition.TargetThinkState)
 	}
 
 	ui.PushTransitionDecision(true)

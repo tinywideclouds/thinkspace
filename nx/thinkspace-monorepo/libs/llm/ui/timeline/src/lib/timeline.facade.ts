@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { TimelineStore, FlowStore, CognitiveStore, ChatItem, WorkspaceStateService, UiSettingsService } from '@org/llm-state-chat';
+import { TimelineStore, FlowStore, CognitiveStore, ChatItem, WorkspaceStateService, UiSettingsService, FlowExecutionChatItem } from '@org/llm-state-chat';
 
 export type TimelineViewMode = 'linear' | 'cognitive';
 
@@ -31,7 +31,8 @@ export class TimelineFacade {
   public activeTagFilters = signal<Set<string>>(new Set());
 
   public flowStates = this.flow.flowStates;
-  public rawFeed = this.domainTimeline.coreChat;
+  // Point directly to the coreChat computed array projection
+  public rawFeed = this.domainTimeline.coreChat; 
   public activeDigests = this.cognitive.activeDigests;
   public activeFocus = this.cognitive.activeFocus;
   
@@ -128,8 +129,8 @@ export class TimelineFacade {
     }
   }
 
-  public inspectFlow(flowId: string): void {
-    this.flow.inspectFlow(flowId);
+  public inspectFlow(item: FlowExecutionChatItem): void {
+    this.flow.inspectFlow(item);
   }
 
   public setHoveredTag(tag: string | null): void {

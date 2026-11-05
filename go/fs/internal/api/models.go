@@ -10,63 +10,63 @@ type SpaceState struct {
 
 type InboundEvent struct {
 	Type               string
-	SubmitPrompt       *SubmitPromptPayload
-	SelectStrategy     *SelectStrategyPayload
-	ReviewDecision     *ReviewDecisionPayload
-	ApproveContext     *ApproveContextPayload
-	TransitionDecision *TransitionDecisionPayload
-	LoadHistory        *LoadHistoryPayload
-	ForkChat           *ForkChatPayload
-	InlineEdit         *InlineEditPayload
-	SwitchBranch       *SwitchBranchPayload
+	SubmitPrompt       *SubmitPrompt
+	SelectStrategy     *SelectStrategy
+	ReviewDecision     *ReviewDecision
+	ApproveContext     *ApproveContext
+	TransitionDecision *TransitionDecision
+	LoadHistory        *LoadHistory
+	ForkChat           *ForkChat
+	InlineEdit         *InlineEdit
+	SwitchBranch       *SwitchBranch
 }
 
-type SubmitPromptPayload struct {
+type SubmitPrompt struct {
 	Text    string
 	SpaceID string
 	ChatID  string
 }
 
-type SelectStrategyPayload struct {
+type SelectStrategy struct {
 	StrategyID flows.FlowStrategy
 }
 
-type ReviewDecisionPayload struct {
+type ReviewDecision struct {
 	Branch   string
 	Accepted bool
 }
 
-type ApproveContextPayload struct {
+type ApproveContext struct {
 	Approved               bool
 	RetainedFilePaths      []string
 	RetainedHistoryIndices []int
 }
 
-type TransitionDecisionPayload struct {
+type TransitionDecision struct {
 	Approved bool
 }
 
-type LoadHistoryPayload struct {
+type LoadHistory struct {
 	SpaceID string
 	ChatID  string
 	Cursor  string
 	Limit   int
 }
 
-type ForkChatPayload struct {
+type ForkChat struct {
 	SpaceID       string
 	ChatID        string
 	TargetEventID string
 }
 
-type InlineEditPayload struct {
+type InlineEdit struct {
 	SpaceID       string
 	ChatID        string
 	TargetEventID string
 	NewText       string
 }
 
-type SwitchBranchPayload struct {
+type SwitchBranch struct {
 	SpaceID      string
 	ChatID       string
 	TargetBranch string

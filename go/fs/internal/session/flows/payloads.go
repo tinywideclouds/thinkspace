@@ -3,34 +3,36 @@ package flows
 import "github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 
 const (
-	EventFlowStarted   thinkgraph.EventType = "flow_started"
-	EventAgentSpawned  thinkgraph.EventType = "agent_spawned"
-	EventFlowCompleted thinkgraph.EventType = "flow_completed"
+	EventFlowLifecycle thinkgraph.EventType = "flow_lifecycle"
 )
 
-type FlowStartedPayload struct {
-	FlowID      string `json:"flow_id"`
-	TaskID      string `json:"task_id"`
-	FlowSummary string `json:"flow_summary"`
-	AgentCount  int    `json:"agent_count"`
+type FlowStatus int
+
+const (
+	FlowStatusUnspecified FlowStatus = 0
+	FlowStatusRunning     FlowStatus = 1
+	FlowStatusCompleted   FlowStatus = 2
+	FlowStatusFailed      FlowStatus = 3
+)
+
+// FlowData represents the immutable parameters of a flow.
+// This is serialized into the Node.Data field.
+type FlowData struct {
+	FlowID     string `json:"flow_id"`
+	TaskID     string `json:"task_id"`
+	TaskPrompt string `json:"task_prompt"`
 }
 
-type AgentSpawnedPayload struct {
-	FlowID      string `json:"flow_id"`
-	AgentID     string `json:"agent_id"`
-	Instruction string `json:"instruction"`
+// FlowExecutionState represents the mutable, materialized state of an active flow.
+// This is serialized into the Node.MaterializedState field via in-place Graph mutations.
+type FlowExecutionState struct {
+	Status  FlowStatus    `json:"status"`
+	Summary string        `json:"summary,omitempty"`
+	Error   string        `json:"error,omitempty"`
+	Agents  []AgentRecord `json:"agents,omitempty"`
 }
 
-// FlowCompletedPayload entirely replaces the legacy workspace.FlowReceipt XML structure
-type FlowCompletedPayload struct {
-	FlowID  string               `json:"flow_id"`
-	TaskID  string               `json:"task_id"`
-	Task    string               `json:"task"`
-	Summary string               `json:"summary"`
-	Agents  []AgentRecordPayload `json:"agents"`
-}
-
-type AgentRecordPayload struct {
+type AgentRecord struct {
 	AgentID           string `json:"agent_id"`
 	Passed            bool   `json:"passed"`
 	Instruction       string `json:"instruction"`

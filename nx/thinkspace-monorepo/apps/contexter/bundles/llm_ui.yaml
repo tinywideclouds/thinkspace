@@ -109,4 +109,5 @@ files:
   - libs/llm/ui/timeline/src/lib/inline-edit-composer.component.spec.ts
   - libs/llm/ui/timeline/src/lib/inline-edit-composer.component.ts
   - libs/llm/ui/timeline/src/lib/tag-ribbon.component.spec.ts
+  - libs/llm/ui/timeline/src/lib/linear-feed/turn-group.component.spec.ts
 last_context: llm_ui_04.md

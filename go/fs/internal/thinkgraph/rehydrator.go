@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -52,8 +53,11 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *Ledge
 			_ = r.store.Repository().SetSyncState(ctx, c, *diskManifest)
 			return SyncStatusOK, diskManifest, diskManifest, nil
 		}
+		slog.InfoContext(ctx, "CheckSync: graph state empty but disk has events", "disk_events", diskManifest.TotalEvents)
 		return SyncStatusMismatch, diskManifest, nil, nil
 	}
+
+	slog.DebugContext(ctx, "CheckSync comparison", "disk_events", diskManifest.TotalEvents, "graph_events", graphManifest.TotalEvents)
 
 	if graphManifest.TotalEvents == diskManifest.TotalEvents {
 		return SyncStatusOK, diskManifest, graphManifest, nil
@@ -63,6 +67,10 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *Ledge
 		return SyncStatusBehind, diskManifest, graphManifest, nil
 	}
 
+	slog.WarnContext(ctx, "CheckSync: graph has more events than disk (ledger truncated or altered)",
+		"disk_events", diskManifest.TotalEvents,
+		"graph_events", graphManifest.TotalEvents,
+	)
 	return SyncStatusMismatch, diskManifest, graphManifest, nil
 }
 
@@ -192,7 +200,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 				mutFiles = append(mutFiles, e.Name())
 			}
 		}
-		sort.Strings(mutFiles) // Chronological execution based on unixnano prefixes
+		sort.Strings(mutFiles)
 
 		for _, filename := range mutFiles {
 			if data, err := os.ReadFile(filepath.Join(mutationsDir, filename)); err == nil {

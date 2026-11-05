@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"uuid"
 )
 
 type ManagementAPI struct {
@@ -66,8 +66,8 @@ func (api *ManagementAPI) handleGetSpaces(w http.ResponseWriter, r *http.Request
 		isConfigured := false
 		state, err := api.manager.GetSpaceState(id)
 
-		if err == nil && state.Domain != "" {
-			if _, ok := api.registry.GetDomain(state.Domain); ok {
+		if err == nil && state.ThinkState != "" {
+			if _, ok := api.registry.GetThinkState(state.ThinkState); ok {
 				isConfigured = true
 			}
 		}

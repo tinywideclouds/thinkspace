@@ -1,6 +1,6 @@
 concept:
   version: 1
-  type: "space"
+  type: "thinkstate"
   name: "concept"
   system_prompt: |
     You are operating within an automated Concept and Ideation ThinkSpace.

@@ -72,11 +72,15 @@ func (f *FanOutFlow) Next(state FlowState) FlowDirective {
 		switch state.UserStrategy {
 		case StrategySkip:
 			return FlowDirective{Action: ActionFinish}
-		case StrategyManual:
+		case StrategyManual, StrategyReview:
 			return FlowDirective{Action: ActionManualReview}
-		case StrategyReview, StrategyRefine:
-			// STUB: We route these to manual until the synthesis LLM steps are implemented
-			return FlowDirective{Action: ActionManualReview}
+		case StrategyRefine:
+			return FlowDirective{
+				Action: ActionSynthesize,
+				Tasks: []SubAgentTask{
+					{Instruction: f.config.RefinePrompt},
+				},
+			}
 		default:
 			return FlowDirective{
 				Action: ActionError,

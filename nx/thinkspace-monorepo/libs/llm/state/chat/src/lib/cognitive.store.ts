@@ -15,7 +15,7 @@ export class CognitiveStore {
   public pendingContextReview = signal<PreviewContext | null>(null);
   public pendingStrategy = signal<boolean>(false);
   public pendingReviewBranch = signal<string | null>(null);
-  public pendingTransition = signal<{ targetDomain: string; reasoning: string } | null>(null);
+  public pendingTransition = signal<{ targetThinkState: string; reasoning: string } | null>(null);
 
   public autoApproveContext = signal<boolean>(false);
 

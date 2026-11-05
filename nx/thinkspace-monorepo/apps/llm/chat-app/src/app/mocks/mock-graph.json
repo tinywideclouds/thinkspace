@@ -68,7 +68,7 @@
               "timestamp": "2026-10-20T10:00:00Z",
               "message": "",
               "summary": "Executing long-running background task...",
-              "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"agent_count\": 1}"
+              "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"task_id\": \"task-del-1\", \"agent_count\": 1}"
             }
           }
         }
@@ -134,6 +134,325 @@
                 "previewSnippet": "package main\n\nfunc getUser() {}",
                 "fileRef": "ref-124.go"
               }
+            }
+          }
+        }
+      }
+    ],
+    "multi-agent-failure": [
+      {
+        "offsetMs": 200,
+        "payload": {
+          "streamedGraphEvent": {
+            "event": {
+              "id": "durable-err-1",
+              "timestamp": "2026-10-23T12:05:00Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "flowExecution": {
+                "flowId": "flow-err-1",
+                "taskId": "task-err-1",
+                "task": "I am assigning 2 agents to safely refactor the database connection pool limits to handle increased load.",
+                "status": 1,
+                "error": "",
+                "summary": "Orchestrating agents to refactor database pool...",
+                "agents": []
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 300,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "manager",
+            "event": {
+              "id": "tel-e1",
+              "type": "flow_start",
+              "timestamp": "2026-10-23T12:05:00Z",
+              "message": "",
+              "summary": "Starting DB pool refactor",
+              "payloadJson": "{\"flow_id\": \"flow-err-1\", \"task_id\": \"task-err-1\", \"agent_count\": 2}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 1000,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "agent",
+            "event": {
+              "id": "tel-e2",
+              "type": "agent_status",
+              "timestamp": "2026-10-23T12:05:01Z",
+              "message": "Updating connection config...",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-err-1\", \"agent_id\": \"db-config\", \"agent_index\": 0, \"instruction\": \"Update connection limits\", \"status\": \"running\"}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 2500,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "agent",
+            "event": {
+              "id": "tel-e3",
+              "type": "agent_complete",
+              "timestamp": "2026-10-23T12:05:03Z",
+              "message": "Config updated",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-err-1\", \"agent_id\": \"db-config\", \"passed\": true, \"trace\": \"[SYSTEM] db_config.go updated.\"}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 3000,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "agent",
+            "event": {
+              "id": "tel-e4",
+              "type": "agent_status",
+              "timestamp": "2026-10-23T12:05:03Z",
+              "message": "Applying connection limits...",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-err-1\", \"agent_id\": \"pool-manager\", \"agent_index\": 1, \"instruction\": \"Apply config to pgxpool\", \"status\": \"running\"}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 4500,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "agent",
+            "event": {
+              "id": "tel-e5",
+              "type": "agent_error",
+              "timestamp": "2026-10-23T12:05:04Z",
+              "message": "Verification failed",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-err-1\", \"agent_id\": \"pool-manager\", \"passed\": false, \"trace\": \"[VERIFY] go build ./...: FAILED\\nsrc/db/pool.go:42: undefined: env.DB_MAX_IDLE\"}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 5000,
+        "payload": {
+          "streamedGraphEvent": {
+            "event": {
+              "id": "durable-err-1",
+              "timestamp": "2026-10-23T12:05:05Z",
+              "tags": [
+                "database"
+              ],
+              "tombstoned": false,
+              "metadata": {},
+              "flowExecution": {
+                "flowId": "flow-err-1",
+                "taskId": "task-err-1",
+                "task": "I am assigning 2 agents to safely refactor the database connection pool limits to handle increased load.",
+                "status": 3,
+                "error": "The verification step failed because the new database connection pool configuration references an undefined environment variable 'DB_MAX_IDLE' in `pool.go`.",
+                "summary": "Database refactor failed during connection logic updates. The workspace has been rolled back to its previous safe state.",
+                "agents": [
+                  {
+                    "agentId": "db-config",
+                    "passed": true,
+                    "instruction": "Update connection limits",
+                    "verificationTrace": "[SYSTEM] db_config.go updated."
+                  },
+                  {
+                    "agentId": "pool-manager",
+                    "passed": false,
+                    "instruction": "Apply config to pgxpool",
+                    "verificationTrace": "[VERIFY] go build ./...: FAILED\nsrc/db/pool.go:42: undefined: env.DB_MAX_IDLE"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 5100,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "manager",
+            "event": {
+              "id": "tel-e6",
+              "type": "flow_complete",
+              "timestamp": "2026-10-23T12:05:05Z",
+              "message": "",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-err-1\", \"passed\": false}"
+            }
+          }
+        }
+      }
+    ],
+    "multi-agent-success": [
+      {
+        "offsetMs": 200,
+        "payload": {
+          "streamedGraphEvent": {
+            "event": {
+              "id": "durable-success-1",
+              "timestamp": "2026-10-23T12:00:00Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "flowExecution": {
+                "flowId": "flow-succ-1",
+                "taskId": "task-succ-1",
+                "task": "I am assigning 2 agents to explore adding JWT authentication to our existing golang service.",
+                "status": 1,
+                "error": "",
+                "summary": "Orchestrating agents to implement JWT auth...",
+                "agents": []
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 300,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "manager",
+            "event": {
+              "id": "tel-s1",
+              "type": "flow_start",
+              "timestamp": "2026-10-23T12:00:00Z",
+              "message": "",
+              "summary": "Starting JWT refactor",
+              "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"task_id\": \"task-succ-1\", \"agent_count\": 2}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 1000,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "agent",
+            "event": {
+              "id": "tel-s2",
+              "type": "agent_status",
+              "timestamp": "2026-10-23T12:00:01Z",
+              "message": "Writing token generation logic...",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"agent_id\": \"jwt-writer\", \"agent_index\": 0, \"instruction\": \"Write JWT logic\", \"status\": \"running\"}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 2500,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "agent",
+            "event": {
+              "id": "tel-s3",
+              "type": "agent_complete",
+              "timestamp": "2026-10-23T12:00:02Z",
+              "message": "Token logic complete",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"agent_id\": \"jwt-writer\", \"passed\": true, \"trace\": \"[SYSTEM] Generated auth.go successfully.\"}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 3000,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "agent",
+            "event": {
+              "id": "tel-s4",
+              "type": "agent_status",
+              "timestamp": "2026-10-23T12:00:03Z",
+              "message": "Integrating middleware...",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"agent_id\": \"middleware-writer\", \"agent_index\": 1, \"instruction\": \"Protect /api routes\", \"status\": \"running\"}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 4500,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "agent",
+            "event": {
+              "id": "tel-s5",
+              "type": "agent_complete",
+              "timestamp": "2026-10-23T12:00:04Z",
+              "message": "Middleware integrated",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"agent_id\": \"middleware-writer\", \"passed\": true, \"trace\": \"[SYSTEM] Routes protected.\"}"
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 5000,
+        "payload": {
+          "streamedGraphEvent": {
+            "event": {
+              "id": "durable-success-1",
+              "timestamp": "2026-10-23T12:00:05Z",
+              "tags": [
+                "auth",
+                "middleware"
+              ],
+              "tombstoned": false,
+              "metadata": {},
+              "flowExecution": {
+                "flowId": "flow-succ-1",
+                "taskId": "task-succ-1",
+                "task": "I am assigning 2 agents to explore adding JWT authentication to our existing golang service.",
+                "status": 2,
+                "error": "",
+                "summary": "Successfully implemented JWT authentication. The token generation logic was isolated in `auth.go`, and the middleware was seamlessly integrated into the Gin router to protect all `/api/v1` routes.",
+                "agents": [
+                  {
+                    "agentId": "jwt-writer",
+                    "passed": true,
+                    "instruction": "Write JWT logic",
+                    "verificationTrace": "[SYSTEM] Generated auth.go successfully."
+                  },
+                  {
+                    "agentId": "middleware-writer",
+                    "passed": true,
+                    "instruction": "Protect /api routes",
+                    "verificationTrace": "[SYSTEM] Routes protected."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 5100,
+        "payload": {
+          "telemetryEvent": {
+            "channel": "manager",
+            "event": {
+              "id": "tel-s6",
+              "type": "flow_complete",
+              "timestamp": "2026-10-23T12:00:05Z",
+              "message": "",
+              "summary": "",
+              "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"passed\": true}"
             }
           }
         }
@@ -306,7 +625,7 @@
               "timestamp": "2026-10-20T10:00:00Z",
               "message": "",
               "summary": "Simulating massive streaming response...",
-              "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"agent_count\": 1}"
+              "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"task_id\": \"task-slow-1\", \"agent_count\": 1}"
             }
           }
         }

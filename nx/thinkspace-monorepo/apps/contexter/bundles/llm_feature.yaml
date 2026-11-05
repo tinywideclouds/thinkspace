@@ -8,8 +8,8 @@ files:
   - libs/llm/feature/chat/vite.config.mts
   - libs/llm/feature/chat/src/index.ts
   - libs/llm/feature/chat/src/test-setup.ts
-  - libs/llm/feature/chat/src/lib/chat-container/chat-container.component.css
   - libs/llm/feature/chat/src/lib/chat-container/chat-container.component.html
   - libs/llm/feature/chat/src/lib/chat-container/chat-container.component.ts
   - libs/llm/feature/chat/src/lib/chat-container/chat-container.component.spec.ts
-last_context: llm_feature_02.md
+  - libs/llm/feature/chat/src/lib/chat-container/chat-container.component.scss
+last_context: llm_feature_09.md

@@ -11,10 +11,10 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
-
-// --- Mocks ---
 
 type mockSandbox struct {
 	files map[string][]byte
@@ -49,18 +49,19 @@ type spyModelClient struct {
 	err            error
 	capturedModel  string
 	capturedBundle cognition.ThinkBundle
-	capturedTools  []llm.ToolDef
+	capturedTools  *tools.Registry
 }
 
 func (m *spyModelClient) GenerateContentStream(
 	ctx context.Context,
 	model string,
 	bundle cognition.ThinkBundle,
-	tools []llm.ToolDef,
+	registry *tools.Registry,
+	config spaces.ThinkStateConfig,
 ) iter.Seq2[llm.StreamChunk, error] {
 	m.capturedModel = model
 	m.capturedBundle = bundle
-	m.capturedTools = tools
+	m.capturedTools = registry
 
 	return func(yield func(llm.StreamChunk, error) bool) {
 		if m.err != nil {
@@ -90,8 +91,6 @@ func (m *mockPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSand
 func (m *mockPatcher) SystemInstructions() string {
 	return "Mock patcher formatting rules"
 }
-
-// --- Tests ---
 
 func TestSubAgentFactory_ExecutionWithPatcher(t *testing.T) {
 	ctx := context.Background()
@@ -130,12 +129,14 @@ func TestSubAgentFactory_ExecutionWithPatcher(t *testing.T) {
 	}
 	close(tokenChan)
 
-	// Assert Formatting Rules were injected into the bundle
+	if spyClient.capturedTools != nil {
+		t.Errorf("expected subagent to pass nil tool registry, but tools were provided")
+	}
+
 	if spyClient.capturedBundle.Rules.FormattingConstraints != "Mock patcher formatting rules" {
 		t.Errorf("expected patcher instructions to be injected into bundle rules, got %q", spyClient.capturedBundle.Rules.FormattingConstraints)
 	}
 
-	// Assert Patcher Call
 	if !patcher.applyCalled {
 		t.Errorf("expected Patcher.Apply to be called")
 	}
@@ -143,7 +144,6 @@ func TestSubAgentFactory_ExecutionWithPatcher(t *testing.T) {
 		t.Errorf("expected patcher to receive raw output")
 	}
 
-	// Assert Trace logging
 	traceContent, exists := sandbox.files["trace.jsonl"]
 	if !exists {
 		t.Fatalf("expected trace.jsonl to be generated in sandbox")

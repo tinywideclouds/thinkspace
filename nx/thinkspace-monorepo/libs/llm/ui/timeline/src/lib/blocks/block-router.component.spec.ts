@@ -2,9 +2,14 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ComponentRef, signal, WritableSignal } from '@angular/core';
 import { BlockRouterComponent } from './block-router.component';
 import { TimelineFacade } from '../timeline.facade';
-import { ChatItem, FlowState } from '@org/llm-state-chat';
+import { ChatItem, FlowState, FlowExecutionChatItem } from '@org/llm-state-chat';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 
+declare const Temporal: { Now: { instant: () => unknown } };
+
+// Define every method and signal that nested components (UserMessage, ModelMessage, etc.) will call
 interface MockTimelineFacade {
   isItemDimmed: Mock<(item: ChatItem) => boolean>;
   isItemCollapsed: Mock<(item: ChatItem) => boolean>;
@@ -12,8 +17,11 @@ interface MockTimelineFacade {
   selectedTag: WritableSignal<string | null>;
   setHoveredTag: Mock<(tag: string | null) => void>;
   toggleSelectedTag: Mock<(tag: string) => void>;
-  inspectFlow: Mock<(flowId: string) => void>;
+  inspectFlow: Mock<(item: FlowExecutionChatItem) => void>;
   flowStates: WritableSignal<Map<string, FlowState>>;
+  isDebugMode: WritableSignal<boolean>;
+  isEditMode: WritableSignal<boolean>;
+  getFileContent: Mock<(path: string, ref: string) => Promise<string>>;
 }
 
 describe('BlockRouterComponent', () => {
@@ -31,13 +39,19 @@ describe('BlockRouterComponent', () => {
       setHoveredTag: vi.fn(),
       toggleSelectedTag: vi.fn(),
       inspectFlow: vi.fn(),
-      flowStates: signal(new Map())
+      flowStates: signal(new Map<string, FlowState>()),
+      isDebugMode: signal(false),
+      isEditMode: signal(false),
+      getFileContent: vi.fn().mockResolvedValue('')
     };
 
     await TestBed.configureTestingModule({
       imports: [BlockRouterComponent],
       providers: [
-        { provide: TimelineFacade, useValue: mockFacade }
+        { provide: TimelineFacade, useValue: mockFacade },
+        // Provide HTTP Client Testing to suppress the spurious /api/spaces fetch error from inner blocks
+        provideHttpClient(),
+        provideHttpClientTesting()
       ]
     }).compileComponents();
 
@@ -53,6 +67,7 @@ describe('BlockRouterComponent', () => {
       content: 'User text',
       timestamp: Temporal.Now.instant()
     } as ChatItem);
+    
     await fixture.whenStable();
     fixture.detectChanges();
     
@@ -66,6 +81,7 @@ describe('BlockRouterComponent', () => {
       content: 'Model text',
       timestamp: Temporal.Now.instant()
     } as ChatItem);
+    
     await fixture.whenStable();
     fixture.detectChanges();
     
@@ -82,6 +98,7 @@ describe('BlockRouterComponent', () => {
       content: 'summary text',
       timestamp: Temporal.Now.instant()
     } as ChatItem);
+    
     await fixture.whenStable();
     fixture.detectChanges();
     
@@ -92,11 +109,16 @@ describe('BlockRouterComponent', () => {
     componentRef.setInput('chatItem', { 
       id: '4', 
       type: 'flow_execution', 
-      flowId: 'flow-123', 
-      status: 'running', 
+      flowId: 'flow-123',
+      taskId: 'task-123',
+      task: 'Mock Task',
+      status: 'RUNNING', 
+      error: '',
+      agents: [],
       content: 'Running agent tests',
       timestamp: Temporal.Now.instant()
     } as ChatItem);
+    
     await fixture.whenStable();
     fixture.detectChanges();
     

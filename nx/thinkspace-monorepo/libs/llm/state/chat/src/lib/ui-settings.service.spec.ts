@@ -12,9 +12,9 @@ describe('UiSettingsService', () => {
     service = TestBed.inject(UiSettingsService);
   });
 
-  it('should be created with a default history page size of 20 and prefetch index of 4', () => {
+  it('should be created with a default history page size of 15 and prefetch index of 4', () => {
     expect(service).toBeTruthy();
-    expect(service.pagination().size).toBe(20);
+    expect(service.pagination().size).toBe(15);
     expect(service.pagination().prefetchIndex).toBe(4);
   });
 

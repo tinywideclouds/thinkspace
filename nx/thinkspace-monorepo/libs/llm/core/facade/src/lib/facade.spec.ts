@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { create } from '@bufbuild/protobuf';
-import { WSEventSchema, DelegationStrategy as ProtoDelegationStrategy, MessageType } from '@org/llm-core-protos';
+import { WSEventSchema, DelegationStrategy as ProtoDelegationStrategy, MessageType, FlowStatus } from '@org/llm-core-protos';
 import { LlmFacade } from './facade';
 import { DelegationStrategy } from './domain-models';
 
@@ -72,6 +72,72 @@ describe('LlmFacade', () => {
           metadata: { custom_info: 'test' },
           branchId: 'feature-branch',
           edges: { amended_by: 'event-2' }
+        }
+      });
+    });
+
+    it('should map a streamed graph event (Flow Execution) correctly', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'streamedGraphEvent',
+          value: {
+            event: {
+              id: 'event-3',
+              timestamp: '2026-10-23T12:00:00Z',
+              payload: {
+                case: 'flowExecution',
+                value: {
+                  summary: 'Flow running',
+                  flowId: 'flow-123',
+                  taskId: 'task-123',
+                  task: 'Build the thing',
+                  status: FlowStatus.RUNNING,
+                  error: '',
+                  agents: [
+                    {
+                      agentId: 'agent-1',
+                      passed: false,
+                      instruction: 'do work',
+                      rawPayload: '{}',
+                      verificationTrace: '',
+                      stateDelta: ''
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      });
+      
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'streamed_graph_event',
+        event: {
+          id: 'event-3',
+          type: 'flow_execution',
+          timestamp: expect.anything(),
+          tags: [],
+          content: 'Flow running',
+          flowId: 'flow-123',
+          taskId: 'task-123',
+          task: 'Build the thing',
+          status: 'RUNNING',
+          error: '',
+          agents: [
+            {
+              agentId: 'agent-1',
+              passed: false,
+              instruction: 'do work',
+              rawPayload: '{}',
+              verificationTrace: '',
+              stateDelta: ''
+            }
+          ],
+          tombstoned: false,
+          metadata: {},
+          edges: {},
+          branchId: undefined
         }
       });
     });
@@ -255,7 +321,7 @@ describe('LlmFacade', () => {
         payload: {
           case: 'requestTransition',
           value: {
-            targetDomain: 'golang',
+            targetThinkState: 'golang',
             reasoning: 'Need to compile things'
           }
         }
@@ -264,7 +330,7 @@ describe('LlmFacade', () => {
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'request_transition',
-        targetDomain: 'golang',
+        targetThinkState: 'golang',
         reasoning: 'Need to compile things'
       });
     });

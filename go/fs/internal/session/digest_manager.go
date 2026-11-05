@@ -12,6 +12,7 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -74,7 +75,7 @@ func (m *DigestManager) CreateManualDigest(
 		},
 	}
 
-	stream := m.client.GenerateContentStream(ctx, model, bundle, nil)
+	stream := m.client.GenerateContentStream(ctx, model, bundle, nil, spaces.ThinkStateConfig{})
 	var summaryBuilder strings.Builder
 
 	for chunk, err := range stream {
@@ -158,7 +159,7 @@ func (m *DigestManager) CreateBackgroundDigest(
 		},
 	}
 
-	stream := m.client.GenerateContentStream(ctx, model, bundle, nil)
+	stream := m.client.GenerateContentStream(ctx, model, bundle, nil, spaces.ThinkStateConfig{})
 	var jsonBuilder strings.Builder
 
 	for chunk, err := range stream {

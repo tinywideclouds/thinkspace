@@ -1,30 +1,7 @@
-import {
-  Component,
-  input,
-  output,
-  computed,
-  signal,
-  effect,
-} from '@angular/core';
+import { Component, input, output, computed, signal, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { parseVerificationTrace, TraceStep } from '@org/llm-core-facade';
-
-interface ParsedAgent {
-  agentId: string;
-  passed: boolean;
-  instruction: string;
-  rawPayload: string;
-  verificationTrace: string;
-  stateDelta: string;
-}
-
-interface ParsedReceipt {
-  flowId: string;
-  taskId: string;
-  task: string;
-  summary: string;
-  agents: ParsedAgent[];
-}
+import { parseVerificationTrace, TraceStep, AgentRecord } from '@org/llm-core-facade';
+import { FlowExecutionChatItem } from '@org/llm-state-chat';
 
 @Component({
   selector: 'llm-flow-inspector',
@@ -33,60 +10,28 @@ interface ParsedReceipt {
   templateUrl: './flow-inspector.component.html',
 })
 export class FlowInspectorComponent {
-  receiptXml = input.required<string>();
-  inspectorClosed = output<void>();
+  public flowItem = input.required<FlowExecutionChatItem>();
+  public inspectorClosed = output<void>();
 
-  parsedReceipt = signal<ParsedReceipt | null>(null);
-  selectedAgentId = signal<string | null>(null);
+  public selectedAgentId = signal<string | null>(null);
 
   constructor() {
     effect(() => {
-      const xml = this.receiptXml();
-      if (!xml) return;
-
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(xml, 'application/xml');
-
-      const flowReceiptNode = doc.querySelector('FlowReceipt');
-      if (!flowReceiptNode) return;
-
-      const agents: ParsedAgent[] = [];
-      const agentNodes = doc.querySelectorAll('Agent');
-      agentNodes.forEach((node) => {
-        agents.push({
-          agentId: node.getAttribute('AgentID') || '',
-          passed: node.getAttribute('Passed') === 'true',
-          instruction: node.querySelector('Instruction')?.textContent || '',
-          rawPayload: node.querySelector('RawPayload')?.textContent || '',
-          verificationTrace:
-            node.querySelector('VerificationTrace')?.textContent || '',
-          stateDelta: node.querySelector('StateDelta')?.textContent || '',
-        });
-      });
-
-      const receipt: ParsedReceipt = {
-        flowId: flowReceiptNode.getAttribute('FlowID') || '',
-        taskId: flowReceiptNode.getAttribute('TaskID') || '',
-        task: doc.querySelector('Task')?.textContent || '',
-        summary: doc.querySelector('Summary')?.textContent || '',
-        agents,
-      };
-
-      this.parsedReceipt.set(receipt);
-      if (agents.length > 0) {
-        this.selectedAgentId.set(agents[0].agentId);
+      const item = this.flowItem();
+      if (item && item.agents && item.agents.length > 0 && !this.selectedAgentId()) {
+        this.selectedAgentId.set(item.agents[0].agentId);
       }
     });
   }
 
-  activeAgent = computed(() => {
-    const receipt = this.parsedReceipt();
+  public activeAgent = computed<AgentRecord | null>(() => {
+    const item = this.flowItem();
     const id = this.selectedAgentId();
-    if (!receipt || !id) return null;
-    return receipt.agents.find((a) => a.agentId === id) || null;
+    if (!item || !item.agents || !id) return null;
+    return item.agents.find((a) => a.agentId === id) || null;
   });
 
-  parsedTraceSteps = computed<TraceStep[]>(() => {
+  public parsedTraceSteps = computed<TraceStep[]>(() => {
     const agent = this.activeAgent();
     if (!agent || !agent.verificationTrace) return [];
     return parseVerificationTrace(agent.verificationTrace);

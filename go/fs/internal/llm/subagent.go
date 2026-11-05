@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -21,17 +22,41 @@ type TraceEvent struct {
 func NewSubAgentExecutor(logger *slog.Logger, client ModelClient, modelName string, patcher workspace.Patcher) workspace.SubAgentExecutor {
 	return func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
 
-		// Inject physical formatting laws into the cognitive rules
 		if patcher != nil && patcher.SystemInstructions() != "" {
 			bundle.Rules.FormattingConstraints = patcher.SystemInstructions()
 		}
 
-		stream := client.GenerateContentStream(ctx, modelName, bundle, nil)
+		logger.InfoContext(ctx, "sub-agent starting generation stream",
+			"agent_id", agentID,
+			"model", modelName,
+			"has_token_chan", tokenChan != nil,
+			"prompt_preview", truncateForLog(bundle.Trajectory.Catalyst.Content, 80),
+			"workbench_files_count", len(bundle.Workbench),
+		)
+
+		// Sub-agent passes nil for tools and empty config: pure text/patch streaming
+		stream := client.GenerateContentStream(ctx, modelName, bundle, nil, spaces.ThinkStateConfig{})
 
 		rawOutput := ""
+		chunkCount := 0
+		var interceptedToolNames []string
+
 		for chunk, err := range stream {
 			if err != nil {
+				logger.ErrorContext(ctx, "sub-agent stream failed with error",
+					"agent_id", agentID,
+					"model", modelName,
+					"error", err,
+				)
 				return fmt.Errorf("sub-agent generation stream failed: %w", err)
+			}
+
+			chunkCount++
+
+			if len(chunk.ToolCalls) > 0 {
+				for _, tc := range chunk.ToolCalls {
+					interceptedToolNames = append(interceptedToolNames, tc.Name)
+				}
 			}
 
 			if chunk.Text != "" {
@@ -46,11 +71,26 @@ func NewSubAgentExecutor(logger *slog.Logger, client ModelClient, modelName stri
 			}
 		}
 
+		logger.DebugContext(ctx, "sub-agent stream completed",
+			"agent_id", agentID,
+			"model", modelName,
+			"chunks_received", chunkCount,
+			"text_bytes", len(rawOutput),
+			"tool_calls_emitted", interceptedToolNames,
+		)
+
 		if rawOutput == "" {
-			return fmt.Errorf("empty response from sub-agent")
+			if len(interceptedToolNames) > 0 {
+				logger.WarnContext(ctx, "sub-agent emitted tool calls instead of code/patch text",
+					"agent_id", agentID,
+					"model", modelName,
+					"tool_calls", interceptedToolNames,
+				)
+				return fmt.Errorf("empty response from sub-agent: model emitted tool calls %v instead of patch text", interceptedToolNames)
+			}
+			return fmt.Errorf("empty response from sub-agent (received %d chunks)", chunkCount)
 		}
 
-		// Apply Model-Specific Output Healers
 		healer := GetHealerForModel(modelName)
 		if healer != nil {
 			healedOutput, modified := healer.Heal(rawOutput)
@@ -86,4 +126,11 @@ func NewSubAgentExecutor(logger *slog.Logger, client ModelClient, modelName stri
 
 		return nil
 	}
+}
+
+func truncateForLog(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }

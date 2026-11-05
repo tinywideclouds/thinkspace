@@ -1,18 +1,28 @@
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
-import { ComponentRef } from '@angular/core';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentRef, signal, WritableSignal } from '@angular/core';
 import { FileDeltaBlockComponent } from './file-delta-block.component';
 import { TimelineFacade } from '../../timeline.facade';
-import { describe, beforeEach, it, expect, vi } from 'vitest';
+import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
+
+// Define the full strict interface expected by the nested component
+interface MockTimelineFacade {
+  getFileContent: Mock<(path: string, ref: string) => Promise<string>>;
+  isDebugMode: WritableSignal<boolean>;
+  isEditMode: WritableSignal<boolean>;
+}
 
 describe('FileDeltaBlockComponent', () => {
   let component: FileDeltaBlockComponent;
   let fixture: ComponentFixture<FileDeltaBlockComponent>;
   let componentRef: ComponentRef<FileDeltaBlockComponent>;
-  let mockFacade: { getFileContent: any };
+  let mockFacade: MockTimelineFacade;
 
   beforeEach(async () => {
+    // Populate every method and signal the component depends on
     mockFacade = {
-      getFileContent: vi.fn().mockResolvedValue('console.log("Full file fetched!");')
+      getFileContent: vi.fn().mockResolvedValue('console.log("Full file fetched!");'),
+      isDebugMode: signal(false),
+      isEditMode: signal(false)
     };
 
     await TestBed.configureTestingModule({
@@ -41,33 +51,31 @@ describe('FileDeltaBlockComponent', () => {
     expect(compiled.textContent).toContain('console.log("Preview");');
   });
 
-  it('should fetch full content and expand when header is clicked', fakeAsync(() => {
-    const header = fixture.nativeElement.querySelector('div[role="button"]');
+  it('should fetch full content and expand when header is clicked', async () => {
+    const header = fixture.nativeElement.querySelector('div[role="button"]') as HTMLElement;
+    
     header.click();
     
-    expect(component.isExpanded()).toBe(true);
-    expect(component.isLoading()).toBe(true);
-    
-    tick();
+    await fixture.whenStable();
     fixture.detectChanges();
     
+    expect(component.isExpanded()).toBe(true);
     expect(component.isLoading()).toBe(false);
     expect(component.fullContent()).toBe('console.log("Full file fetched!");');
     expect(mockFacade.getFileContent).toHaveBeenCalledWith('src/main.ts', 'hash123');
-  }));
+  });
 
-  it('should trigger expand when Enter key is pressed on header', fakeAsync(() => {
-    const header = fixture.nativeElement.querySelector('div[role="button"]');
+  it('should trigger expand when Enter key is pressed on header', async () => {
+    const header = fixture.nativeElement.querySelector('div[role="button"]') as HTMLElement;
     const enterEvent = new KeyboardEvent('keydown', { key: 'Enter' });
+    
     header.dispatchEvent(enterEvent);
     
-    expect(component.isExpanded()).toBe(true);
-    expect(component.isLoading()).toBe(true);
-
-    tick();
+    await fixture.whenStable();
     fixture.detectChanges();
 
+    expect(component.isExpanded()).toBe(true);
     expect(component.isLoading()).toBe(false);
     expect(component.fullContent()).toBe('console.log("Full file fetched!");');
-  }));
+  });
 });

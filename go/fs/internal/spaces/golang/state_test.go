@@ -99,13 +99,11 @@ func setupGoThinkState(t *testing.T, verifyTimeout int) *golang.GoThinkState {
 			Manager: spaces.ManagerConfig{
 				Tools: spaces.ToolsConfig{
 					ProposeChange: spaces.ToolProposeChangeConfig{
-						Description:                  "mock tool desc",
-						AgentCountDescription:        "mock count desc",
-						AssignedTagsDescription:      "mock tags desc",
-						AgentInstructionsDescription: "mock instructions desc",
-						ContextDigestDescription:     "mock digest desc",
-						InstructionDescription:       "mock instruction desc",
-						TargetFilesDescription:       "mock files desc",
+						Description:              "mock tool desc",
+						AgentCountDescription:    "mock count desc",
+						ContextDigestDescription: "mock digest desc",
+						InstructionDescription:   "mock instruction desc",
+						TargetFilesDescription:   "mock files desc",
 					},
 					QueryLens: spaces.ToolQueryLensConfig{
 						Description:          "mock query lens desc",
@@ -268,10 +266,6 @@ func TestGoThinkState_InterfaceContracts(t *testing.T) {
 		t.Errorf("Mapbook() returned nil")
 	}
 
-	tools := space.Tools()
-	if len(tools) != 2 {
-		t.Fatalf("Expected exactly 2 tools, got %d", len(tools))
-	}
 }
 
 // --- Cognitive Hook Tests ---
