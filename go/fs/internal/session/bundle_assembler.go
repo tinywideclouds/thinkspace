@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"text/template"
 
 	"uuid"
@@ -102,7 +103,8 @@ func (a *BundleAssembler) Assemble(
 		return cognition.ThinkBundle{}, graphData, nil
 	}
 
-	rawMapbook, err := thinkState.Mapbook().GenerateLayers(ctx, a.workspaceRoot)
+	projectWorkspaceDir := filepath.Join(a.workspaceRoot, chatObj.ProjectID, "workspace")
+	rawMapbook, err := thinkState.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("generating mapbook layers: %w", err)
 	}

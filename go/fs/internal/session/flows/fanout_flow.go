@@ -36,18 +36,21 @@ func (f *FanOutFlow) MaxSteps() int {
 }
 
 func (f *FanOutFlow) Next(state FlowState) FlowDirective {
-
 	if len(state.Candidates) == 0 && state.UserStrategy == "" {
-		tasks := f.parseTasks(state.LLMArguments)
-		if len(tasks) == 0 {
+		if len(state.InitialTasks) == 0 {
 			return FlowDirective{
 				Action: ActionError,
-				Error:  fmt.Errorf("manager provided no valid agent_tasks to execute"),
+				Error:  fmt.Errorf("supervisor provided no valid agent_tasks to execute"),
 			}
 		}
+
+		for i := range state.InitialTasks {
+			state.InitialTasks[i].RetryPrompt = f.config.RetryPrompt
+		}
+
 		return FlowDirective{
 			Action: ActionSpawnAgents,
-			Tasks:  tasks,
+			Tasks:  state.InitialTasks,
 		}
 	}
 
@@ -97,42 +100,4 @@ func (f *FanOutFlow) Next(state FlowState) FlowDirective {
 	}
 
 	return FlowDirective{Action: ActionFinish}
-}
-
-func (f *FanOutFlow) parseTasks(args map[string]any) []SubAgentTask {
-	var tasks []SubAgentTask
-	if rawTasks, ok := args["agent_tasks"].([]any); ok {
-		for i, raw := range rawTasks {
-			taskMap, isMap := raw.(map[string]any)
-			if isMap {
-				digest, _ := taskMap["context_digest"].(string)
-				instruction, _ := taskMap["instruction"].(string)
-
-				targetFiles := make([]string, 0)
-				if rawFiles, hasFiles := taskMap["target_files"].([]any); hasFiles {
-					for _, fileRaw := range rawFiles {
-						if strFile, isStr := fileRaw.(string); isStr {
-							targetFiles = append(targetFiles, strFile)
-						}
-					}
-				}
-
-				tasks = append(tasks, SubAgentTask{
-					AgentID:       fmt.Sprintf("agent-%d", i+1),
-					ContextDigest: digest,
-					Instruction:   instruction,
-					TargetFiles:   targetFiles,
-					RetryPrompt:   f.config.RetryPrompt,
-				})
-			} else {
-				tasks = append(tasks, SubAgentTask{
-					AgentID:     fmt.Sprintf("agent-%d", i+1),
-					Instruction: fmt.Sprintf("%v", raw),
-					TargetFiles: make([]string, 0),
-					RetryPrompt: f.config.RetryPrompt,
-				})
-			}
-		}
-	}
-	return tasks
 }

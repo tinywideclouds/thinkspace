@@ -165,7 +165,13 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID, ActiveBranch: activeBranch}
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    chatID,
+		ProjectID: spaceID,
+		SubGraph: thinkgraph.SubGraph{
+			Name: activeBranch,
+		},
+	}
 	var events []thinkgraph.Node
 	var err error
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 )
 
@@ -14,7 +15,7 @@ type mockTransitionUI struct {
 	confirmResult bool
 }
 
-func (m *mockTransitionUI) ConfirmTransition(target, reasoning string) bool {
+func (m *mockTransitionUI) ConfirmTransition(req signals.SignalTransition) bool {
 	return m.confirmResult
 }
 
@@ -31,21 +32,17 @@ func TestTransitionThinkStateTool_Execute_Approved(t *testing.T) {
 		UI:           &mockTransitionUI{confirmResult: true},
 	}
 
-	shouldBreak, err := tool.Execute(context.Background(), ec)
-
-	if err == nil {
-		t.Fatalf("expected transition request error, got nil")
-	}
-	if !shouldBreak {
-		t.Errorf("expected to break loop")
+	result, err := tool.Execute(context.Background(), ec)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	req, ok := err.(*tools.TransitionThinkStateRequest)
+	signal, ok := result.(*signals.SignalTransition)
 	if !ok {
-		t.Fatalf("expected TransitionThinkStateRequest, got %T", err)
+		t.Fatalf("expected SignalTransition, got %T", result)
 	}
-	if req.TargetThinkState != "golang" {
-		t.Errorf("expected 'golang', got %q", req.TargetThinkState)
+	if signal.TargetThinkState != "golang" {
+		t.Errorf("expected 'golang', got %q", signal.TargetThinkState)
 	}
 }
 
@@ -65,13 +62,13 @@ func TestTransitionThinkStateTool_Execute_Denied(t *testing.T) {
 		Bundle:       bundle,
 	}
 
-	shouldBreak, err := tool.Execute(context.Background(), ec)
+	result, err := tool.Execute(context.Background(), ec)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if shouldBreak {
-		t.Errorf("expected to NOT break loop on denied transition (LLM must self-correct)")
+	if result != nil {
+		t.Errorf("expected nil signal on denied transition (LLM must self-correct)")
 	}
 
 	if len(bundle.Trajectory.WorkingMemory) != 1 {
@@ -99,12 +96,12 @@ func TestTransitionThinkStateTool_EmptyTarget(t *testing.T) {
 		RawArguments: rawArgs,
 	}
 
-	shouldBreak, err := tool.Execute(context.Background(), ec)
+	result, err := tool.Execute(context.Background(), ec)
 
 	if err == nil {
 		t.Fatalf("expected error on empty target")
 	}
-	if shouldBreak {
-		t.Errorf("expected tool to not break loop on internal error")
+	if result != nil {
+		t.Errorf("expected nil signal on error")
 	}
 }

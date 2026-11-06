@@ -11,7 +11,7 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
@@ -19,8 +19,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// TurnExecutor handles the universal LLM generation and tool interception loop.
-// It relies entirely on the provided ThinkState and ChatAddress for boundaries.
 type TurnExecutor struct {
 	logger           *slog.Logger
 	modelClient      llm.ModelClient
@@ -42,15 +40,14 @@ func NewTurnExecutor(
 	}
 }
 
-// Execute runs a single cognitive turn bounded strictly by the provided ThinkState.
 func (e *TurnExecutor) Execute(
 	ctx context.Context,
 	address *thinkgraph.ChatAddress,
 	thinkState spaces.ThinkState,
 	bundle cognition.ThinkBundle,
 	registry *tools.Registry,
-	ui UserInterface,
-) error {
+	ui tools.UI, // Narrowed from UserInterface to tools.UI
+) (signals.EngineSignal, error) {
 	turnContext, cancel := context.WithTimeout(ctx, thinkState.Config().TurnTimeout())
 	defer cancel()
 
@@ -79,7 +76,7 @@ func (e *TurnExecutor) Execute(
 
 		for chunk, err := range stream {
 			if err != nil {
-				return fmt.Errorf("generation stream failed: %w", err)
+				return nil, fmt.Errorf("generation stream failed: %w", err)
 			}
 			if chunk.Text != "" {
 				ui.OnTextChunk(chunk.Text)
@@ -117,12 +114,7 @@ func (e *TurnExecutor) Execute(
 		}
 
 		call := interceptedTools[0]
-
-		var argKeys []string
-		for k := range call.Args {
-			argKeys = append(argKeys, k)
-		}
-		e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name, "args", argKeys)
+		e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name)
 
 		tool, exists := registry.Get(call.Name)
 		if !exists {
@@ -137,38 +129,16 @@ func (e *TurnExecutor) Execute(
 			RawArguments: call.Args,
 		}
 
-		shouldBreak, err := tool.Execute(turnContext, ec)
-
-		// Catch the flow's synthesis request and rewrite the bundle to focus purely on the dossier
-		if synthReq, ok := err.(*flows.SynthesisRequest); ok {
-			e.logger.InfoContext(ctx, "manager synthesis requested by flow engine")
-
-			bundle = cognition.ThinkBundle{
-				Rules:     bundle.Rules,
-				Mapbook:   bundle.Mapbook,
-				Workbench: bundle.Workbench, // Keep pristine baseline files
-				Trajectory: cognition.Trajectory{
-					LongTermMemory: bundle.Trajectory.LongTermMemory, // Keep workspace background context
-					Catalyst: cognition.TrajectoryEvent{
-						Role:    "user",
-						Content: synthReq.CompiledPrompt,
-					},
-					// We drop the WorkingMemory so the Manager doesn't get confused by its previous planning phase
-				},
-			}
-
-			iteration = -1
-			continue
-		}
-
+		signal, err := tool.Execute(turnContext, ec)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if shouldBreak {
-			break
+
+		if signal != nil {
+			e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", signal))
+			return signal, nil
 		}
 	}
 
-	_, err := e.workspaceService.Checkpoint(turnContext, address, "End of session turn")
-	return err
+	return &signals.SignalTerminal{}, nil
 }

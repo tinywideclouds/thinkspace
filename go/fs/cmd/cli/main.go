@@ -26,7 +26,7 @@ import (
 )
 
 func main() {
-	chatName := flag.String("chat", "unit-circle-test", "The name of the initial exploration thread")
+	chatName := flag.String("chat", "unit-circle-test", "The name of the initial exploration chat")
 	engineType := flag.String("engine", "gogit", "State engine backend to use ('gogit' or 'exec')")
 	spaceName := flag.String("space", "sandbox", "The think space to use")
 	thinkStateName := flag.String("thinkstate", "intake", "The ThinkState configuration to load")
@@ -105,10 +105,10 @@ func main() {
 		fmt.Println("⚙️  Engine: go-git (GoGitEngine with Local Clones)")
 	}
 
-	isNewThread := false
+	isNewChat := false
 	meta, err := serviceManager.GetChatMeta(*spaceName, *chatName)
 	if err != nil {
-		isNewThread = true
+		isNewChat = true
 		meta, err = serviceManager.CreateChat(ctx, *spaceName, *chatName)
 		if err != nil {
 			logger.Error("Failed to create initial chat", "error", err)
@@ -121,12 +121,12 @@ func main() {
 	}
 
 	var promptText string
-	if isNewThread {
-		fmt.Printf("🌱 Creating new exploration thread: %s (ThinkState: %s)\n", meta.ID, *thinkStateName)
+	if isNewChat {
+		fmt.Printf("🌱 Creating new exploration chat: %s (ThinkState: %s)\n", meta.ID, *thinkStateName)
 		promptText = "Hello! Let's explore some concepts."
 		fmt.Printf("💬 Initial Prompt: %s\n", promptText)
 	} else {
-		fmt.Printf("📖 Resuming exploration thread: %s (Active ThinkState: %s)\n", meta.ID, meta.ActiveThinkState)
+		fmt.Printf("📖 Resuming exploration chat: %s (Active ThinkState: %s)\n", meta.ID, meta.ActiveThinkState)
 
 		fmt.Print("\n> ")
 		reader := bufio.NewReader(os.Stdin)
@@ -151,14 +151,12 @@ func main() {
 	}
 	digestManager := session.NewDigestManager(logger, modelClient, digestCfg)
 
-	// Inject the central TurnManager orchestrator
 	turnManager := session.NewManager(logger, registry, serviceManager, modelClient, fanOutFlow, digestManager)
 
 	userInterface := cli.NewTerminalUI()
 
 	fmt.Println("\n🤖 Main Session Thinking...")
 
-	// Execute turn directly through the Manager
 	if err := turnManager.RunTurn(ctx, *spaceName, meta.ID, promptText, userInterface, emitter); err != nil {
 		logger.Error("Execution turn failed", "error", err)
 		os.Exit(1)

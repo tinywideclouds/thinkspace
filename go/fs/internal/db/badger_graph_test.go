@@ -29,17 +29,25 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
 
-	chat := &thinkgraph.ChatAddress{ChatID: "chat-123", ProjectID: "test-space", ActiveBranch: "main"}
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "chat-123",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: graphID,
+		},
+	}
 
 	node1 := thinkgraph.Node{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "First event")}
 	node1.Tags = []string{"init"}
 	node1.Timestamp = time.Now().Add(-1 * time.Hour)
-	node1.BranchID = "main"
+	node1.GraphID = graphID
 
 	node2 := thinkgraph.Node{Event: thinkgraph.NewEvent(thinkgraph.EventModel, "Second event")}
 	node2.Tags = []string{"response", "init"}
 	node2.Timestamp = time.Now()
-	node2.BranchID = "main"
+	node2.GraphID = graphID
 
 	if err := graph.AppendNode(ctx, chat, node1); err != nil {
 		t.Fatalf("Failed to append node 1: %v", err)
@@ -48,7 +56,7 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 		t.Fatalf("Failed to append node 2: %v", err)
 	}
 
-	timeline, err := graph.GetBranchTimeline(ctx, chat, "main")
+	timeline, err := graph.GetSubGraphTimeline(ctx, chat, graphID)
 	if err != nil {
 		t.Fatalf("Failed to get timeline: %v", err)
 	}
@@ -61,19 +69,27 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.ChatAddress{ChatID: "chat-page", ProjectID: "test-space", ActiveBranch: "main"}
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "chat-page",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: graphID,
+		},
+	}
 
 	var nodes []thinkgraph.Node
 	for i := 0; i < 5; i++ {
 		ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("Event %d", i))
 		ev.Timestamp = time.Now().Add(time.Duration(i) * time.Minute)
-		ev.BranchID = "main"
+		ev.GraphID = graphID
 		node := thinkgraph.Node{Event: ev}
 		_ = graph.AppendNode(ctx, chat, node)
 		nodes = append(nodes, node)
 	}
 
-	page1, nextCursor, hasMore, err := graph.GetBranchTimelinePage(ctx, chat, "main", "", 2)
+	page1, nextCursor, hasMore, err := graph.GetSubGraphTimelinePage(ctx, chat, graphID, "", 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 1: %v", err)
 	}
@@ -87,7 +103,7 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 		t.Fatalf("Expected latest 2 nodes, got %s and %s", page1[0].Content, page1[1].Content)
 	}
 
-	page2, nextCursor2, hasMore2, err := graph.GetBranchTimelinePage(ctx, chat, "main", nextCursor, 2)
+	page2, nextCursor2, hasMore2, err := graph.GetSubGraphTimelinePage(ctx, chat, graphID, nextCursor, 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 2: %v", err)
 	}
@@ -101,7 +117,7 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 		t.Fatalf("Expected older 2 nodes, got %s and %s", page2[0].Content, page2[1].Content)
 	}
 
-	page3, _, hasMore3, err := graph.GetBranchTimelinePage(ctx, chat, "main", nextCursor2, 2)
+	page3, _, hasMore3, err := graph.GetSubGraphTimelinePage(ctx, chat, graphID, nextCursor2, 2)
 	if err != nil {
 		t.Fatalf("Failed to fetch page 3: %v", err)
 	}
@@ -119,20 +135,28 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.ChatAddress{ChatID: "chat-mutations", ProjectID: "test-space", ActiveBranch: "main"}
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "chat-mutations",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: graphID,
+		},
+	}
 
 	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be deleted")
-	ev1.BranchID = "main"
+	ev1.GraphID = graphID
 	node1 := thinkgraph.Node{Event: ev1}
 
 	ev2 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be updated")
-	ev2.BranchID = "main"
+	ev2.GraphID = graphID
 	node2 := thinkgraph.Node{Event: ev2}
 
 	_ = graph.AppendNode(ctx, chat, node1)
 	_ = graph.AppendNode(ctx, chat, node2)
 
-	t1, _ := graph.GetBranchTimeline(ctx, chat, "main")
+	t1, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
 	if len(t1) != 2 {
 		t.Fatalf("Expected 2 nodes baseline, got %d", len(t1))
 	}
@@ -146,7 +170,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 		t.Fatalf("Failed to save tombstone mutation: %v", err)
 	}
 
-	t2, _ := graph.GetBranchTimeline(ctx, chat, "main")
+	t2, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
 	if len(t2) != 1 || t2[0].ID != node2.ID {
 		t.Fatalf("Tombstoned node was not filtered out of timeline")
 	}
@@ -159,7 +183,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	}
 	_ = graph.SaveMutation(ctx, chat, mut2)
 
-	t3, _ := graph.GetBranchTimeline(ctx, chat, "main")
+	t3, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
 	if t3[0].Content != "Updated content!" {
 		t.Errorf("Mutation update failed, content is: %s", t3[0].Content)
 	}
@@ -171,7 +195,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	}
 	_ = graph.SaveMutation(ctx, chat, mut3)
 
-	t4, _ := graph.GetBranchTimeline(ctx, chat, "main")
+	t4, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
 	if len(t4) != 2 {
 		t.Fatalf("Failed to restore tombstoned node")
 	}
@@ -180,11 +204,19 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 func TestBadgerGraph_GetLenses(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.ChatAddress{ChatID: "chat-lenses", ProjectID: "test-space", ActiveBranch: "main"}
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "chat-lenses",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: graphID,
+		},
+	}
 
 	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Query DB")
 	ev1.Tags = []string{"database", "backend"}
-	ev1.BranchID = "main"
+	ev1.GraphID = graphID
 	node1 := thinkgraph.Node{Event: ev1}
 
 	digestID := uuid.NewV7()

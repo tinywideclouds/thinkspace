@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
@@ -24,7 +25,7 @@ type CreateDigestRequest struct {
 }
 
 type DigestCommitter interface {
-	CommitDigest(ctx context.Context, chatObj *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error
+	CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error
 }
 
 type CreateDigestTool struct {
@@ -43,21 +44,21 @@ func (t *CreateDigestTool) DefaultDescription() string {
 	return "Compress a concluded discussion or major architectural decision into durable memory."
 }
 
-func (t *CreateDigestTool) Execute(ctx context.Context, executionContext ExecutionContext) (bool, error) {
+func (t *CreateDigestTool) Execute(ctx context.Context, executionContext ExecutionContext) (signals.EngineSignal, error) {
 	var request CreateDigestRequest
 	argumentBytes, err := json.Marshal(executionContext.RawArguments)
 	if err != nil {
-		return false, fmt.Errorf("marshaling create_digest arguments: %w", err)
+		return nil, fmt.Errorf("marshaling create_digest arguments: %w", err)
 	}
 	if err := json.Unmarshal(argumentBytes, &request); err != nil {
-		return false, fmt.Errorf("invalid create_digest schema: %w", err)
+		return nil, fmt.Errorf("invalid create_digest schema: %w", err)
 	}
 
 	if request.TopicName == "" || request.Instruction == "" {
 		if executionContext.UI != nil {
 			executionContext.UI.OnTextChunk("\n\n⚠️ **System Intercept:** Manager provided incomplete digest parameters. Aborting.\n")
 		}
-		return true, fmt.Errorf("manager provided empty topic or instruction")
+		return nil, fmt.Errorf("manager provided empty topic or instruction")
 	}
 
 	var sb strings.Builder
@@ -76,8 +77,8 @@ func (t *CreateDigestTool) Execute(ctx context.Context, executionContext Executi
 		sb.String(),
 	)
 	if err != nil {
-		return false, fmt.Errorf("manual digest creation failed: %w", err)
+		return nil, fmt.Errorf("manual digest creation failed: %w", err)
 	}
 
-	return true, nil
+	return &signals.SignalTerminal{}, nil
 }

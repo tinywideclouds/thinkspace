@@ -32,7 +32,7 @@ func TestCompileCoreTools_OverridesDescriptionsNotSchema(t *testing.T) {
 	}
 
 	transitionTool := tools.NewTransitionThinkStateTool([]string{"golang", "concept"})
-	proposeTool := tools.NewProposeChangeTool(nil)
+	proposeTool := tools.NewProposeChangeTool()
 	queryTool := tools.NewQueryLensTool(nil)
 	digestTool := tools.NewCreateDigestTool(nil)
 

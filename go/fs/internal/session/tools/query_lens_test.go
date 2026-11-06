@@ -50,15 +50,15 @@ func TestQueryLensTool_Execute(t *testing.T) {
 	ec := tools.ExecutionContext{
 		RawArguments: rawArgs,
 		Bundle:       bundle,
-		UI:           &mockUI{}, // embedded from propose_change_test.go
+		UI:           &mockUI{},
 	}
 
-	shouldBreak, err := tool.Execute(context.Background(), ec)
+	result, err := tool.Execute(context.Background(), ec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if shouldBreak {
-		t.Errorf("expected tool to NOT break the loop (must return execution to LLM)")
+	if result != nil {
+		t.Errorf("expected tool to return a nil signal (continue turn)")
 	}
 
 	if len(bundle.Trajectory.WorkingMemory) != 1 {

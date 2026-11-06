@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
@@ -13,8 +14,8 @@ type mockUI struct {
 	tools.UI
 }
 
-func (m *mockUI) OnTextChunk(text string)                                   {}
-func (m *mockUI) ConfirmTransition(targetThinkState, reasoning string) bool { return true }
+func (m *mockUI) OnTextChunk(text string)                             {}
+func (m *mockUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
 
 type mockDigestCommitter struct {
 	lastTopic       string
@@ -23,7 +24,7 @@ type mockDigestCommitter struct {
 	lastContext     string
 }
 
-func (m *mockDigestCommitter) CommitDigest(ctx context.Context, chatObj *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error {
+func (m *mockDigestCommitter) CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error {
 	m.lastTopic = topicName
 	m.lastTags = tags
 	m.lastInstruction = instruction
@@ -51,19 +52,19 @@ func TestCreateDigestTool_Execute(t *testing.T) {
 	}
 
 	ec := tools.ExecutionContext{
-		ChatID:       "chat-1",
-		SpaceID:      "space-1",
+		Address:      &thinkgraph.ChatAddress{ChatID: "chat-1", ProjectID: "space-1"},
 		RawArguments: rawArgs,
 		Bundle:       bundle,
 		UI:           &mockUI{},
 	}
 
-	shouldBreak, err := tool.Execute(context.Background(), ec)
+	signal, err := tool.Execute(context.Background(), ec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !shouldBreak {
-		t.Errorf("expected tool to break the loop")
+
+	if _, ok := signal.(*signals.SignalTerminal); !ok {
+		t.Errorf("expected tool to yield SignalTerminal, got %T", signal)
 	}
 
 	if committer.lastTopic != "Architecture Decision" {
@@ -93,11 +94,11 @@ func TestCreateDigestTool_InvalidSchema(t *testing.T) {
 		UI:           &mockUI{},
 	}
 
-	shouldBreak, err := tool.Execute(context.Background(), ec)
+	signal, err := tool.Execute(context.Background(), ec)
 	if err == nil {
 		t.Fatalf("expected error on missing required fields")
 	}
-	if !shouldBreak {
-		t.Errorf("expected tool to break the loop to force LLM self-correction")
+	if signal != nil {
+		t.Errorf("expected nil signal on error")
 	}
 }

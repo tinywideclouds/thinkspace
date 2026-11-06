@@ -32,13 +32,13 @@ func NewRehydrator(store *GraphStore, workspaceRoot string) *Rehydrator {
 }
 
 func (r *Rehydrator) CheckSync(ctx context.Context, c *ChatAddress) (SyncStatus, *LedgerManifest, *LedgerManifest, error) {
-	branchID := c.ActiveBranch
-	if branchID == "" {
-		branchID = "main"
+	subGraphName := c.Name
+	if subGraphName == "" {
+		subGraphName = "main"
 	}
 	ledgerDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger")
 
-	diskManifest, err := LoadOrRebuildManifest(ledgerDir, branchID)
+	diskManifest, err := LoadOrRebuildManifest(ledgerDir, subGraphName)
 	if err != nil {
 		return SyncStatusMismatch, nil, nil, fmt.Errorf("failed to load disk manifest: %w", err)
 	}
@@ -75,11 +75,11 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *ChatAddress) (SyncStatus,
 }
 
 func (r *Rehydrator) FastForward(ctx context.Context, c *ChatAddress, graphManifest, diskManifest *LedgerManifest) error {
-	branchID := c.ActiveBranch
-	if branchID == "" {
-		branchID = "main"
+	subGraphName := c.Name
+	if subGraphName == "" {
+		subGraphName = "main"
 	}
-	logsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "logs", branchID)
+	logsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "logs", subGraphName)
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		return err
@@ -173,17 +173,17 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *ChatAddress) error {
 	// 3. Re-ingest Event Shards for ALL branches (.jsonl -> Badger)
 	ledgerDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger")
 	logsBaseDir := filepath.Join(ledgerDir, "logs")
-	branches, err := os.ReadDir(logsBaseDir)
+	subGraphs, err := os.ReadDir(logsBaseDir)
 	if err == nil {
-		for _, branchDir := range branches {
+		for _, branchDir := range subGraphs {
 			if branchDir.IsDir() {
-				branchID := branchDir.Name()
-				diskManifest, err := LoadOrRebuildManifest(ledgerDir, branchID)
+				subGraphName := branchDir.Name()
+				diskManifest, err := LoadOrRebuildManifest(ledgerDir, subGraphName)
 				if err == nil {
-					branchChat := &ChatAddress{ChatID: c.ChatID, ProjectID: c.ProjectID, ActiveBranch: branchID}
+					subGraphChat := &ChatAddress{ChatID: c.ChatID, ProjectID: c.ProjectID, SubGraph: SubGraph{Name: subGraphName}}
 					emptyGraphManifest := &LedgerManifest{TotalEvents: 0}
-					if err := r.FastForward(ctx, branchChat, emptyGraphManifest, diskManifest); err != nil {
-						return fmt.Errorf("fast-forwarding branch %s: %w", branchID, err)
+					if err := r.FastForward(ctx, subGraphChat, emptyGraphManifest, diskManifest); err != nil {
+						return fmt.Errorf("fast-forwarding subgraph %s: %w", subGraphName, err)
 					}
 				}
 			}

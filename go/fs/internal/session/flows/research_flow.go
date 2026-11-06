@@ -35,26 +35,24 @@ func (f *ResearchFlow) MaxSteps() int {
 
 func (f *ResearchFlow) Next(state FlowState) FlowDirective {
 	if len(state.Candidates) == 0 && state.TargetBranch == "" {
-		topics, ok := state.LLMArguments["topics"].([]any)
-		if !ok || len(topics) == 0 {
+		if len(state.InitialTasks) == 0 {
 			return FlowDirective{
 				Action: ActionError,
 				Error:  fmt.Errorf("manager provided no topics to research"),
 			}
 		}
 
-		var tasks []SubAgentTask
-		for i, rawTopic := range topics {
-			tasks = append(tasks, SubAgentTask{
-				AgentID:     fmt.Sprintf("researcher-%d", i+1),
-				Instruction: fmt.Sprintf("%s\nTopic: %s", f.config.ResearchPrompt, rawTopic),
-				TargetFiles: []string{},
-			})
+		// Inject the research prompt wrapper into the provided tasks
+		for i := range state.InitialTasks {
+			if state.InitialTasks[i].AgentID == "" {
+				state.InitialTasks[i].AgentID = fmt.Sprintf("researcher-%d", i+1)
+			}
+			state.InitialTasks[i].Instruction = fmt.Sprintf("%s\nTopic: %s", f.config.ResearchPrompt, state.InitialTasks[i].Instruction)
 		}
 
 		return FlowDirective{
 			Action: ActionSpawnAgents,
-			Tasks:  tasks,
+			Tasks:  state.InitialTasks,
 		}
 	}
 

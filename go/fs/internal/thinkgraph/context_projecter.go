@@ -39,8 +39,6 @@ func (a *ContextProjecter) extractContent(node Node) string {
 		// Safely ignore MaterializedState diffs. Just extract semantic summary.
 		case "flow_lifecycle":
 			return fmt.Sprintf("[System: A sub-agent flow is executing or completed. Result: %s]", node.Content)
-		case "candidate_proposal":
-			return fmt.Sprintf("[System: A file change was proposed. Description: %s]", node.Content)
 		case "candidate_resolution":
 			return fmt.Sprintf("[System: The user resolved a proposal. Result: %s]", node.Content)
 		}

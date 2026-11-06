@@ -31,10 +31,9 @@ func TestProjectTimeline(t *testing.T) {
 			Event: thinkgraph.Event{
 				ID:        ev2,
 				Timestamp: time.Now(),
-				Type:      workspace.EventCandidateProposal,
-				Data:      []byte(`{"candidate_id":"c-123","description":"A proposal","files":["main.go"]}`),
+				Type:      workspace.EventCandidateResolution,
+				Data:      []byte(`{"candidate_id":"c-123","accepted":true,"reason":"looks good"}`),
 			},
-			MaterializedState: []byte(`{"diff":"+ added line"}`),
 		},
 		{
 			Event: thinkgraph.Event{
@@ -61,12 +60,12 @@ func TestProjectTimeline(t *testing.T) {
 		t.Errorf("expected text 'Hello from user', got %s", msgPayload.Message.Text)
 	}
 
-	propPayload, ok := pbEvents[1].Payload.(*pb.GraphEvent_CandidateProposal)
+	resPayload, ok := pbEvents[1].Payload.(*pb.GraphEvent_CandidateResolution)
 	if !ok {
-		t.Fatalf("expected second event to map to CandidateProposal payload")
+		t.Fatalf("expected second event to map to CandidateResolution payload")
 	}
-	if propPayload.CandidateProposal.CandidateId != "c-123" {
-		t.Errorf("expected candidate_id 'c-123', got %s", propPayload.CandidateProposal.CandidateId)
+	if resPayload.CandidateResolution.CandidateId != "c-123" {
+		t.Errorf("expected candidate_id 'c-123', got %s", resPayload.CandidateResolution.CandidateId)
 	}
 
 	flowPayload, ok := pbEvents[2].Payload.(*pb.GraphEvent_FlowExecution)
@@ -84,8 +83,6 @@ func TestProjectTimeline(t *testing.T) {
 	}
 }
 
-// TestProjectTimeline_FlowStatusMapping exhaustively ensures that valid domain states
-// successfully map to non-UNSPECIFIED Protobuf statuses to prevent cross-package drift.
 func TestProjectTimeline_FlowStatusMapping(t *testing.T) {
 	testCases := []struct {
 		domainStatus   flows.FlowStatus

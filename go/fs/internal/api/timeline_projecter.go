@@ -36,7 +36,7 @@ func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
 			Timestamp:  n.Timestamp.Format(time.RFC3339),
 			Tags:       n.Tags,
 			Tombstoned: n.Tombstoned,
-			BranchId:   n.BranchID,
+			BranchId:   n.GraphID.String(), // Mapped to the strict GraphID coordinate
 			Metadata:   n.Metadata,
 		}
 
@@ -53,28 +53,6 @@ func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
 				Message: &pb.Message{
 					Type: pb.MessageType_MODEL,
 					Text: n.Content,
-				},
-			}
-		case workspace.EventCandidateProposal:
-			var payload workspace.CandidateProposal
-			if err := json.Unmarshal(n.Data, &payload); err != nil {
-				continue
-			}
-
-			var state map[string]string
-			diffSnippet := ""
-			if len(n.MaterializedState) > 0 {
-				if err := json.Unmarshal(n.MaterializedState, &state); err == nil {
-					diffSnippet = state["diff"]
-				}
-			}
-
-			ev.Payload = &pb.GraphEvent_CandidateProposal{
-				CandidateProposal: &pb.CandidateProposal{
-					CandidateId: payload.CandidateID,
-					Description: payload.Description,
-					Files:       payload.Files,
-					DiffSnippet: diffSnippet,
 				},
 			}
 		case workspace.EventCandidateResolution:

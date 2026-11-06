@@ -8,12 +8,12 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
@@ -64,9 +64,6 @@ func (m *feMockChatEngine) Reject(ctx context.Context, chatID string, candidateI
 func (m *feMockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
 	m.sandbox = &feMockSandbox{candidateID: candidateID}
 	return m.sandbox, nil
-}
-func (u *feMockChatEngine) ConfirmTransition(targetDomain string, reasoning string) bool {
-	return true
 }
 
 type feMockSandbox struct {
@@ -147,8 +144,8 @@ func (u *feMockUI) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
 }
-func (u *feMockUI) ConfirmTransition(targetDomain string, reasoning string) bool {
-	u.capturedReasoning = reasoning
+func (u *feMockUI) ConfirmTransition(req signals.SignalTransition) bool {
+	u.capturedReasoning = req.Reasoning
 	return u.transitionToReturn
 }
 
@@ -161,7 +158,16 @@ func TestFlowEngine_FanOutIntegration(t *testing.T) {
 	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
 
 	service := workspace.NewService(logger, engine, workspaceRoot, dispatcher, &feMockEmitter{})
-	chatSession, _ := service.InitializeChat(context.Background(), "golang", "chat-1")
+
+	chatSession := &thinkgraph.ChatAddress{
+		ChatID:    "chat-1",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	_ = service.InitializeChat(context.Background(), chatSession)
 
 	emitter := &feMockEmitter{}
 	modelClient := &feMockModelClient{
@@ -169,27 +175,28 @@ func TestFlowEngine_FanOutIntegration(t *testing.T) {
 	}
 	turnExecutor := session.NewTurnExecutor(logger, modelClient, service, emitter)
 
-	flowEngine := session.NewFlowEngine(logger, service, turnExecutor, dispatcher, emitter)
+	flowEngine := session.NewFlowEngine(logger, service, turnExecutor, dispatcher)
 
 	flowCfg := flows.FanOutConfig{MaxSteps: 10, RetryPrompt: "Trace: {{.ErrorTrace}}"}
 	fanOutFlow := flows.NewFanOutFlow(logger, flowCfg)
 	space := &feMockThinkSpace{}
 	ui := &feMockUI{strategyToReturn: flows.StrategyManual, reviewToReturn: true}
 
-	args := map[string]any{
-		"agent_tasks": []any{
-			map[string]any{
-				"context_digest": "Basic server built",
-				"instruction":    "Add auth",
-				"target_files":   []any{"src/main.go"},
-			},
+	tasks := []flows.SubAgentTask{
+		{
+			ContextDigest: "Basic server built",
+			Instruction:   "Add auth",
+			TargetFiles:   []string{"src/main.go"},
 		},
 	}
-	flowContext := flows.FlowContext{FlowID: uuid.NewV7().String(), SpaceID: "golang", BaseAgentRules: "Worker Persona"}
 
-	err := flowEngine.Run(context.Background(), chatSession, space, fanOutFlow, args, flowContext, ui)
+	signal, err := flowEngine.Run(context.Background(), chatSession, space, fanOutFlow, tasks, "Executing auth flow", ui, emitter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, ok := signal.(*signals.SignalTerminal); !ok {
+		t.Errorf("Expected SignalTerminal, got %T", signal)
 	}
 
 	if !engine.sandbox.delivered {
@@ -209,23 +216,28 @@ func TestFlowEngine_FailFast_HallucinatedFile(t *testing.T) {
 	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
 
 	service := workspace.NewService(logger, engine, workspaceRoot, dispatcher, &feMockEmitter{})
-	chatSession, _ := service.InitializeChat(context.Background(), "golang", "chat-1")
+	chatSession := &thinkgraph.ChatAddress{
+		ChatID:    "chat-1",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	_ = service.InitializeChat(context.Background(), chatSession)
 
 	turnExecutor := session.NewTurnExecutor(logger, &feMockModelClient{}, service, &feMockEmitter{})
-	flowEngine := session.NewFlowEngine(logger, service, turnExecutor, dispatcher, &feMockEmitter{})
+	flowEngine := session.NewFlowEngine(logger, service, turnExecutor, dispatcher)
 	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
 
-	args := map[string]any{
-		"agent_tasks": []any{
-			map[string]any{
-				"instruction":  "Edit hallucinated file",
-				"target_files": []any{"does/not/exist.go"},
-			},
+	tasks := []flows.SubAgentTask{
+		{
+			Instruction: "Edit hallucinated file",
+			TargetFiles: []string{"does/not/exist.go"},
 		},
 	}
 
-	flowContext := flows.FlowContext{FlowID: uuid.NewV7().String()}
-	err := flowEngine.Run(context.Background(), chatSession, &feMockThinkSpace{}, fanOutFlow, args, flowContext, nil)
+	_, err := flowEngine.Run(context.Background(), chatSession, &feMockThinkSpace{}, fanOutFlow, tasks, "test flow", nil, &feMockEmitter{})
 
 	if err == nil {
 		t.Fatalf("expected flow to fail-fast on missing file, but it succeeded")

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 )
 
 const QueryLens ToolName = "query_lens"
@@ -33,14 +34,14 @@ func (t *QueryLensTool) DefaultDescription() string {
 	return "Query historical events indexed under a specific semantic tag."
 }
 
-func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionContext) (bool, error) {
+func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionContext) (signals.EngineSignal, error) {
 	var request QueryLensRequest
 	argumentBytes, err := json.Marshal(executionContext.RawArguments)
 	if err != nil {
-		return false, fmt.Errorf("marshaling query_lens arguments: %w", err)
+		return nil, fmt.Errorf("marshaling query_lens arguments: %w", err)
 	}
 	if err := json.Unmarshal(argumentBytes, &request); err != nil {
-		return false, fmt.Errorf("invalid query_lens schema: %w", err)
+		return nil, fmt.Errorf("invalid query_lens schema: %w", err)
 	}
 
 	executionContext.UI.OnTextChunk(fmt.Sprintf("\n\n🔍 **Searching memory for #%s...**\n", request.Tag))
@@ -70,5 +71,5 @@ func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionC
 		Content: toolResponse.String(),
 	})
 
-	return false, nil
+	return nil, nil // Nil signal allows the LLM generation loop to continue natively
 }

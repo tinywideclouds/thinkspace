@@ -12,8 +12,9 @@ func TestResearchFlow_StateTransitions(t *testing.T) {
 
 	t.Run("Stage 1 -> Spawn Agents", func(t *testing.T) {
 		state := FlowState{
-			LLMArguments: map[string]any{
-				"topics": []any{"1960s perspective", "Feminist perspective"},
+			InitialTasks: []SubAgentTask{
+				{Instruction: "1960s perspective"},
+				{Instruction: "Feminist perspective"},
 			},
 		}
 		directive := flow.Next(state)
@@ -22,6 +23,9 @@ func TestResearchFlow_StateTransitions(t *testing.T) {
 		}
 		if len(directive.Tasks) != 2 {
 			t.Errorf("Expected 2 research tasks, got %d", len(directive.Tasks))
+		}
+		if directive.Tasks[0].Instruction != "Gather data on:\nTopic: 1960s perspective" {
+			t.Errorf("Expected prompt injection, got %q", directive.Tasks[0].Instruction)
 		}
 	})
 

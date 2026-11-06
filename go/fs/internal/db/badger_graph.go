@@ -255,10 +255,10 @@ func (g *BadgerGraph) GetSubGraphTimeline(ctx context.Context, c *thinkgraph.Cha
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			keyStr := string(it.Item().Key())
 			parts := strings.Split(keyStr, ":")
-			if len(parts) < 7 {
+			if len(parts) < 2 {
 				continue
 			}
-			eventID := parts[6]
+			eventID := parts[len(parts)-1]
 
 			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.ProjectID, c.ChatID, eventID)
 			if nodeItem, err := txn.Get(nodeKey); err == nil {
@@ -309,10 +309,10 @@ func (g *BadgerGraph) GetSubGraphTimelinePage(ctx context.Context, c *thinkgraph
 		for it.Seek(seekPrefix); it.ValidForPrefix(prefix); it.Next() {
 			keyStr := string(it.Item().Key())
 			parts := strings.Split(keyStr, ":")
-			if len(parts) < 7 {
+			if len(parts) < 2 {
 				continue
 			}
-			eventID := parts[6]
+			eventID := parts[len(parts)-1]
 
 			if count >= limit {
 				hasMore = true
@@ -365,10 +365,10 @@ func (g *BadgerGraph) WalkSubGraphReverse(ctx context.Context, c *thinkgraph.Cha
 		for it.Seek(seekPrefix); it.ValidForPrefix(prefix); it.Next() {
 			keyStr := string(it.Item().Key())
 			parts := strings.Split(keyStr, ":")
-			if len(parts) < 7 {
+			if len(parts) < 2 {
 				continue
 			}
-			eventID := parts[6]
+			eventID := parts[len(parts)-1]
 
 			nodeKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.ProjectID, c.ChatID, eventID)
 			if nodeItem, err := txn.Get(nodeKey); err == nil {
@@ -398,10 +398,10 @@ func (g *BadgerGraph) GetLenses(ctx context.Context, c *thinkgraph.ChatAddress, 
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			keyStr := string(it.Item().Key())
 			parts := strings.Split(keyStr, ":")
-			if len(parts) < 6 {
+			if len(parts) < 2 {
 				continue
 			}
-			eventID := parts[5]
+			eventID := parts[len(parts)-1]
 
 			if item, err := txn.Get(fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.ProjectID, c.ChatID, eventID)); err == nil {
 				_ = item.Value(func(val []byte) error {

@@ -14,6 +14,28 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
+type mMockChatEngine struct{}
+
+func (m *mMockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
+func (m *mMockChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+	return "", nil
+}
+func (m *mMockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+	return nil, nil
+}
+func (m *mMockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
+	return nil
+}
+func (m *mMockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
+	return nil
+}
+func (m *mMockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
+	return nil
+}
+func (m *mMockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
+	return "", nil
+}
+
 func TestManager_GetSessionCaching(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-manager-test"
@@ -26,7 +48,7 @@ func TestManager_GetSessionCaching(t *testing.T) {
 	graphDB, _ := db.NewBadgerGraph(opts)
 	t.Cleanup(func() { graphDB.Close() })
 
-	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return nil }, graphDB, nil)
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &mMockChatEngine{} }, graphDB, nil)
 	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
 
 	// Scaffold required directories

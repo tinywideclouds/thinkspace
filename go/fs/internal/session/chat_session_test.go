@@ -56,6 +56,11 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 	// Create the workspace directory structure
 	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
 
+	// Scaffold meta.json to bypass CreateChat REST endpoint dependency
+	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
+	_ = os.MkdirAll(chatDir, 0755)
+	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
+
 	// Scaffold base space state so the ChatSession can inherit the default ThinkState on boot
 	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" })
 
@@ -85,12 +90,10 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 	}
 
 	// Verify that the ChatSession correctly pulled the fallback ActiveThinkState from the SpaceState
-	// because the newly created chat did not have one explicitly defined in its meta.json yet.
 	if chatSession.Meta.ActiveThinkState != "golang" {
 		t.Errorf("Expected initialized ActiveThinkState to be 'golang', got %s", chatSession.Meta.ActiveThinkState)
 	}
 
-	// Verify the mutex is safely addressable
 	mu := chatSession.Mu()
 	if mu == nil {
 		t.Errorf("Expected Mu() to return a valid RWMutex pointer")
@@ -98,11 +101,8 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 }
 
 func TestChatSession_SetReviewPolicy_NilSafety(t *testing.T) {
-	// Create a zero-value session just to test the setter's nil protection
 	chatSession := &session.ChatSession{}
 
-	// Ensure setting a nil policy safely falls back to the default NewTokenThresholdPolicy
-	// without causing a panic when locked.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("SetReviewPolicy panicked when given a nil policy: %v", r)
@@ -129,6 +129,10 @@ func TestChatSession_GetGraphData_MissingThinkState(t *testing.T) {
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &csMockChatEngine{} }, graphDB, nil)
 	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
 
+	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
+	_ = os.MkdirAll(chatDir, 0755)
+	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
+
 	registry := config.NewRegistry()
 
 	chatSession, err := session.NewChatSession(
@@ -146,8 +150,6 @@ func TestChatSession_GetGraphData_MissingThinkState(t *testing.T) {
 		t.Fatalf("Failed to initialize ChatSession: %v", err)
 	}
 
-	// The registry is empty, so attempting to fetch graph data should safely warn
-	// and fall back to a zero-value bundle assembly without panicking.
 	_, err = chatSession.GetGraphData(ctx)
 	if err != nil {
 		t.Fatalf("GetGraphData failed unexpectedly when think state was missing: %v", err)

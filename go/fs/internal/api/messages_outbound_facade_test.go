@@ -10,7 +10,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
-	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"uuid"
 )
 
@@ -126,12 +125,10 @@ func TestMarshalSyncHistory(t *testing.T) {
 			Event: thinkgraph.Event{
 				ID:        evID,
 				Timestamp: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
-				Type:      workspace.EventCandidateProposal,
-				Content:   "Proposed changes",
+				Type:      thinkgraph.EventPrompt,
+				Content:   "Standard message",
 				Metadata:  map[string]string{"user": "test"},
-				Data:      []byte(`{"candidate_id":"cand-123","description":"Proposed changes","files":["src/main.go"]}`),
 			},
-			MaterializedState: []byte(`{"diff":"+ hello"}`),
 		},
 	}
 
@@ -159,14 +156,8 @@ func TestMarshalSyncHistory(t *testing.T) {
 	if !strings.Contains(jsonStr, evID.String()) {
 		t.Errorf("expected event ID %s to be present", evID.String())
 	}
-	if !strings.Contains(jsonStr, `"candidateProposal"`) {
-		t.Errorf("expected oneof payload 'candidateProposal' to be present, got: %s", jsonStr)
-	}
-	if !strings.Contains(jsonStr, `"cand-123"`) {
-		t.Errorf("expected candidate ID 'cand-123', got: %s", jsonStr)
-	}
-	if !strings.Contains(jsonStr, `"diffSnippet":"+ hello"`) {
-		t.Errorf("expected projected diffSnippet to be present, got: %s", jsonStr)
+	if !strings.Contains(jsonStr, `"message"`) {
+		t.Errorf("expected oneof payload 'message' to be present, got: %s", jsonStr)
 	}
 	if !strings.Contains(jsonStr, "Sticky context") {
 		t.Errorf("expected digest summary to be present")

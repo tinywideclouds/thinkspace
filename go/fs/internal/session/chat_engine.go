@@ -4,14 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
@@ -19,7 +19,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// ChatEngine orchestrates the open-ended conversational trunk (the main DAG).
 type ChatEngine struct {
 	logger           *slog.Logger
 	session          *ChatSession
@@ -29,7 +28,6 @@ type ChatEngine struct {
 	bundleAssembler  *BundleAssembler
 	digestManager    *DigestManager
 	turnExecutor     *TurnExecutor
-	fanOutFlow       flows.Flow
 }
 
 func NewChatEngine(
@@ -41,7 +39,6 @@ func NewChatEngine(
 	bundleAssembler *BundleAssembler,
 	digestManager *DigestManager,
 	turnExecutor *TurnExecutor,
-	fanOutFlow flows.Flow,
 ) *ChatEngine {
 	return &ChatEngine{
 		logger:           logger,
@@ -52,160 +49,222 @@ func NewChatEngine(
 		bundleAssembler:  bundleAssembler,
 		digestManager:    digestManager,
 		turnExecutor:     turnExecutor,
-		fanOutFlow:       fanOutFlow,
 	}
 }
 
-func (e *ChatEngine) Run(ctx context.Context, promptText string, ui UserInterface, emitter telemetry.Emitter) error {
-	e.session.mu.RLock()
-	activeBranch := e.session.Meta.ActiveBranch
-	e.session.mu.RUnlock()
+// inlineDigestCommitter connects the generic tool interface to the specialized session DigestManager without creating an import cycle.
+type inlineDigestCommitter struct {
+	dm           *DigestManager
+	ws           *workspace.Service
+	workerModel  string
+	workerPrompt string
+}
 
-	address := &thinkgraph.ChatAddress{
-		ChatID:    e.session.ChatID,
-		ProjectID: e.session.SpaceID,
-		SubGraph: thinkgraph.SubGraph{
-			Name: activeBranch,
-		},
-	}
+func (c *inlineDigestCommitter) CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error {
+	return c.dm.CreateManualDigest(ctx, c.ws, address, topicName, tags, instruction, contextData, c.workerModel, c.workerPrompt)
+}
 
+func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, promptText string, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
 	e.turnExecutor.emitter = emitter
 
 	if promptText != "" {
 		e.logger.InfoContext(ctx, "processing user prompt", "chat_id", e.session.ChatID, "prompt", promptText)
 		if err := e.workspaceService.LogUserPrompt(ctx, address, promptText); err != nil {
 			e.logger.ErrorContext(ctx, "failed logging user prompt to ledger", "chat_id", e.session.ChatID, "error", err)
-			return fmt.Errorf("logging user prompt: %w", err)
+			return nil, fmt.Errorf("logging user prompt: %w", err)
 		}
-		e.logger.InfoContext(ctx, "successfully logged user prompt to ledger", "chat_id", e.session.ChatID)
 	}
 
-	for {
-		emitter.Emit("manager", telemetry.Event{
-			ID:        uuid.NewV7(),
-			Type:      "log",
-			Timestamp: time.Now(),
-			Message:   "Initializing workspace turn...",
-		})
+	emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "log",
+		Timestamp: time.Now(),
+		Message:   "Initializing workspace turn...",
+	})
 
-		e.session.mu.Lock()
-		if e.session.Meta.ActiveThinkState == "" {
-			spaceState, err := e.workspaceManager.GetSpaceState(e.session.SpaceID)
-			if err != nil {
-				e.logger.WarnContext(ctx, "failed reading space state during active think state resolution", "space_id", e.session.SpaceID, "error", err)
-			}
-			e.session.Meta.ActiveThinkState = spaceState.ThinkState
-			if flushErr := e.session.flushMetaLocked(); flushErr != nil {
-				e.logger.WarnContext(ctx, "failed flushing meta with resolved think state", "error", flushErr)
-			}
-		}
-		activeThinkState := e.session.Meta.ActiveThinkState
-		digestionHorizon := e.session.Meta.DigestionHorizon
-		e.session.mu.Unlock()
+	e.session.mu.RLock()
+	activeThinkState := e.session.Meta.ActiveThinkState
+	digestionHorizon := e.session.Meta.DigestionHorizon
+	activeBranch := e.session.Meta.ActiveBranch
+	e.session.mu.RUnlock()
 
-		e.logger.InfoContext(ctx, "resolving think state from registry", "space_id", e.session.SpaceID, "active_think_state", activeThinkState)
-		thinkState, ok := e.registry.GetThinkState(activeThinkState)
-		if !ok {
-			e.logger.ErrorContext(ctx, "think state configuration not found in registry", "space_id", e.session.SpaceID, "think_state", activeThinkState)
-			return fmt.Errorf("think state configuration not found: %s", activeThinkState)
-		}
+	thinkState, ok := e.registry.GetThinkState(activeThinkState)
+	if !ok {
+		return nil, fmt.Errorf("think state configuration not found: %s", activeThinkState)
+	}
 
-		e.logger.InfoContext(ctx, "assembling context bundle", "think_state", activeThinkState, "branch", activeBranch)
-		bundle, graphData, err := e.bundleAssembler.Assemble(ctx, address, e.session.buildTopology(), digestionHorizon, activeThinkState, thinkState)
-		if err != nil {
-			e.logger.ErrorContext(ctx, "failed assembling bundle", "error", err)
-			return fmt.Errorf("assembling bundle: %w", err)
-		}
+	e.logger.InfoContext(ctx, "assembling context bundle", "think_state", activeThinkState, "branch", activeBranch)
+	bundle, graphData, err := e.bundleAssembler.Assemble(ctx, address, e.session.buildTopology(), digestionHorizon, activeThinkState, thinkState)
+	if err != nil {
+		e.logger.ErrorContext(ctx, "failed assembling bundle", "error", err)
+		return nil, fmt.Errorf("assembling bundle: %w", err)
+	}
 
-		settings, err := e.workspaceManager.GetSpaceSettings(e.session.SpaceID)
-		if err != nil {
-			e.logger.WarnContext(ctx, "failed to read space settings, using safe defaults", "error", err)
-			settings = workspace.SpaceSettings{
-				ReviewPolicy: workspace.ReviewPolicySettings{
-					Active:         true,
-					MinTokens:      200,
-					IncludePersona: false,
-				},
-			}
-		}
+	settings, err := e.workspaceManager.GetSpaceSettings(e.session.SpaceID)
+	if err != nil {
+		settings = workspace.SpaceSettings{ReviewPolicy: workspace.ReviewPolicySettings{Active: true, MinTokens: 200}}
+	}
 
-		e.session.mu.RLock()
-		policy := e.session.reviewPolicy
-		e.session.mu.RUnlock()
-		if policy == nil {
-			policy = NewTokenThresholdPolicy()
-		}
+	e.session.mu.RLock()
+	policy := e.session.reviewPolicy
+	e.session.mu.RUnlock()
+	if policy == nil {
+		policy = NewTokenThresholdPolicy()
+	}
 
-		shouldReview := policy.ShouldReview(settings, &bundle, graphData.Focus)
-		e.logger.InfoContext(ctx, "evaluated context review policy",
-			"context_review_active", settings.ReviewPolicy.Active,
-			"min_tokens", settings.ReviewPolicy.MinTokens,
-			"include_persona", settings.ReviewPolicy.IncludePersona,
-			"should_review", shouldReview,
-			"working_memory_count", len(bundle.Trajectory.WorkingMemory),
-			"workbench_files_count", len(bundle.Workbench),
-		)
+	shouldReview := policy.ShouldReview(settings, &bundle, graphData.Focus)
+	if !e.contextReview(ctx, shouldReview, &bundle, graphData, ui) {
+		return &signals.SignalTerminal{}, nil
+	}
 
-		if !e.contextReview(ctx, shouldReview, &bundle, graphData, ui) {
-			return nil
-		}
+	registry := tools.NewRegistry()
 
-		flowEngine := NewFlowEngine(e.logger, e.workspaceService, e.turnExecutor, e.workspaceService.Dispatcher(), emitter)
+	// Transition tool is a global routing mechanism, so it is always available
+	var validStates []string
+	for k := range e.registry.GetAllConfigs() {
+		validStates = append(validStates, k)
+	}
+	registry.Register(tools.NewTransitionThinkStateTool(validStates))
 
-		registry := tools.NewRegistry()
-
-		var validStates []string
-		for k := range e.registry.GetAllConfigs() {
-			validStates = append(validStates, k)
-		}
-		registry.Register(tools.NewTransitionThinkStateTool(validStates))
+	// Domain tools are only allocated if they are explicitly configured in the YAML (determined by Description presence)
+	if thinkState.Config().Roles.Manager.Tools.QueryLens.Description != "" {
 		registry.Register(tools.NewQueryLensTool(e.workspaceService))
-
-		fanOutAdapter := NewFanOutAdapter(flowEngine, thinkState, e.session.SpaceID, ui, e.fanOutFlow)
-		registry.Register(tools.NewProposeChangeTool(fanOutAdapter))
-
-		digestAdapter := NewDigestAdapter(e.digestManager, e.workspaceService, thinkState.Config().Roles.Worker.Model, thinkState.Config().WorkerSystemPrompt())
-		registry.Register(tools.NewCreateDigestTool(digestAdapter))
-
-		e.logger.InfoContext(ctx, "invoking turn executor agent loop")
-		err = e.turnExecutor.Execute(ctx, address, thinkState, bundle, registry, ui)
-
-		e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
-
-		if transitionReq, isTransition := err.(*tools.TransitionThinkStateRequest); isTransition {
-			e.logger.InfoContext(ctx, "domain transition requested by LLM", "target", transitionReq.TargetThinkState)
-			if rebootErr := e.handleTransition(ctx, address, transitionReq.TargetThinkState, ui); rebootErr != nil {
-				e.logger.ErrorContext(ctx, "domain transition failed", "error", rebootErr)
-				return rebootErr
-			}
-			continue
-		}
-
-		if err != nil {
-			e.logger.ErrorContext(ctx, "turn execution completed with error", "error", err)
-		} else {
-			e.logger.InfoContext(ctx, "turn execution completed successfully")
-		}
-		return err
 	}
+
+	if thinkState.Config().Roles.Manager.Tools.ProposeChange.Description != "" {
+		registry.Register(tools.NewProposeChangeTool())
+	}
+
+	if thinkState.Config().Roles.Manager.Tools.CreateDigest.Description != "" {
+		committer := &inlineDigestCommitter{
+			dm:           e.digestManager,
+			ws:           e.workspaceService,
+			workerModel:  thinkState.Config().Roles.Worker.Model,
+			workerPrompt: thinkState.Config().WorkerSystemPrompt(),
+		}
+		registry.Register(tools.NewCreateDigestTool(committer))
+	}
+
+	signal, err := e.turnExecutor.Execute(ctx, address, thinkState, bundle, registry, ui)
+	if err == nil {
+		e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
+	}
+
+	return signal, err
+}
+
+func (e *ChatEngine) RunSynthesis(ctx context.Context, address *thinkgraph.ChatAddress, signal *signals.SignalSynthesize, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
+	e.turnExecutor.emitter = emitter
+
+	e.session.mu.RLock()
+	activeThinkState := e.session.Meta.ActiveThinkState
+	e.session.mu.RUnlock()
+
+	thinkState, ok := e.registry.GetThinkState(activeThinkState)
+	if !ok {
+		return nil, fmt.Errorf("think state configuration not found: %s", activeThinkState)
+	}
+
+	var prompt strings.Builder
+	prompt.WriteString(signal.OriginalInstruction + "\n\n")
+
+	if signal.OriginalContext != "" {
+		prompt.WriteString("### Original Task Context\n")
+		prompt.WriteString(signal.OriginalContext + "\n\n")
+	}
+
+	prompt.WriteString("### Candidate Results\n")
+	for _, c := range signal.Candidates {
+		status := "PASSED"
+		if !c.Passed {
+			status = "FAILED"
+		}
+		prompt.WriteString(fmt.Sprintf("\n--- Candidate Branch: %s (Status: %s) ---\n", c.CandidateID, status))
+		if c.Instruction != "" {
+			prompt.WriteString(fmt.Sprintf("**Sub-Task Instruction:** %s\n", c.Instruction))
+		}
+		if c.Trace != "" {
+			prompt.WriteString(fmt.Sprintf("**Verification Error Trace:**\n```\n%s\n```\n", c.Trace))
+		}
+		if c.RawPayload != "" {
+			prompt.WriteString(fmt.Sprintf("**Raw Sub-Agent Output:**\n```\n%s\n```\n", c.RawPayload))
+		}
+	}
+
+	synthAddress := &thinkgraph.ChatAddress{
+		ProjectID: address.ProjectID,
+		ChatID:    address.ChatID,
+		SubGraph: thinkgraph.SubGraph{
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixFlow),
+			Name:    "synthesis",
+		},
+	}
+
+	// FIX: Provide the Mapbook to the Manager so it knows the file paths for the synthesis tool payload
+	projectWorkspaceDir := e.workspaceService.ProjectWorkspaceDir(address.ProjectID)
+	rawMapbook, _ := thinkState.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
+	stringMaps := make(map[string]string)
+	for k, v := range rawMapbook {
+		stringMaps[string(k)] = v
+	}
+
+	bundle := cognition.ThinkBundle{
+		Rules:   cognition.SystemRules{Persona: thinkState.Config().ManagerSystemPrompt()},
+		Mapbook: cognition.Mapbook{Maps: stringMaps},
+		Trajectory: cognition.Trajectory{
+			Catalyst: cognition.TrajectoryEvent{
+				Role:    "user",
+				Content: prompt.String(),
+			},
+		},
+		Workbench: []cognition.WorkbenchItem{},
+	}
+
+	registry := tools.NewRegistry()
+
+	// FIX: Register the full suite of domain tools for synthesis so the Manager can actually delegate the final work.
+	var validStates []string
+	for k := range e.registry.GetAllConfigs() {
+		validStates = append(validStates, k)
+	}
+	registry.Register(tools.NewTransitionThinkStateTool(validStates))
+
+	if thinkState.Config().Roles.Manager.Tools.QueryLens.Description != "" {
+		registry.Register(tools.NewQueryLensTool(e.workspaceService))
+	}
+
+	if thinkState.Config().Roles.Manager.Tools.ProposeChange.Description != "" {
+		registry.Register(tools.NewProposeChangeTool())
+	}
+
+	if thinkState.Config().Roles.Manager.Tools.CreateDigest.Description != "" {
+		committer := &inlineDigestCommitter{
+			dm:           e.digestManager,
+			ws:           e.workspaceService,
+			workerModel:  thinkState.Config().Roles.Worker.Model,
+			workerPrompt: thinkState.Config().WorkerSystemPrompt(),
+		}
+		registry.Register(tools.NewCreateDigestTool(committer))
+	}
+
+	resultSignal, err := e.turnExecutor.Execute(ctx, synthAddress, thinkState, bundle, registry, ui)
+	if err == nil {
+		e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
+	}
+
+	return resultSignal, err
 }
 
 func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
 	if !shouldReview {
-		e.logger.DebugContext(ctx, "bypassing UI context review")
 		return true
 	}
 
 	turnContext := ProjectTurnContext(e.session.SpaceID, e.session.ChatID, bundle, graphData.Focus)
-	e.logger.InfoContext(ctx, "blocking for UI context review", "preview_id", turnContext.PreviewID)
-
 	decision := ui.ReviewContext(turnContext)
 	if !decision.Approved {
-		e.logger.InfoContext(ctx, "turn cancelled by user during context review")
 		return false
 	}
-
-	e.logger.InfoContext(ctx, "context approved by UI, applying retentions")
 
 	if decision.RetainedFilePaths != nil {
 		retainedPaths := make(map[string]bool)
@@ -234,7 +293,6 @@ func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, bundl
 		}
 
 		if bundle.Trajectory.Catalyst.Content != "" && !retainedCatalyst {
-			e.logger.WarnContext(ctx, "catalyst (user prompt) explicitly unchecked by user; aborting turn")
 			return false
 		}
 
@@ -246,13 +304,6 @@ func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, bundl
 		}
 		bundle.Trajectory.WorkingMemory = prunedMemory
 	}
-
-	e.logger.DebugContext(ctx, "final bundle prepared for orchestrator",
-		"working_memory_count", len(bundle.Trajectory.WorkingMemory),
-		"catalyst_present", bundle.Trajectory.Catalyst.Content != "",
-		"workbench_files_count", len(bundle.Workbench),
-		"long_term_memory_count", len(bundle.Trajectory.LongTermMemory),
-	)
 
 	return true
 }
@@ -270,8 +321,7 @@ func (e *ChatEngine) evaluateAndTriggerDigestion(ctx context.Context, address *t
 	}
 
 	var volatileEvents []thinkgraph.Event
-	horizonIndex := -1
-	evalIndex := -1
+	horizonIndex, evalIndex := -1, -1
 
 	e.session.mu.RLock()
 	digestionHorizon := e.session.Meta.DigestionHorizon
@@ -323,13 +373,9 @@ func (e *ChatEngine) evaluateAndTriggerDigestion(ctx context.Context, address *t
 	newEvalHorizonEvent := timeline[len(timeline)-1]
 	targetWindowHorizonEvent := targetWindow[len(targetWindow)-1]
 
-	e.logger.Info("Triggering background digestion", "target_events", len(targetWindow), "buffer_events", len(activeBuffer), "forced", forceDigest)
-
 	e.session.mu.Lock()
 	e.session.Meta.EvaluationHorizon = newEvalHorizonEvent.ID
-	if err := e.session.flushMetaLocked(); err != nil {
-		e.logger.WarnContext(ctx, "failed flushing meta during digestion evaluation", "error", err)
-	}
+	_ = e.session.flushMetaLocked()
 	e.session.mu.Unlock()
 
 	go e.executeBackgroundDigestion(address, targetWindow, activeBuffer, forceDigest, targetWindowHorizonEvent.ID)
@@ -351,12 +397,8 @@ func (e *ChatEngine) executeBackgroundDigestion(
 
 	thinkState, ok := e.registry.GetThinkState(activeThinkState)
 	if !ok {
-		e.logger.Error("Background digestion aborted: think state not found", "think_state", activeThinkState)
 		return
 	}
-
-	workerModel := thinkState.Config().Roles.Worker.Model
-	workerPersona := thinkState.Config().WorkerSystemPrompt()
 
 	count, digestErr := e.digestManager.CreateBackgroundDigest(
 		bgCtx,
@@ -365,59 +407,17 @@ func (e *ChatEngine) executeBackgroundDigestion(
 		targetWindow,
 		activeBuffer,
 		forceDigest,
-		workerModel,
-		workerPersona,
+		thinkState.Config().Roles.Worker.Model,
+		thinkState.Config().WorkerSystemPrompt(),
 	)
 	if digestErr != nil {
-		e.logger.Error("Background digestion failed", "error", digestErr)
 		return
 	}
 
 	if count > 0 {
 		e.session.mu.Lock()
 		e.session.Meta.DigestionHorizon = targetWindowHorizonEventID
-		if flushErr := e.session.flushMetaLocked(); flushErr != nil {
-			e.logger.Warn("Failed flushing meta after digestion horizon advancement", "error", flushErr)
-		}
+		_ = e.session.flushMetaLocked()
 		e.session.mu.Unlock()
-		e.logger.Info("Digestion Horizon advanced", "new_horizon", targetWindowHorizonEventID, "digests_created", count)
 	}
-}
-
-func (e *ChatEngine) handleTransition(ctx context.Context, address *thinkgraph.ChatAddress, targetThinkState string, ui UserInterface) error {
-	targetSpace, exists := e.registry.GetThinkState(targetThinkState)
-	if !exists {
-		ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Error:** Think state '%s' does not exist in registry. Transition aborted.\n", targetThinkState))
-		return fmt.Errorf("invalid transition target: %s", targetThinkState)
-	}
-
-	chatDir := filepath.Join(e.workspaceService.WorkspaceRoot(), e.session.SpaceID, "chats", address.ChatID)
-
-	e.session.mu.Lock()
-	hasInitialized := false
-	for _, d := range e.session.Meta.InitializedThinkStates {
-		if d == targetThinkState {
-			hasInitialized = true
-			break
-		}
-	}
-
-	if !hasInitialized {
-		if initErr := targetSpace.Initialize(ctx, chatDir); initErr != nil {
-			e.session.mu.Unlock()
-			return fmt.Errorf("failed to initialize domain %s: %w", targetThinkState, initErr)
-		}
-		e.session.Meta.InitializedThinkStates = append(e.session.Meta.InitializedThinkStates, targetThinkState)
-	}
-
-	e.session.Meta.ActiveThinkState = targetThinkState
-	if err := e.session.flushMetaLocked(); err != nil {
-		e.logger.WarnContext(ctx, "failed to flush meta after domain transition", "error", err)
-	}
-	e.session.mu.Unlock()
-
-	if err := e.workspaceService.LogDigest(ctx, address, fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState), []string{"system"}, false, nil); err != nil {
-		e.logger.WarnContext(ctx, "failed logging transition digest", "error", err)
-	}
-	return nil
 }

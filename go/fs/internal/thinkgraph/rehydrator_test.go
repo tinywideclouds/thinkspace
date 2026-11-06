@@ -18,16 +18,20 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 	workspaceRoot := tempDir
 	spaceID := "test-space"
 	chatID := "chat-rehydrate"
-	branchID := "main"
+	subGraphName := "main"
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
 
 	chat := &thinkgraph.ChatAddress{
-		ChatID:       chatID,
-		ProjectID:    spaceID,
-		ActiveBranch: branchID,
+		ChatID:    chatID,
+		ProjectID: spaceID,
+		SubGraph: thinkgraph.SubGraph{
+			Name:    subGraphName,
+			GraphID: graphID,
+		},
 	}
 
 	ledgerPath := filepath.Join(workspaceRoot, spaceID, "chats", chatID, "ledger")
-	logsDir := filepath.Join(ledgerPath, "logs", branchID)
+	logsDir := filepath.Join(ledgerPath, "logs", subGraphName)
 	digestsDir := filepath.Join(ledgerPath, "digests")
 	os.MkdirAll(logsDir, 0755)
 	os.MkdirAll(digestsDir, 0755)
@@ -79,7 +83,7 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		t.Errorf("Expected badger to hold 5 events, got %d", graphManifest.TotalEvents)
 	}
 
-	timeline, _ := graph.GetBranchTimeline(context.Background(), chat, branchID)
+	timeline, _ := graph.GetSubGraphTimeline(context.Background(), chat, graphID)
 	if len(timeline) != 5 {
 		t.Fatalf("Expected timeline to have 5 nodes, got %d", len(timeline))
 	}
@@ -108,7 +112,7 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 		t.Fatalf("FastForward failed: %v", err)
 	}
 
-	ffTimeline, _ := graph.GetBranchTimeline(context.Background(), chat, branchID)
+	ffTimeline, _ := graph.GetSubGraphTimeline(context.Background(), chat, graphID)
 	if len(ffTimeline) != 9 {
 		t.Fatalf("Expected timeline to have 9 nodes, got %d", len(ffTimeline))
 	}
@@ -116,7 +120,15 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 
 func TestRehydrator_MutationReplay(t *testing.T) {
 	tempDir := t.TempDir()
-	chat := &thinkgraph.ChatAddress{ChatID: "chat-mut", ProjectID: "space", ActiveBranch: "main"}
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "chat-mut",
+		ProjectID: "space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: graphID,
+		},
+	}
 
 	ledger := thinkgraph.NewFileLedger(1000, tempDir)
 
@@ -139,7 +151,7 @@ func TestRehydrator_MutationReplay(t *testing.T) {
 	rehydrator := thinkgraph.NewRehydrator(graphStore, tempDir)
 	_ = rehydrator.Rebuild(context.Background(), chat)
 
-	t1, _ := graph.GetBranchTimeline(context.Background(), chat, "main")
+	t1, _ := graph.GetSubGraphTimeline(context.Background(), chat, graphID)
 	if len(t1) != 1 {
 		t.Fatalf("Expected 1 node, got %d", len(t1))
 	}

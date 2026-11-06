@@ -9,6 +9,7 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -40,8 +41,8 @@ func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- 
 	}
 }
 
-func (ui *WebSocketUI) ConfirmTransition(targetThinkState string, reasoning string) bool {
-	data, err := MarshalRequestTransition(targetThinkState, reasoning)
+func (ui *WebSocketUI) ConfirmTransition(req signals.SignalTransition) bool {
+	data, err := MarshalRequestTransition(req.TargetThinkState, req.Reasoning)
 	if err != nil {
 		ui.logger.ErrorContext(ui.ctx, "failed marshaling request transition", "error", err)
 	} else {

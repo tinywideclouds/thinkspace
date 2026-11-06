@@ -7,7 +7,7 @@ The system provides two distinct binaries to interact with the ThinkSpace orches
 The CLI binary provides a synchronous, terminal-based loop for interacting with the workspace.
 
 ### Configuration Flags
-*   `-chat`: The name of the exploration thread (default: "unit-circle-test").
+*   `-chat`: The name of the exploration chat (default: "unit-circle-test").
 *   `-engine`: State engine backend to use, either 'gogit' or 'exec' (default: "gogit").
 *   `-space`: The ThinkSpace directory to use (default: "sandbox").
 *   `-domain`: The domain configuration YAML to load (default: "golang").
@@ -15,9 +15,9 @@ The CLI binary provides a synchronous, terminal-based loop for interacting with 
 ### Execution Flow
 1. **Initialization:** Loads environment variables and configures the GenAI client.
 2. **Workspace Setup:** Provisions the workspace directory and loads the requested domain configuration from the registry.
-3. **Dependency Injection:** Wires the `ServiceManager`, `Adapter`, `FanOutFlow`, and injects the `TerminalUI` into the `Coordinator`.
-4. **Session Resumption:** Checks if the thread directory exists. If it does not, it creates a new thread and injects an initial prompt. If it does, it instantly loads the read-model from the BadgerDB graph, utilizing the `Rehydrator` to fast-forward any missing events from the append-only ledger (`.jsonl`). It then blocks for user terminal input.
-5. **Execution:** Triggers a single `ExecuteTurn` via the `Coordinator`, blocking until the LLM generation, tool execution, and user review phases are complete.
+3. **Dependency Injection:** Wires the `ServiceManager`, `Adapter`, `FanOutFlow`, and injects the `TerminalUI` into the supervisor.
+4. **Session Resumption:** Checks if the chat directory exists. If it does not, it creates a new chat and injects an initial prompt. If it does, it instantly loads the read-model from the BadgerDB graph, utilizing the `Rehydrator` to fast-forward any missing events from the append-only ledger (`.jsonl`). It then blocks for user terminal input.
+5. **Execution:** Triggers a single `RunTurn` via the `Manager`, blocking until the LLM generation, tool execution, and user review phases are complete.
 
 ---
 

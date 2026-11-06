@@ -191,7 +191,13 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			chatSess.Mu().RUnlock()
 
-			chatObj := &thinkgraph.ChatAddress{ChatID: payload.ChatID, ProjectID: payload.SpaceID, ActiveBranch: activeBranch}
+			chatObj := &thinkgraph.ChatAddress{
+				ChatID:    payload.ChatID,
+				ProjectID: payload.SpaceID,
+				SubGraph: thinkgraph.SubGraph{
+					Name: activeBranch,
+				},
+			}
 			limit := payload.Limit
 			if limit <= 0 {
 				limit = 50
@@ -207,7 +213,6 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			var digests []thinkgraph.DigestMeta
 			var focus thinkgraph.AttentionFocus
 
-			// Piggyback full cognitive state if the client is fetching the initial timeline page
 			if payload.Cursor == "" {
 				if graphData, err := chatSess.GetGraphData(ctx); err == nil {
 					digests = graphData.Digests
@@ -256,7 +261,13 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed to update chat meta on fork", "error", err)
 			}
 
-			chatObj := &thinkgraph.ChatAddress{ChatID: payload.ChatID, ProjectID: payload.SpaceID, ActiveBranch: newBranchID}
+			chatObj := &thinkgraph.ChatAddress{
+				ChatID:    payload.ChatID,
+				ProjectID: payload.SpaceID,
+				SubGraph: thinkgraph.SubGraph{
+					Name: newBranchID,
+				},
+			}
 			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
 
 			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatObj, "", 50, topo)
@@ -279,7 +290,13 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			activeBranch := chatSess.Meta.ActiveBranch
 			chatSess.Mu().RUnlock()
 
-			chatObj := &thinkgraph.ChatAddress{ChatID: payload.ChatID, ProjectID: payload.SpaceID, ActiveBranch: activeBranch}
+			chatObj := &thinkgraph.ChatAddress{
+				ChatID:    payload.ChatID,
+				ProjectID: payload.SpaceID,
+				SubGraph: thinkgraph.SubGraph{
+					Name: activeBranch,
+				},
+			}
 
 			if err := server.manager.GetService(payload.SpaceID).LogUserPrompt(ctx, chatObj, payload.NewText); err != nil {
 				server.logger.Error("Failed logging amended prompt", "error", err)
@@ -322,7 +339,13 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed updating meta on switch branch", "error", err)
 			}
 
-			chatObj := &thinkgraph.ChatAddress{ChatID: payload.ChatID, ProjectID: payload.SpaceID, ActiveBranch: payload.TargetBranch}
+			chatObj := &thinkgraph.ChatAddress{
+				ChatID:    payload.ChatID,
+				ProjectID: payload.SpaceID,
+				SubGraph: thinkgraph.SubGraph{
+					Name: payload.TargetBranch,
+				},
+			}
 			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
 
 			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatObj, "", 50, topo)

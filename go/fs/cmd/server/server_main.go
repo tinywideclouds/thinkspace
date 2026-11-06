@@ -119,7 +119,6 @@ func main() {
 	}
 	digestManager := session.NewDigestManager(logger, modelClient, digestCfg)
 
-	// Inject the central TurnManager orchestrator
 	turnManager := session.NewManager(logger, registry, serviceManager, modelClient, fanOutFlow, digestManager)
 
 	mux := http.NewServeMux()

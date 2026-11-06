@@ -117,52 +117,43 @@ func setupServiceTest(t *testing.T) (*workspace.Service, *mockChatEngine, string
 	return svc, mockEngine, workspaceRoot
 }
 
-func TestService_StartThread(t *testing.T) {
+func TestService_StartChat(t *testing.T) {
 	svc, mockEngine, _ := setupServiceTest(t)
 	ctx := context.Background()
 
-	thread, err := svc.InitializeChat(ctx, "test-space", "test-thread")
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "test-chat",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	err := svc.InitializeChat(ctx, chat)
 	if err != nil {
-		t.Fatalf("StartThread failed: %v", err)
+		t.Fatalf("InitializeChat failed: %v", err)
 	}
 
 	if !mockEngine.initCalled {
 		t.Errorf("Expected ChatEngine.InitChat to be called")
 	}
-
-	if thread.ChatID != "test-thread" {
-		t.Errorf("Expected thread ID 'test-thread', got '%s'", thread.ChatID)
-	}
 }
 
-func TestService_ProposeAndResolveCandidate(t *testing.T) {
+func TestService_ResolveCandidate(t *testing.T) {
 	svc, mockEngine, _ := setupServiceTest(t)
 	ctx := context.Background()
 
-	thread, _ := svc.InitializeChat(ctx, "test-space", "test-thread")
-
-	files := map[string][]byte{
-		"main.go": []byte("package main"),
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "test-chat",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
 	}
+	_ = svc.InitializeChat(ctx, chat)
 
-	candidate, err := svc.ProposeCandidate(ctx, thread, "test_tool", files)
-	if err != nil {
-		t.Fatalf("ProposeCandidate failed: %v", err)
-	}
-
-	if !mockEngine.spawnCalled || !mockEngine.previewCalled {
-		t.Errorf("Expected ChatEngine lifecycle methods to be called during proposal")
-	}
-
-	if mockEngine.lastSandbox == nil || !mockEngine.lastSandbox.writeCalled || !mockEngine.lastSandbox.applyCalled || !mockEngine.lastSandbox.deliverCalled || !mockEngine.lastSandbox.tearDownCalled {
-		t.Errorf("Expected CandidateSandbox virtual file I/O and lifecycle methods to be called")
-	}
-
-	if candidate.Status != workspace.StatusPending {
-		t.Errorf("Expected candidate status to be pending")
-	}
-
-	err = svc.ResolveCandidate(ctx, thread, candidate.ID, true, "Looks good")
+	err := svc.ResolveCandidate(ctx, chat, "cand-123", true, "Looks good")
 	if err != nil {
 		t.Fatalf("ResolveCandidate failed: %v", err)
 	}
@@ -171,7 +162,7 @@ func TestService_ProposeAndResolveCandidate(t *testing.T) {
 		t.Errorf("Expected ChatEngine.Accept to be called")
 	}
 
-	err = svc.ResolveCandidate(ctx, thread, candidate.ID, false, "Needs work")
+	err = svc.ResolveCandidate(ctx, chat, "cand-123", false, "Needs work")
 	if err != nil {
 		t.Fatalf("ResolveCandidate failed: %v", err)
 	}
@@ -185,14 +176,25 @@ func TestService_LedgerTags(t *testing.T) {
 	svc, _, workspaceRoot := setupServiceTest(t)
 	ctx := context.Background()
 
-	thread, _ := svc.InitializeChat(ctx, "test-space", "tag-thread")
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "tag-chat",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	_ = svc.InitializeChat(ctx, chat)
 
 	tags := []string{"ui", "frontend"}
-	if err := svc.LogProposal(ctx, thread, "cand-123", "Added UI", tags, []string{"src/main.go"}); err != nil {
-		t.Fatalf("LogProposal failed: %v", err)
+
+	ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Test tags")
+	ev.Tags = tags
+	if err := svc.Dispatcher().AppendEvent(ctx, chat, ev); err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
 	}
 
-	logsDir := filepath.Join(workspaceRoot, thread.ProjectID, "chats", thread.ChatID, "ledger", "logs", thread.ActiveBranch)
+	logsDir := filepath.Join(workspaceRoot, chat.ProjectID, "chats", chat.ChatID, "ledger", "logs", chat.Name)
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		t.Fatalf("failed to read logs dir: %v", err)
@@ -212,9 +214,9 @@ func TestService_LedgerTags(t *testing.T) {
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			if len(scanner.Bytes()) > 0 {
-				var ev thinkgraph.Event
-				json.Unmarshal(scanner.Bytes(), &ev)
-				recoveredEvents = append(recoveredEvents, ev)
+				var event thinkgraph.Event
+				json.Unmarshal(scanner.Bytes(), &event)
+				recoveredEvents = append(recoveredEvents, event)
 			}
 		}
 		file.Close()

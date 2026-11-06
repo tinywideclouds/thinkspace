@@ -27,6 +27,11 @@ func NewDispatcher(graphStore *GraphStore, ledger EventWriter) *Dispatcher {
 }
 
 func (d *Dispatcher) AppendEvent(ctx context.Context, c *ChatAddress, event Event) error {
+	// Lock in the mathematical DAG identity before fanning out to sinks
+	if event.GraphID.IsZero() {
+		event.GraphID = c.GraphID
+	}
+
 	if d.ledger != nil {
 		if err := d.ledger.AppendEvent(ctx, c, event); err != nil {
 			return fmt.Errorf("ledger append failed: %w", err)

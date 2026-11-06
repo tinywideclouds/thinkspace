@@ -4,18 +4,21 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
+	"time"
+
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// ChatSession represents the active state and dependency container of a single conversation thread.
-// It manages metadata locks, topology construction, and routes execution to the ChatEngine.
 type ChatSession struct {
 	mu      sync.RWMutex
 	SpaceID string
@@ -30,8 +33,10 @@ type ChatSession struct {
 	bundleAssembler  *BundleAssembler
 	digestManager    *DigestManager
 	reviewPolicy     ContextReviewPolicy
+	fanOutFlow       flows.Flow
 
 	chatEngine *ChatEngine
+	flowEngine *FlowEngine
 }
 
 func NewChatSession(
@@ -45,16 +50,8 @@ func NewChatSession(
 	spaceID string,
 	chatID string,
 ) (*ChatSession, error) {
-	workspaceService := workspaceManager.GetService(spaceID)
-
-	if _, err := workspaceService.InitializeChat(ctx, spaceID, chatID); err != nil {
-		logger.ErrorContext(ctx, "failed initializing chat boundaries", "space_id", spaceID, "chat_id", chatID, "error", err)
-		return nil, fmt.Errorf("initializing chat boundaries: %w", err)
-	}
-
 	meta, err := workspaceManager.GetChatMeta(spaceID, chatID)
 	if err != nil {
-		logger.ErrorContext(ctx, "failed loading chat meta", "space_id", spaceID, "chat_id", chatID, "error", err)
 		return nil, fmt.Errorf("loading chat meta: %w", err)
 	}
 
@@ -69,15 +66,7 @@ func NewChatSession(
 		})
 	}
 
-	assembler := NewBundleAssembler(
-		logger,
-		workspaceManager.GraphRepository(),
-		thinkgraph.NewContextProjecter(),
-		registry,
-		workspaceService.WorkspaceRoot(),
-	)
-
-	turnExecutor := NewTurnExecutor(logger, modelClient, workspaceService, nil)
+	workspaceService := workspaceManager.GetService(spaceID)
 
 	session := &ChatSession{
 		SpaceID:          spaceID,
@@ -88,22 +77,29 @@ func NewChatSession(
 		workspaceManager: workspaceManager,
 		workspaceService: workspaceService,
 		modelClient:      modelClient,
-		bundleAssembler:  assembler,
 		digestManager:    digestManager,
 		reviewPolicy:     NewTokenThresholdPolicy(),
+		fanOutFlow:       fanOutFlow,
 	}
 
-	session.chatEngine = NewChatEngine(
+	address := session.getActiveAddress()
+	if err := workspaceService.InitializeChat(ctx, address); err != nil {
+		return nil, fmt.Errorf("initializing chat boundaries: %w", err)
+	}
+
+	assembler := NewBundleAssembler(
 		logger,
-		session,
+		workspaceManager.GraphRepository(),
+		thinkgraph.NewContextProjecter(),
 		registry,
-		workspaceManager,
-		workspaceService,
-		assembler,
-		digestManager,
-		turnExecutor,
-		fanOutFlow,
+		workspaceService.WorkspaceRoot(),
 	)
+
+	turnExecutor := NewTurnExecutor(logger, modelClient, workspaceService, nil)
+
+	session.bundleAssembler = assembler
+	session.chatEngine = NewChatEngine(logger, session, registry, workspaceManager, workspaceService, assembler, digestManager, turnExecutor)
+	session.flowEngine = NewFlowEngine(logger, workspaceService, turnExecutor, workspaceService.Dispatcher())
 
 	return session, nil
 }
@@ -121,23 +117,6 @@ func (s *ChatSession) SetReviewPolicy(policy ContextReviewPolicy) {
 	s.reviewPolicy = policy
 }
 
-func (s *ChatSession) flushMeta() error {
-	s.mu.RLock()
-	activeThinkState := s.Meta.ActiveThinkState
-	initializedThinkStates := s.Meta.InitializedThinkStates
-	digestionHorizon := s.Meta.DigestionHorizon
-	evaluationHorizon := s.Meta.EvaluationHorizon
-	s.mu.RUnlock()
-
-	return s.workspaceManager.UpdateChatMeta(s.SpaceID, s.ChatID, func(m *workspace.ChatMeta) {
-		m.ActiveThinkState = activeThinkState
-		m.InitializedThinkStates = initializedThinkStates
-		m.DigestionHorizon = digestionHorizon
-		m.EvaluationHorizon = evaluationHorizon
-	})
-}
-
-// flushMetaLocked flushes metadata directly while a write lock is already held by the caller.
 func (s *ChatSession) flushMetaLocked() error {
 	activeThinkState := s.Meta.ActiveThinkState
 	initializedThinkStates := s.Meta.InitializedThinkStates
@@ -162,20 +141,48 @@ func (s *ChatSession) buildTopology() map[string]thinkgraph.BranchTopology {
 	return topo
 }
 
-func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, error) {
+func (s *ChatSession) getActiveAddress() *thinkgraph.ChatAddress {
 	s.mu.RLock()
 	activeBranch := s.Meta.ActiveBranch
-	activeThinkState := s.Meta.ActiveThinkState
-	digestionHorizon := s.Meta.DigestionHorizon
+	branchMeta := s.Meta.Branches[activeBranch]
 	s.mu.RUnlock()
 
-	address := &thinkgraph.ChatAddress{
+	gID, _ := thinkgraph.ParseGraphID(branchMeta.GraphID)
+
+	// Backfill legacy chats that didn't have a GraphID saved to disk
+	if gID.IsZero() {
+		gID = thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+
+		s.mu.Lock()
+		branchMeta.GraphID = gID.String()
+		s.Meta.Branches[activeBranch] = branchMeta
+		_ = s.flushMetaLocked()
+		s.mu.Unlock()
+
+		s.workspaceManager.UpdateChatMeta(s.SpaceID, s.ChatID, func(m *workspace.ChatMeta) {
+			bm := m.Branches[activeBranch]
+			bm.GraphID = gID.String()
+			m.Branches[activeBranch] = bm
+		})
+	}
+
+	return &thinkgraph.ChatAddress{
 		ChatID:    s.ChatID,
 		ProjectID: s.SpaceID,
 		SubGraph: thinkgraph.SubGraph{
-			Name: activeBranch,
+			Name:    activeBranch,
+			GraphID: gID,
 		},
 	}
+}
+
+func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, error) {
+	address := s.getActiveAddress()
+
+	s.mu.RLock()
+	activeThinkState := s.Meta.ActiveThinkState
+	digestionHorizon := s.Meta.DigestionHorizon
+	s.mu.RUnlock()
 
 	thinkState, ok := s.registry.GetThinkState(activeThinkState)
 	if !ok {
@@ -187,5 +194,101 @@ func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, 
 }
 
 func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInterface, emitter telemetry.Emitter) error {
-	return s.chatEngine.Run(ctx, promptText, ui, emitter)
+	address := s.getActiveAddress()
+
+	var currentSignal signals.EngineSignal = &signals.SignalStartChat{}
+	var err error
+
+	for !currentSignal.IsTerminal() {
+		switch sig := currentSignal.(type) {
+
+		case *signals.SignalStartChat:
+			currentSignal, err = s.chatEngine.Run(ctx, address, promptText, ui, emitter)
+			promptText = ""
+			if err != nil {
+				return err
+			}
+
+		case *signals.SignalDispatchFlow:
+			s.mu.RLock()
+			activeThinkState := s.Meta.ActiveThinkState
+			s.mu.RUnlock()
+
+			thinkState, ok := s.registry.GetThinkState(activeThinkState)
+			if !ok {
+				return fmt.Errorf("think state not found: %s", activeThinkState)
+			}
+
+			currentSignal, err = s.flowEngine.Run(ctx, address, thinkState, s.fanOutFlow, sig.Tasks, sig.Summary, ui, emitter)
+			if err != nil {
+				return err
+			}
+
+		case *signals.SignalSynthesize:
+			currentSignal, err = s.chatEngine.RunSynthesis(ctx, address, sig, ui, emitter)
+			if err != nil {
+				return err
+			}
+
+		case *signals.SignalTransition:
+			if rebootErr := s.handleTransition(ctx, address, sig.TargetThinkState, ui, emitter); rebootErr != nil {
+				return rebootErr
+			}
+			currentSignal = &signals.SignalStartChat{}
+
+		default:
+			return fmt.Errorf("supervisor encountered unknown engine signal: %T", sig)
+		}
+	}
+
+	_, err = s.workspaceService.Checkpoint(ctx, address, "End of session turn")
+	return err
+}
+
+func (s *ChatSession) handleTransition(ctx context.Context, address *thinkgraph.ChatAddress, targetThinkState string, ui UserInterface, emitter telemetry.Emitter) error {
+	targetSpace, exists := s.registry.GetThinkState(targetThinkState)
+	if !exists {
+		ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Error:** Think state '%s' does not exist in registry. Transition aborted.\n", targetThinkState))
+		return fmt.Errorf("invalid transition target: %s", targetThinkState)
+	}
+
+	chatDir := filepath.Join(s.workspaceService.WorkspaceRoot(), s.SpaceID, "chats", address.ChatID)
+
+	s.mu.Lock()
+	hasInitialized := false
+	for _, d := range s.Meta.InitializedThinkStates {
+		if d == targetThinkState {
+			hasInitialized = true
+			break
+		}
+	}
+
+	if !hasInitialized {
+		if initErr := targetSpace.Initialize(ctx, chatDir); initErr != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("failed to initialize domain %s: %w", targetThinkState, initErr)
+		}
+		s.Meta.InitializedThinkStates = append(s.Meta.InitializedThinkStates, targetThinkState)
+	}
+
+	s.Meta.ActiveThinkState = targetThinkState
+	if err := s.flushMetaLocked(); err != nil {
+		s.logger.WarnContext(ctx, "failed to flush meta after domain transition", "error", err)
+	}
+	s.mu.Unlock()
+
+	if emitter != nil {
+		emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "thinkstate_transition",
+			Timestamp: time.Now(),
+			Message:   fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState),
+			Payload:   map[string]any{"target_think_state": targetThinkState},
+		})
+	}
+
+	if err := s.workspaceService.LogDigest(ctx, address, fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState), []string{"system"}, false, nil); err != nil {
+		s.logger.WarnContext(ctx, "failed logging transition digest", "error", err)
+	}
+	return nil
 }

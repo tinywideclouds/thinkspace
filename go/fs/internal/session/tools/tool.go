@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
@@ -20,7 +21,7 @@ func (n ToolName) String() string {
 
 type UI interface {
 	OnTextChunk(text string)
-	ConfirmTransition(targetThinkState, reasoning string) bool
+	ConfirmTransition(req signals.SignalTransition) bool
 }
 
 type Workspace interface {
@@ -29,7 +30,7 @@ type Workspace interface {
 }
 
 type ExecutionContext struct {
-	Address      *thinkgraph.ChatAddress // The universal DAG coordinate
+	Address      *thinkgraph.ChatAddress
 	Bundle       *cognition.ThinkBundle
 	UI           UI
 	RawArguments map[string]any
@@ -38,5 +39,5 @@ type ExecutionContext struct {
 type Tool interface {
 	Name() ToolName
 	DefaultDescription() string
-	Execute(ctx context.Context, executionContext ExecutionContext) (bool, error)
+	Execute(ctx context.Context, executionContext ExecutionContext) (signals.EngineSignal, error)
 }

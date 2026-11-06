@@ -3,6 +3,7 @@ package session
 import (
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -31,11 +32,10 @@ type ContextApprovalDecision struct {
 }
 
 type UserInterface interface {
-	OnTextChunk(text string)
+	tools.UI
 	ReviewContext(turnContext TurnContext) ContextApprovalDecision
 	ChooseNextStep() flows.FlowStrategy
 	ReviewCandidate(branch string) (accepted bool)
-	ConfirmTransition(targetThinkState string, reasoning string) bool
 	GetAgentTokenChannel() chan<- workspace.AgentToken
 }
 

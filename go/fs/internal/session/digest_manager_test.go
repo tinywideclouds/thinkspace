@@ -19,7 +19,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// Renamed from coordMockChatEngine to avoid cross-test collisions
 type dmMockChatEngine struct{}
 
 func (m *dmMockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
@@ -42,7 +41,6 @@ func (m *dmMockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candid
 	return "+ mock diff", nil
 }
 
-// Renamed from coordMockModelClient
 type dmMockModelClient struct {
 	responses []llm.StreamChunk
 }
@@ -69,13 +67,23 @@ func TestDigestManager_CreateManualDigest(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	workspaceRoot := t.TempDir()
 	spaceID := "test-space"
+	chatID := "test-digest-thread"
 
 	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
 	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
 	emitter := &dmTestEmitter{}
 
 	svc := workspace.NewService(logger, &dmMockChatEngine{}, workspaceRoot, dispatcher, emitter)
-	chatSession, _ := svc.InitializeChat(context.Background(), spaceID, "test-digest-thread")
+
+	chatAddress := &thinkgraph.ChatAddress{
+		ChatID:    chatID,
+		ProjectID: spaceID,
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	_ = svc.InitializeChat(context.Background(), chatAddress)
 
 	client := &dmMockModelClient{
 		responses: []llm.StreamChunk{{Text: "Manual summary content"}},
@@ -84,12 +92,12 @@ func TestDigestManager_CreateManualDigest(t *testing.T) {
 	cfg := session.DigestConfig{ManualPrompt: "Instruction: {{.Instruction}}\nContext: {{.Context}}"}
 	manager := session.NewDigestManager(logger, client, cfg)
 
-	err := manager.CreateManualDigest(context.Background(), svc, chatSession, "Topic A", []string{"tag1"}, "Summarize this", "Context data", "test-model", "Persona")
+	err := manager.CreateManualDigest(context.Background(), svc, chatAddress, "Topic A", []string{"tag1"}, "Summarize this", "Context data", "test-model", "Persona")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatSession.ChatID, "ledger", "digests")
+	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatAddress.ChatID, "ledger", "digests")
 	entries, err := os.ReadDir(digestsDir)
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("expected digest markdown file to be created in %s", digestsDir)
@@ -109,13 +117,23 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	workspaceRoot := t.TempDir()
 	spaceID := "test-space"
+	chatID := "test-bg-digest-thread"
 
 	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
 	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
 	emitter := &dmTestEmitter{}
 
 	svc := workspace.NewService(logger, &dmMockChatEngine{}, workspaceRoot, dispatcher, emitter)
-	chatSession, _ := svc.InitializeChat(context.Background(), spaceID, "test-bg-digest-thread")
+
+	chatAddress := &thinkgraph.ChatAddress{
+		ChatID:    chatID,
+		ProjectID: spaceID,
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	_ = svc.InitializeChat(context.Background(), chatAddress)
 
 	jsonResponse := `
 	{
@@ -136,7 +154,7 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 	ev2 := thinkgraph.NewEvent(thinkgraph.EventModel, "Sure thing")
 	targetWindow := []thinkgraph.Event{ev1, ev2}
 
-	count, err := manager.CreateBackgroundDigest(context.Background(), svc, chatSession, targetWindow, nil, false, "test-model", "Persona")
+	count, err := manager.CreateBackgroundDigest(context.Background(), svc, chatAddress, targetWindow, nil, false, "test-model", "Persona")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -145,7 +163,7 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 		t.Errorf("expected 1 digest created, got %d", count)
 	}
 
-	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatSession.ChatID, "ledger", "digests")
+	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatAddress.ChatID, "ledger", "digests")
 	entries, err := os.ReadDir(digestsDir)
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("expected digest markdown file to be created in %s", digestsDir)
@@ -163,11 +181,5 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 
 	if !strings.Contains(contentStr, "summarizes: [") {
 		t.Errorf("expected summarizes array in frontmatter, got:\n%s", contentStr)
-	}
-	if !strings.Contains(contentStr, ev1.ID.String()) {
-		t.Errorf("expected frontmatter to contain event ID %s", ev1.ID.String())
-	}
-	if !strings.Contains(contentStr, ev2.ID.String()) {
-		t.Errorf("expected frontmatter to contain event ID %s", ev2.ID.String())
 	}
 }

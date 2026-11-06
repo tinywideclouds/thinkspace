@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"uuid"
 
@@ -24,7 +23,7 @@ var ErrGraphMismatch = errors.New("physical ledger mismatch detected (Git histor
 type Service struct {
 	logger        *slog.Logger
 	engine        ChatVersioner
-	workspaceRoot string
+	workspaceRoot string // Represents the system's base root directory
 	dispatcher    *thinkgraph.Dispatcher
 	emitter       telemetry.Emitter
 }
@@ -49,6 +48,11 @@ func (s *Service) WorkspaceRoot() string {
 	return s.workspaceRoot
 }
 
+// ProjectWorkspaceDir returns the physical git workspace directory for a specific project.
+func (s *Service) ProjectWorkspaceDir(projectID string) string {
+	return filepath.Join(s.workspaceRoot, projectID, "workspace")
+}
+
 func (s *Service) Graph() thinkgraph.GraphRepository {
 	if s.dispatcher != nil && s.dispatcher.GraphStore() != nil {
 		return s.dispatcher.GraphStore().Repository()
@@ -56,66 +60,57 @@ func (s *Service) Graph() thinkgraph.GraphRepository {
 	return nil
 }
 
-func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*thinkgraph.ChatAddress, error) {
-	chat := &thinkgraph.ChatAddress{
-		ChatID:    chatID,
-		ProjectID: spaceID,
-		SubGraph: thinkgraph.SubGraph{
-			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
-			Name:    "main",
-		},
-	}
-
-	chatDir := filepath.Join(s.workspaceRoot, spaceID, "chats", chatID)
+func (s *Service) InitializeChat(ctx context.Context, chat *thinkgraph.ChatAddress) error {
+	chatDir := filepath.Join(s.workspaceRoot, chat.ProjectID, "chats", chat.ChatID)
 	ledgerPath := filepath.Join(chatDir, "ledger")
 
-	s.logger.InfoContext(ctx, "initializing chat", slog.String("id", chatID))
+	s.logger.InfoContext(ctx, "initializing chat", slog.String("id", chat.ChatID))
 
-	if err := s.engine.InitChat(ctx, chatID); err != nil {
-		return nil, fmt.Errorf("initializing chat state: %w", err)
+	if err := s.engine.InitChat(ctx, chat.ChatID); err != nil {
+		return fmt.Errorf("initializing chat state: %w", err)
 	}
 
 	if err := os.MkdirAll(filepath.Join(chatDir, "docs"), 0755); err != nil {
-		return nil, fmt.Errorf("creating chat directories: %w", err)
+		return fmt.Errorf("creating chat directories: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(ledgerPath, "logs"), 0755); err != nil {
-		return nil, fmt.Errorf("creating ledger logs dir: %w", err)
+		return fmt.Errorf("creating ledger logs dir: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(ledgerPath, "digests"), 0755); err != nil {
-		return nil, fmt.Errorf("creating ledger digests dir: %w", err)
+		return fmt.Errorf("creating ledger digests dir: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(ledgerPath, "mutations"), 0755); err != nil {
-		return nil, fmt.Errorf("creating ledger mutations dir: %w", err)
+		return fmt.Errorf("creating ledger mutations dir: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Join(ledgerPath, "contexts"), 0755); err != nil {
-		return nil, fmt.Errorf("creating ledger contexts dir: %w", err)
+		return fmt.Errorf("creating ledger contexts dir: %w", err)
 	}
 
 	if s.Graph() != nil {
 		rehydrator := thinkgraph.NewRehydrator(s.dispatcher.GraphStore(), s.workspaceRoot)
 		status, diskManifest, graphManifest, err := rehydrator.CheckSync(ctx, chat)
 		if err != nil {
-			return nil, fmt.Errorf("sync check failed: %w", err)
+			return fmt.Errorf("sync check failed: %w", err)
 		}
 
 		if status == thinkgraph.SyncStatusBehind {
 			s.logger.InfoContext(ctx, "Fast-forwarding graph index", "target_events", diskManifest.TotalEvents)
 			if err := rehydrator.FastForward(ctx, chat, graphManifest, diskManifest); err != nil {
-				return nil, fmt.Errorf("fast-forward failed: %w", err)
+				return fmt.Errorf("fast-forward failed: %w", err)
 			}
 		} else if status == thinkgraph.SyncStatusMismatch {
-			s.logger.WarnContext(ctx, "History divergence detected between BadgerDB and disk; rebuilding graph index from ledger", "chat_id", chatID)
+			s.logger.WarnContext(ctx, "History divergence detected between BadgerDB and disk; rebuilding graph index from ledger", "chat_id", chat.ChatID)
 			if err := rehydrator.Rebuild(ctx, chat); err != nil {
-				s.logger.ErrorContext(ctx, "failed rebuilding graph index from ledger", "chat_id", chatID, "error", err)
-				return nil, fmt.Errorf("rebuilding graph index: %w", err)
+				s.logger.ErrorContext(ctx, "failed rebuilding graph index from ledger", "chat_id", chat.ChatID, "error", err)
+				return fmt.Errorf("rebuilding graph index: %w", err)
 			}
-			s.logger.InfoContext(ctx, "successfully rebuilt graph index from ledger", "chat_id", chatID)
+			s.logger.InfoContext(ctx, "successfully rebuilt graph index from ledger", "chat_id", chat.ChatID)
 		}
 	} else {
-		_, _ = thinkgraph.LoadOrRebuildManifest(ledgerPath, "main")
+		_, _ = thinkgraph.LoadOrRebuildManifest(ledgerPath, chat.Name)
 	}
 
-	return chat, nil
+	return nil
 }
 
 func (s *Service) PreviewCandidate(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string) error {
@@ -138,55 +133,6 @@ func (s *Service) ResolveCandidate(ctx context.Context, c *thinkgraph.ChatAddres
 	}
 
 	return nil
-}
-
-func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.ChatAddress, toolName string, files map[string][]byte) (*Candidate, error) {
-	now := time.Now().UTC()
-	candidateID := fmt.Sprintf("%s-%d", toolName, now.Unix())
-
-	s.logger.InfoContext(ctx, "proposing candidate", slog.String("candidate_id", candidateID))
-
-	sandbox, err := s.engine.SpawnCandidateSandbox(ctx, c.ChatID, candidateID)
-	if err != nil {
-		return nil, fmt.Errorf("spawning sandbox: %w", err)
-	}
-	defer sandbox.TearDown(ctx)
-
-	var fileList []string
-	for relativePath, content := range files {
-		cleanPath := filepath.Clean(relativePath)
-		if err := sandbox.WriteFile(ctx, filepath.Join("chats", c.ChatID, "docs", cleanPath), content); err != nil {
-			return nil, fmt.Errorf("writing file %s to sandbox: %w", cleanPath, err)
-		}
-		fileList = append(fileList, cleanPath)
-	}
-
-	commitMessage := fmt.Sprintf("auto(candidate): generated by %s", toolName)
-	if err := sandbox.ApplyDraft(ctx, commitMessage); err != nil {
-		return nil, fmt.Errorf("applying sandbox draft: %w", err)
-	}
-
-	if err := sandbox.DeliverForReview(ctx); err != nil {
-		return nil, fmt.Errorf("delivering sandbox for review: %w", err)
-	}
-
-	if err := s.engine.PreviewCandidate(ctx, c.ChatID, candidateID); err != nil {
-		return nil, fmt.Errorf("previewing candidate: %w", err)
-	}
-
-	description := fmt.Sprintf("Proposed files: %s", strings.Join(fileList, ", "))
-	if err := s.LogProposal(ctx, c, candidateID, description, nil, fileList); err != nil {
-		s.logger.ErrorContext(ctx, "failed to log proposal", "error", err)
-	}
-
-	return &Candidate{
-		ID:        candidateID,
-		ThreadID:  c.ChatID,
-		Branch:    "candidate/" + candidateID,
-		CommitSHA: "head",
-		Status:    StatusPending,
-		CreatedAt: now,
-	}, nil
 }
 
 func (s *Service) Checkpoint(ctx context.Context, c *thinkgraph.ChatAddress, reason string) (string, error) {
@@ -216,20 +162,6 @@ func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.ChatAddres
 			"total_tokens":     strconv.Itoa(usage.TotalTokens),
 		}
 	}
-
-	return s.dispatcher.AppendEvent(ctx, c, event)
-}
-
-func (s *Service) LogProposal(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string, description string, tags []string, fileList []string) error {
-	event := thinkgraph.NewEvent(EventCandidateProposal, description)
-	event.Tags = tags
-
-	payload := CandidateProposal{
-		CandidateID: candidateID,
-		Description: description,
-		Files:       fileList,
-	}
-	event.Data, _ = json.Marshal(payload)
 
 	return s.dispatcher.AppendEvent(ctx, c, event)
 }

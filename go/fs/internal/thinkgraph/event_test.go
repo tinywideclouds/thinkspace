@@ -19,7 +19,7 @@ func TestEvent_TimeOrderingV7(t *testing.T) {
 
 func TestEvent_BranchInitialization(t *testing.T) {
 	ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Branch test")
-	if ev.BranchID != "" {
-		t.Errorf("Expected new event branch ID to be empty by default, got %s", ev.BranchID)
+	if !ev.GraphID.IsZero() {
+		t.Errorf("Expected new event graph ID to be empty by default, got %s", ev.GraphID)
 	}
 }

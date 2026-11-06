@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"log/slog"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
@@ -83,8 +85,11 @@ func (space *ceTestThinkSpace) Config() spaces.ThinkStateConfig {
 	cfg.ApplyDefaults()
 	return cfg
 }
-func (space *ceTestThinkSpace) Verifier() spaces.Verifier                              { return nil }
-func (space *ceTestThinkSpace) Mapbook() spaces.Mapbook                                { return nil }
+func (space *ceTestThinkSpace) Verifier() spaces.Verifier { return nil }
+func (space *ceTestThinkSpace) Mapbook() spaces.Mapbook   { return space }
+func (space *ceTestThinkSpace) GenerateLayers(ctx context.Context, workspaceRoot string) (map[spaces.MapbookLayer]string, error) {
+	return map[spaces.MapbookLayer]string{}, nil
+}
 func (space *ceTestThinkSpace) Patcher() workspace.Patcher                             { return nil }
 func (space *ceTestThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
 func (space *ceTestThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus, workspaceRoot string) error {
@@ -110,7 +115,7 @@ func (ui *ceTestUI) ReviewContext(turnContext session.TurnContext) session.Conte
 }
 func (ui *ceTestUI) ChooseNextStep() flows.FlowStrategy { return flows.StrategyManual }
 func (ui *ceTestUI) ReviewCandidate(branch string) bool { return true }
-func (ui *ceTestUI) ConfirmTransition(targetDomain string, reasoning string) bool {
+func (ui *ceTestUI) ConfirmTransition(req signals.SignalTransition) bool {
 	return ui.transitionApproved
 }
 func (ui *ceTestUI) GetAgentTokenChannel() chan<- workspace.AgentToken { return nil }
@@ -127,16 +132,19 @@ func (flow *ceTestFlow) Next(state flows.FlowState) flows.FlowDirective {
 	return flows.FlowDirective{Action: flows.ActionFinish}
 }
 
-func scaffoldChat(workspaceRoot, spaceID, chatID string) {
+func scaffoldChat(workspaceRoot, spaceID, chatID string, graphID thinkgraph.GraphID) {
 	metaPath := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
 	_ = os.MkdirAll(metaPath, 0755)
-	_ = os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
+	
+	metaJSON := fmt.Sprintf(`{"id":"%s", "name":"%s", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": "", "graph_id": "%s"}}}`, chatID, chatID, graphID.String())
+	_ = os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(metaJSON), 0644)
 }
 
-func setupEngineTest(t *testing.T, chatID string) (*session.Manager, *session.ChatSession, *workspace.ServiceManager, *workspace.Service, *ceTestModelClient, string) {
+func setupEngineTest(t *testing.T, chatID string) (*session.Manager, *session.ChatSession, *workspace.ServiceManager, *workspace.Service, *ceTestModelClient, string, *config.Registry, thinkgraph.GraphID) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 	spaceID := "test-space"
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
 
 	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
 	graphDB, err := db.NewBadgerGraph(opts)
@@ -150,7 +158,7 @@ func setupEngineTest(t *testing.T, chatID string) (*session.Manager, *session.Ch
 	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
 	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" })
 
-	scaffoldChat(workspaceRoot, spaceID, chatID)
+	scaffoldChat(workspaceRoot, spaceID, chatID, graphID)
 
 	registry := config.NewRegistry()
 	mockSpace := &ceTestThinkSpace{}
@@ -184,13 +192,13 @@ func setupEngineTest(t *testing.T, chatID string) (*session.Manager, *session.Ch
 
 	workspaceService := svcManager.GetService(spaceID)
 
-	return turnManager, chatSession, svcManager, workspaceService, client, spaceID
+	return turnManager, chatSession, svcManager, workspaceService, client, spaceID, registry, graphID
 }
 
 func TestChatEngine_Run_Sequencing(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-seq"
-	_, chatSession, svcManager, _, client, spaceID := setupEngineTest(t, chatID)
+	_, chatSession, svcManager, _, client, spaceID, _, graphID := setupEngineTest(t, chatID)
 
 	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
@@ -208,10 +216,9 @@ func TestChatEngine_Run_Sequencing(t *testing.T) {
 
 	address := &thinkgraph.ChatAddress{
 		ChatID: chatID, ProjectID: spaceID,
-		SubGraph: thinkgraph.SubGraph{GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat), Name: "main"},
+		SubGraph: thinkgraph.SubGraph{GraphID: graphID, Name: "main"},
 	}
 
-	// Fast fetch via active sub-graph
 	timeline, err := svcManager.GraphRepository().GetSubGraphTimeline(ctx, address, address.GraphID)
 	if err != nil {
 		t.Fatalf("Failed to fetch timeline: %v", err)
@@ -225,7 +232,7 @@ func TestChatEngine_Run_Sequencing(t *testing.T) {
 func TestChatEngine_Run_Transition(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-trans"
-	_, chatSession, svcManager, _, client, spaceID := setupEngineTest(t, chatID)
+	_, chatSession, svcManager, _, client, spaceID, _, _ := setupEngineTest(t, chatID)
 
 	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
@@ -266,7 +273,7 @@ func TestChatEngine_Run_Transition(t *testing.T) {
 func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-context"
-	_, chatSession, svcManager, workspaceService, client, spaceID := setupEngineTest(t, chatID)
+	_, chatSession, svcManager, workspaceService, client, spaceID, _, graphID := setupEngineTest(t, chatID)
 
 	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
@@ -275,7 +282,7 @@ func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 
 	address := &thinkgraph.ChatAddress{
 		ChatID: chatID, ProjectID: spaceID,
-		SubGraph: thinkgraph.SubGraph{GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat), Name: "main"},
+		SubGraph: thinkgraph.SubGraph{GraphID: graphID, Name: "main"},
 	}
 
 	id := uuid.NewV7()
@@ -287,7 +294,6 @@ func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 
 	ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Build database")
 	ev.Tags = []string{"database"}
-	ev.GraphID = address.GraphID
 
 	_ = workspaceService.Dispatcher().AppendEvent(ctx, address, ev)
 
@@ -313,7 +319,7 @@ func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 func TestChatEngine_Run_BypassesReviewOnLowTokenThreshold(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-bypass-threshold"
-	_, chatSession, svcManager, _, client, spaceID := setupEngineTest(t, chatID)
+	_, chatSession, svcManager, _, client, spaceID, _, _ := setupEngineTest(t, chatID)
 
 	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
@@ -337,7 +343,7 @@ func TestChatEngine_Run_BypassesReviewOnLowTokenThreshold(t *testing.T) {
 func TestChatEngine_Run_BypassesReviewWhenDisabledGlobally(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-bypass-disabled"
-	_, chatSession, svcManager, _, client, spaceID := setupEngineTest(t, chatID)
+	_, chatSession, svcManager, _, client, spaceID, _, _ := setupEngineTest(t, chatID)
 
 	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = false
@@ -362,16 +368,27 @@ func TestChatEngine_IntakeBootAndContextInjection(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-intake"
 
-	turnManager, _, svcManager, _, client, spaceID := setupEngineTest(t, chatID)
+	_, _, serviceManager, _, client, spaceID, registry, graphID := setupEngineTest(t, chatID)
 
-	_ = svcManager.UpdateChatMeta(spaceID, chatID, func(m *workspace.ChatMeta) {
+	_ = serviceManager.UpdateChatMeta(spaceID, chatID, func(m *workspace.ChatMeta) {
 		m.ActiveThinkState = ""
 	})
-	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) {
+	_ = serviceManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) {
 		s.ThinkState = ""
 	})
 
-	chatSession, _ := turnManager.GetSession(ctx, spaceID, chatID)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{})
+
+	chatSession, _ := session.NewChatSession(ctx, logger, registry, serviceManager, client, &ceTestFlow{}, digestManager, spaceID, chatID)
+
+	chatSession.Mu().Lock()
+	meta := chatSession.Meta
+	branch := meta.Branches["main"]
+	branch.GraphID = graphID.String()
+	meta.Branches["main"] = branch
+	chatSession.Meta = meta
+	chatSession.Mu().Unlock()
 
 	client.responses = []llm.StreamChunk{{Text: "Hello there."}}
 	ui := &ceTestUI{reviewApproved: true}
@@ -382,7 +399,7 @@ func TestChatEngine_IntakeBootAndContextInjection(t *testing.T) {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
 
-	meta, _ := svcManager.GetChatMeta(spaceID, chatID)
+	meta, _ = serviceManager.GetChatMeta(spaceID, chatID)
 	if meta.ActiveThinkState != "intake" {
 		t.Errorf("Expected ActiveThinkState to default to 'intake', got '%s'", meta.ActiveThinkState)
 	}
@@ -396,7 +413,7 @@ func TestChatEngine_IntakeBootAndContextInjection(t *testing.T) {
 func TestChatEngine_ContextReview_Retentions(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-retention"
-	_, chatSession, svcManager, workspaceService, client, spaceID := setupEngineTest(t, chatID)
+	_, chatSession, svcManager, workspaceService, client, spaceID, _, graphID := setupEngineTest(t, chatID)
 
 	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
@@ -405,34 +422,41 @@ func TestChatEngine_ContextReview_Retentions(t *testing.T) {
 
 	address := &thinkgraph.ChatAddress{
 		ChatID: chatID, ProjectID: spaceID,
-		SubGraph: thinkgraph.SubGraph{GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat), Name: "main"},
+		SubGraph: thinkgraph.SubGraph{GraphID: graphID, Name: "main"},
 	}
-	ev := thinkgraph.NewEvent(thinkgraph.EventModel, "First response")
-	ev.GraphID = address.GraphID
-	_ = workspaceService.Dispatcher().AppendEvent(ctx, address, ev)
+	
+	// Create multiple history events so the retention indices filter them
+	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Initial context")
+	_ = workspaceService.Dispatcher().AppendEvent(ctx, address, ev1)
+
+	ev2 := thinkgraph.NewEvent(thinkgraph.EventModel, "First response")
+	_ = workspaceService.Dispatcher().AppendEvent(ctx, address, ev2)
 
 	client.responses = []llm.StreamChunk{{Text: "Ok"}}
 
 	ui := &ceTestUI{
 		reviewApproved:         true,
-		retainedHistoryIndices: []int{1},
+		retainedHistoryIndices: []int{0, 2}, // Keep 'Initial Context' (0) and Catalyst (2)
 	}
 	emitter := &ceTestEmitter{}
 
 	_ = chatSession.RunTurn(ctx, "New task", ui, emitter)
 
-	if len(client.lastRequest.Trajectory.WorkingMemory) != 0 {
-		t.Errorf("Expected working memory to be fully pruned by UI retention, got %d items", len(client.lastRequest.Trajectory.WorkingMemory))
+	if len(client.lastRequest.Trajectory.WorkingMemory) != 1 {
+		t.Errorf("Expected working memory to be fully pruned down to retained index, got %d items", len(client.lastRequest.Trajectory.WorkingMemory))
+	} else if client.lastRequest.Trajectory.WorkingMemory[0].Content != "Initial context" {
+		t.Errorf("Expected retained context to be 'Initial context', got '%s'", client.lastRequest.Trajectory.WorkingMemory[0].Content)
 	}
+
 	if client.lastRequest.Trajectory.Catalyst.Content != "New task" {
-		t.Errorf("Expected catalyst (index 1) to survive pruning, got '%s'", client.lastRequest.Trajectory.Catalyst.Content)
+		t.Errorf("Expected catalyst to survive pruning, got '%s'", client.lastRequest.Trajectory.Catalyst.Content)
 	}
 }
 
 func TestChatEngine_ContextReview_AbortOnMissingCatalyst(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-abort"
-	_, chatSession, svcManager, _, client, spaceID := setupEngineTest(t, chatID)
+	_, chatSession, svcManager, _, client, spaceID, _, _ := setupEngineTest(t, chatID)
 
 	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
@@ -443,7 +467,7 @@ func TestChatEngine_ContextReview_AbortOnMissingCatalyst(t *testing.T) {
 
 	ui := &ceTestUI{
 		reviewApproved:         true,
-		retainedHistoryIndices: []int{},
+		retainedHistoryIndices: []int{}, // Empty array discards the catalyst
 	}
 	emitter := &ceTestEmitter{}
 

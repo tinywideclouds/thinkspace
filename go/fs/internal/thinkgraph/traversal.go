@@ -22,15 +22,16 @@ func (t *TraversalEngine) GetTimelinePage(
 ) ([]Node, string, bool, error) {
 
 	var finalNodes []Node
-	currentBranch := c.ActiveBranch
-	if currentBranch == "" {
-		currentBranch = "main"
+	currentName := c.Name
+	if currentName == "" {
+		currentName = "main"
 	}
+	currentGraphID := c.GraphID
 	currentCursor := cursor
 	remainingLimit := limit
 
 	for remainingLimit > 0 {
-		nodes, nextCursor, hasMore, err := t.graph.GetBranchTimelinePage(ctx, c, currentBranch, currentCursor, remainingLimit)
+		nodes, nextCursor, hasMore, err := t.graph.GetSubGraphTimelinePage(ctx, c, currentGraphID, currentCursor, remainingLimit)
 		if err != nil {
 			return nil, "", false, err
 		}
@@ -43,12 +44,13 @@ func (t *TraversalEngine) GetTimelinePage(
 		}
 
 		// Reached the end of the current branch. Hop to the parent if it exists.
-		topo, exists := topology[currentBranch]
+		topo, exists := topology[currentName]
 		if !exists || topo.ParentBranch == "" {
 			break // Root of the entire chat
 		}
 
-		currentBranch = topo.ParentBranch
+		currentName = topo.ParentBranch
+		currentGraphID = GraphID{} // Parent graph ID is inherently unknown to string-based topology map
 		currentCursor = topo.ForkPoint
 	}
 
@@ -70,16 +72,17 @@ func (t *TraversalEngine) WalkTimelineReverse(
 	topology map[string]BranchTopology,
 	fn func(Node) bool,
 ) error {
-	currentBranch := c.ActiveBranch
-	if currentBranch == "" {
-		currentBranch = "main"
+	currentName := c.Name
+	if currentName == "" {
+		currentName = "main"
 	}
+	currentGraphID := c.GraphID
 	currentCursor := ""
 
 	for {
 		continueWalk := true
 
-		err := t.graph.WalkBranchReverse(ctx, c, currentBranch, currentCursor, func(node Node) bool {
+		err := t.graph.WalkSubGraphReverse(ctx, c, currentGraphID, currentCursor, func(node Node) bool {
 			if !fn(node) {
 				continueWalk = false
 				return false
@@ -94,11 +97,12 @@ func (t *TraversalEngine) WalkTimelineReverse(
 			break
 		}
 
-		topo, exists := topology[currentBranch]
+		topo, exists := topology[currentName]
 		if !exists || topo.ParentBranch == "" {
 			break
 		}
-		currentBranch = topo.ParentBranch
+		currentName = topo.ParentBranch
+		currentGraphID = GraphID{}
 		currentCursor = topo.ForkPoint
 	}
 

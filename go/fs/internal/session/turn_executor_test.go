@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
@@ -80,8 +80,11 @@ func (space *teTestThinkSpace) Config() spaces.ThinkStateConfig {
 	cfg.ApplyDefaults()
 	return cfg
 }
-func (space *teTestThinkSpace) Verifier() spaces.Verifier                              { return nil }
-func (space *teTestThinkSpace) Mapbook() spaces.Mapbook                                { return nil }
+func (space *teTestThinkSpace) Verifier() spaces.Verifier { return nil }
+func (space *teTestThinkSpace) Mapbook() spaces.Mapbook   { return space }
+func (space *teTestThinkSpace) GenerateLayers(ctx context.Context, workspaceRoot string) (map[spaces.MapbookLayer]string, error) {
+	return map[spaces.MapbookLayer]string{}, nil
+}
 func (space *teTestThinkSpace) Patcher() workspace.Patcher                             { return nil }
 func (space *teTestThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
 func (space *teTestThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus, workspaceRoot string) error {
@@ -90,10 +93,10 @@ func (space *teTestThinkSpace) EnrichBundle(ctx context.Context, bundle *cogniti
 
 type teTestUI struct{}
 
-func (ui *teTestUI) OnTextChunk(text string)                               {}
-func (ui *teTestUI) ConfirmTransition(targetDomain, reasoning string) bool { return true }
-func (ui *teTestUI) ChooseNextStep() flows.FlowStrategy                    { return flows.StrategyManual }
-func (ui *teTestUI) ReviewCandidate(branch string) bool                    { return true }
+func (ui *teTestUI) OnTextChunk(text string)                             {}
+func (ui *teTestUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
+func (ui *teTestUI) ChooseNextStep() flows.FlowStrategy                  { return flows.StrategyManual }
+func (ui *teTestUI) ReviewCandidate(branch string) bool                  { return true }
 func (ui *teTestUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{}
 }
@@ -103,13 +106,12 @@ type teTestEmitter struct{}
 
 func (emitter *teTestEmitter) Emit(channel string, event telemetry.Event) {}
 
-// A mock tool that returns a SynthesisRequest to test the bouncing behavior
 type teMockSynthesisTool struct{}
 
 func (t *teMockSynthesisTool) Name() tools.ToolName       { return "mock_synth_tool" }
 func (t *teMockSynthesisTool) DefaultDescription() string { return "" }
-func (t *teMockSynthesisTool) Execute(ctx context.Context, ec tools.ExecutionContext) (bool, error) {
-	return false, &flows.SynthesisRequest{CompiledPrompt: "Dossier output"}
+func (t *teMockSynthesisTool) Execute(ctx context.Context, ec tools.ExecutionContext) (signals.EngineSignal, error) {
+	return &signals.SignalSynthesize{OriginalInstruction: "Dossier output"}, nil
 }
 
 func setupExecutorTest(t *testing.T, spaceID, chatID string) (*session.TurnExecutor, *workspace.Service, *teTestModelClient) {
@@ -137,18 +139,30 @@ func TestTurnExecutor_Execute_StandardResponse(t *testing.T) {
 	defer cancel()
 
 	executor, wsService, client := setupExecutorTest(t, "golang", "test-thread")
-	address := &thinkgraph.ChatAddress{ChatID: "test-thread", ProjectID: "golang"}
+
+	// Ensure GraphID is strictly assigned so standard response gets successfully indexed
+	address := &thinkgraph.ChatAddress{
+		ChatID:    "test-thread",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
 
 	client.responses = []llm.StreamChunk{{Text: "Hello world"}}
 
 	registry := tools.NewRegistry()
-	err := executor.Execute(ctx, address, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
+	signal, err := executor.Execute(ctx, address, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
 
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	// Verify it wrote the standard response to the exact ChatAddress
+	if _, ok := signal.(*signals.SignalTerminal); !ok {
+		t.Errorf("Expected SignalTerminal for standard response, got %T", signal)
+	}
+
 	timeline, _ := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
 	if len(timeline) == 0 {
 		t.Errorf("Expected standard generation to be appended to graph timeline")
@@ -160,7 +174,14 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	defer cancel()
 
 	executor, _, client := setupExecutorTest(t, "golang", "test-thread")
-	address := &thinkgraph.ChatAddress{ChatID: "test-thread", ProjectID: "golang"}
+	address := &thinkgraph.ChatAddress{
+		ChatID:    "test-thread",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
 
 	client.responses = []llm.StreamChunk{
 		{
@@ -177,14 +198,14 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewTransitionThinkStateTool([]string{"concept"}))
 
-	err := executor.Execute(ctx, address, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
-	if err == nil {
-		t.Fatalf("Expected tool error (TransitionRequest), got nil")
+	signal, err := executor.Execute(ctx, address, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
+	if err != nil {
+		t.Fatalf("Expected nil error, got %v", err)
 	}
 
-	tr, ok := err.(*tools.TransitionThinkStateRequest)
+	tr, ok := signal.(*signals.SignalTransition)
 	if !ok {
-		t.Errorf("Expected TransitionThinkStateRequest error, got %v", err)
+		t.Fatalf("Expected SignalTransition, got %T", signal)
 	}
 	if tr.TargetThinkState != "concept" {
 		t.Errorf("Expected transition to concept, got %s", tr.TargetThinkState)
@@ -196,7 +217,14 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 	defer cancel()
 
 	executor, _, client := setupExecutorTest(t, "golang", "test-thread")
-	address := &thinkgraph.ChatAddress{ChatID: "test-thread", ProjectID: "golang"}
+	address := &thinkgraph.ChatAddress{
+		ChatID:    "test-thread",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
 
 	client.responses = []llm.StreamChunk{
 		{
@@ -216,18 +244,17 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 		},
 	}
 
-	err := executor.Execute(ctx, address, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{})
+	signal, err := executor.Execute(ctx, address, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	// Verify the bundle was replaced with the focused dossier
-	if len(client.capturedBundle.Trajectory.WorkingMemory) > 0 {
-		t.Fatalf("Expected synthesis context to clear WorkingMemory, got %d items", len(client.capturedBundle.Trajectory.WorkingMemory))
+	synthSig, ok := signal.(*signals.SignalSynthesize)
+	if !ok {
+		t.Fatalf("Expected SignalSynthesize, got %T", signal)
 	}
 
-	lastMemory := client.capturedBundle.Trajectory.Catalyst
-	if !strings.Contains(lastMemory.Content, "Dossier output") {
-		t.Errorf("Expected synthesis request trace to be injected into the Catalyst, got %s", lastMemory.Content)
+	if synthSig.OriginalInstruction != "Dossier output" {
+		t.Errorf("Expected Dossier output, got %s", synthSig.OriginalInstruction)
 	}
 }

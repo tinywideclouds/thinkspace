@@ -6,19 +6,15 @@ import (
 	"fmt"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 )
 
-const (
-	TransitionThinkState ToolName = "transition_workspace"
-)
+const TransitionThinkState ToolName = "transition_workspace"
 
+// TransitionThinkStateRequest acts as the local JSON schema for parsing LLM arguments
 type TransitionThinkStateRequest struct {
 	TargetThinkState string `json:"target_think_state"`
 	Reasoning        string `json:"reasoning"`
-}
-
-func (r *TransitionThinkStateRequest) Error() string {
-	return "think state transition requested to: " + r.TargetThinkState
 }
 
 type TransitionThinkStateTool struct {
@@ -41,22 +37,27 @@ func (t *TransitionThinkStateTool) ValidStates() []string {
 	return t.validStates
 }
 
-func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext ExecutionContext) (bool, error) {
+func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext ExecutionContext) (signals.EngineSignal, error) {
 	var request TransitionThinkStateRequest
 	argumentBytes, err := json.Marshal(executionContext.RawArguments)
 	if err != nil {
-		return false, fmt.Errorf("marshaling transition arguments: %w", err)
+		return nil, fmt.Errorf("marshaling transition arguments: %w", err)
 	}
 	if err := json.Unmarshal(argumentBytes, &request); err != nil {
-		return false, fmt.Errorf("invalid transition arguments schema: %w", err)
+		return nil, fmt.Errorf("invalid transition arguments schema: %w", err)
 	}
 
 	if request.TargetThinkState == "" {
-		return false, fmt.Errorf("%s cannot be empty", TargetThinkState)
+		return nil, fmt.Errorf("target_think_state cannot be empty")
 	}
 
-	if executionContext.UI.ConfirmTransition(request.TargetThinkState, request.Reasoning) {
-		return true, &request
+	sig := signals.SignalTransition{
+		TargetThinkState: request.TargetThinkState,
+		Reasoning:        request.Reasoning,
+	}
+
+	if executionContext.UI.ConfirmTransition(sig) {
+		return &sig, nil
 	}
 
 	executionContext.UI.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** Transition to '%s' denied.\n", request.TargetThinkState))
@@ -65,5 +66,5 @@ func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext
 		Content: fmt.Sprintf("[System: Transition to '%s' was denied by user. Continue in current state.]", request.TargetThinkState),
 	})
 
-	return false, nil
+	return nil, nil
 }

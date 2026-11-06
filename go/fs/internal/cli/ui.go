@@ -8,98 +8,76 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type TerminalUI struct {
-	reader *bufio.Reader
-}
+type TerminalUI struct{}
 
 func NewTerminalUI() *TerminalUI {
-	return &TerminalUI{
-		reader: bufio.NewReader(os.Stdin),
-	}
+	return &TerminalUI{}
 }
 
 func (ui *TerminalUI) OnTextChunk(text string) {
 	fmt.Print(text)
 }
 
-func (ui *TerminalUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
-	fmt.Printf("\n🧠 --- CONTEXT PREVIEW ---\n")
-	fmt.Printf("Space: %s | Chat: %s\n", ctxData.SpaceID, ctxData.ChatID)
+func (ui *TerminalUI) ConfirmTransition(req signals.SignalTransition) bool {
+	fmt.Printf("\n\n⚠️  [SYSTEM] The agent has requested a transition to the '%s' domain.\n", req.TargetThinkState)
+	fmt.Printf("💡 Reasoning: %s\n", req.Reasoning)
+	fmt.Print("Allow transition? [Y/n]: ")
 
-	if len(ctxData.StickyDigests) > 0 {
-		fmt.Printf("Sticky Digests: %d\n", len(ctxData.StickyDigests))
-	}
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
 
-	if len(ctxData.FileContexts) > 0 {
-		fmt.Printf("Files in Context:\n")
-		for _, fc := range ctxData.FileContexts {
-			fmt.Printf("  - %s [%s] (~%d tokens)\n", fc.Path, fc.Level, fc.TokenCount)
-		}
-	}
+	return input == "" || input == "y" || input == "yes"
+}
 
-	fmt.Println("---------------------------")
-	fmt.Print("Proceed with LLM execution? (Y/n): ")
-
-	input, _ := ui.reader.ReadString('\n')
-	input = strings.ToLower(strings.TrimSpace(input))
-
-	// Default to yes unless explicitly aborted
-	// The CLI does not yet support interactive pruning, so arrays remain nil
+func (ui *TerminalUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
+	// For the CLI, we currently bypass manual context pruning and auto-approve.
 	return session.ContextApprovalDecision{
-		Approved: input != "n",
+		Approved: true,
 	}
 }
 
 func (ui *TerminalUI) ChooseNextStep() flows.FlowStrategy {
-	fmt.Println("\nSelect Next Step:")
-	fmt.Println("[1] Manual Review (I will read the generated code)")
-	fmt.Println("[2] Assisted Review (Manager evaluates diffs, I decide)")
-	fmt.Println("[3] Auto-Refine (Manager evaluates, synthesizes a final branch, I approve)")
-	fmt.Println("[0] Skip / Abort (Reject all and continue)")
-	fmt.Print("Choice [1]: ")
+	fmt.Println("\n\n[FLOW] Sub-agents have completed their tasks. How would you like to proceed?")
+	fmt.Println("  1. Manual (I will review the branches myself)")
+	fmt.Println("  2. Review (Manager will summarize the approaches)")
+	fmt.Println("  3. Refine (Manager will synthesize the best candidate)")
+	fmt.Println("  4. Skip   (Discard all candidates and continue)")
+	fmt.Print("\nSelect strategy [1-4] (default 1): ")
 
-	input, _ := ui.reader.ReadString('\n')
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
 	input = strings.TrimSpace(input)
 
 	switch input {
-	case "0":
-		return flows.StrategySkip
 	case "2":
 		return flows.StrategyReview
 	case "3":
 		return flows.StrategyRefine
+	case "4":
+		return flows.StrategySkip
 	default:
 		return flows.StrategyManual
 	}
 }
 
 func (ui *TerminalUI) ReviewCandidate(branch string) bool {
-	fmt.Printf("\n👀 Previewing %s...\n", branch)
-	fmt.Println("--------------------------------------------------")
-	fmt.Printf("📂 Files have been successfully checked out.\n")
-	fmt.Printf("💻 Open your IDE to inspect the code for %s.\n", branch)
-	fmt.Println("--------------------------------------------------")
+	fmt.Printf("\n🔍 [REVIEW] Candidate branch ready: %s\n", branch)
+	fmt.Print("Accept this candidate into the main timeline? [y/N]: ")
 
-	fmt.Print("Accept candidate? (y/n): ")
-	accept, _ := ui.reader.ReadString('\n')
-	return strings.ToLower(strings.TrimSpace(accept)) == "y"
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+
+	return input == "y" || input == "yes"
 }
 
 func (ui *TerminalUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
+	// The standard CLI does not currently multiplex concurrent agent text streams to the terminal.
+	// It relies on the post-execution diffs and flow summaries.
 	return nil
-}
-
-func (ui *TerminalUI) ConfirmTransition(targetDomain string, reasoning string) bool {
-	fmt.Printf("\n⚠️  The AI wants to transition the workspace to the '%s' domain.\n", targetDomain)
-	fmt.Printf("Reasoning: %s\n", reasoning)
-	fmt.Print("Allow this transition and scaffold the environment? (Y/n): ")
-
-	input, _ := ui.reader.ReadString('\n')
-	input = strings.ToLower(strings.TrimSpace(input))
-
-	// Default to yes unless explicitly rejected
-	return input != "n"
 }

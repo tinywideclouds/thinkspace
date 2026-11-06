@@ -32,18 +32,9 @@ const (
 	ActionError           FlowAction = "error"
 )
 
-// SynthesisRequest acts as a control-flow signal to bounce execution back to the Manager LLM.
-type SynthesisRequest struct {
-	CompiledPrompt string
-}
-
-func (s *SynthesisRequest) Error() string {
-	return "manager synthesis requested"
-}
-
 // FlowState is passed to the Flow so it can evaluate what has happened so far.
 type FlowState struct {
-	LLMArguments map[string]any
+	InitialTasks []SubAgentTask
 	Candidates   []BranchResult
 	UserStrategy FlowStrategy
 	TargetBranch string

@@ -2,10 +2,11 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
-	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 )
 
 const ProposeChange ToolName = "propose_change"
@@ -17,20 +18,17 @@ const (
 	TargetFiles   = "target_files"
 )
 
-// FanOutDispatcher defines the capability to trigger a flow execution.
-type FanOutDispatcher interface {
-	// The interface no longer requires UI; the dispatcher holds it natively.
-	DispatchFanOut(ctx context.Context, chatObj *thinkgraph.ChatAddress, bundle *cognition.ThinkBundle, args map[string]any, summary string) error
+type ProposeChangeRequest struct {
+	AgentCount    int      `json:"agent_count"`
+	ContextDigest string   `json:"context_digest"`
+	Instruction   string   `json:"instruction"`
+	TargetFiles   []string `json:"target_files"`
 }
 
-type ProposeChangeTool struct {
-	dispatcher FanOutDispatcher
-}
+type ProposeChangeTool struct{}
 
-func NewProposeChangeTool(dispatcher FanOutDispatcher) *ProposeChangeTool {
-	return &ProposeChangeTool{
-		dispatcher: dispatcher,
-	}
+func NewProposeChangeTool() *ProposeChangeTool {
+	return &ProposeChangeTool{}
 }
 
 func (t *ProposeChangeTool) Name() ToolName {
@@ -41,52 +39,38 @@ func (t *ProposeChangeTool) DefaultDescription() string {
 	return "Delegate a task to sub-agents."
 }
 
-func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (bool, error) {
-	agentCount := 1
-	if count, ok := ec.RawArguments[AgentCount].(float64); ok { // JSON unmarshals numbers to float64
-		agentCount = int(count)
-	} else if count, ok := ec.RawArguments[AgentCount].(int); ok {
-		agentCount = count
+func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (signals.EngineSignal, error) {
+	var request ProposeChangeRequest
+	argumentBytes, err := json.Marshal(ec.RawArguments)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling propose_change arguments: %w", err)
+	}
+	if err := json.Unmarshal(argumentBytes, &request); err != nil {
+		return nil, fmt.Errorf("invalid propose_change schema: %w", err)
 	}
 
-	contextDigest, _ := ec.RawArguments[ContextDigest].(string)
-	instruction, _ := ec.RawArguments[Instruction].(string)
-
-	var targetFiles []any
-	if tf, ok := ec.RawArguments[TargetFiles].([]any); ok {
-		targetFiles = tf
-	} else if targetFiles == nil {
-		targetFiles = []any{}
-	}
-
-	if instruction == "" {
+	if request.Instruction == "" {
 		if ec.UI != nil {
 			ec.UI.OnTextChunk("\n\n⚠️ **System Intercept:** Manager provided an empty instruction. Aborting proposal.\n")
 		}
-		return true, fmt.Errorf("manager provided empty instruction")
+		return nil, fmt.Errorf("manager provided empty instruction")
 	}
 
-	if agentCount < 1 || agentCount > 5 {
-		agentCount = 1
+	if request.AgentCount < 1 || request.AgentCount > 5 {
+		request.AgentCount = 1
 	}
 
-	// Protect against YAML schema drift by strictly mapping flat LLM arguments
-	// into the nested array structure expected by the FlowEngine.
-	var tasks []any
-	for i := 0; i < agentCount; i++ {
-		task := map[string]any{
-			"context_digest": contextDigest,
-			"instruction":    instruction,
-			"target_files":   targetFiles,
-		}
-		tasks = append(tasks, task)
+	var tasks []flows.SubAgentTask
+	for i := 0; i < request.AgentCount; i++ {
+		tasks = append(tasks, flows.SubAgentTask{
+			AgentID:       fmt.Sprintf("agent-%d", i+1),
+			ContextDigest: request.ContextDigest,
+			Instruction:   request.Instruction,
+			TargetFiles:   request.TargetFiles,
+		})
 	}
 
-	flowArgs := map[string]any{
-		"agent_tasks": tasks,
-	}
-
-	summary := fmt.Sprintf("Executing %d agent(s): %s", agentCount, instruction)
+	summary := fmt.Sprintf("Executing %d agent(s): %s", request.AgentCount, request.Instruction)
 	if len(summary) > 80 {
 		summary = summary[:77] + "..."
 	}
@@ -95,10 +79,8 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (b
 		ec.UI.OnTextChunk(fmt.Sprintf("\n\n🚀 **Dispatching Flow:** %s\n", summary))
 	}
 
-	// Dispatcher already has the UI stored inside it
-	if err := t.dispatcher.DispatchFanOut(ctx, ec.Address, ec.Bundle, flowArgs, summary); err != nil {
-		return true, fmt.Errorf("dispatching fanout flow: %w", err)
-	}
-
-	return true, nil
+	return &signals.SignalDispatchFlow{
+		Tasks:   tasks,
+		Summary: summary,
+	}, nil
 }

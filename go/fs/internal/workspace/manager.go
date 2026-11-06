@@ -50,7 +50,6 @@ func (manager *ServiceManager) WorkspaceRoot() string {
 	return manager.baseRoot
 }
 
-// GraphRepository returns the raw underlying graph database connection.
 func (manager *ServiceManager) GraphRepository() thinkgraph.GraphRepository {
 	return manager.graphRepo
 }
@@ -63,14 +62,19 @@ func (manager *ServiceManager) GetService(spaceID string) *Service {
 		return service
 	}
 
+	// Route the Git engine explicitly into the isolated 'workspace' subdirectory
 	spaceRoot := filepath.Join(manager.baseRoot, spaceID)
-	engine := manager.engineFactory(spaceRoot)
+	workspaceDir := filepath.Join(spaceRoot, "workspace")
+	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+		manager.logger.Error("failed to create workspace directory", "error", err)
+	}
 
-	builder := NewWorkspaceGraphBuilder(engine)
+	engine := manager.engineFactory(workspaceDir)
+
 	var dispatcher *thinkgraph.Dispatcher
 
 	if manager.graphRepo != nil {
-		graphStore := thinkgraph.NewGraphStore(manager.graphRepo, builder)
+		graphStore := thinkgraph.NewGraphStore(manager.graphRepo, nil)
 		ledger := thinkgraph.NewFileLedger(1000, manager.baseRoot)
 		dispatcher = thinkgraph.NewDispatcher(graphStore, ledger)
 	}
@@ -140,7 +144,6 @@ func (manager *ServiceManager) GetSpaceSettings(spaceID string) (SpaceSettings, 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Provide safe defaults if the user hasn't explicitly saved settings yet
 			return SpaceSettings{
 				ReviewPolicy: ReviewPolicySettings{
 					Active:         true,
@@ -267,6 +270,7 @@ func (manager *ServiceManager) CreateChat(ctx context.Context, spaceID string, r
 			"main": {
 				ParentBranch: "",
 				ForkPoint:    "",
+				GraphID:      thinkgraph.NewGraphID(thinkgraph.PrefixChat).String(),
 			},
 		},
 	}
