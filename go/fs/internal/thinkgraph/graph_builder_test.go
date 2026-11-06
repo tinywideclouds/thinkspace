@@ -10,7 +10,7 @@ import (
 func TestDefaultBuilder_Build(t *testing.T) {
 	ctx := context.Background()
 	builder := &thinkgraph.DefaultBuilder{}
-	chat := &thinkgraph.Chat{ID: "test-chat"}
+	chat := &thinkgraph.ChatAddress{ChatID: "test-chat"}
 
 	ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Test Lean Event")
 

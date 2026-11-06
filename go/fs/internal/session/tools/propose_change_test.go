@@ -14,7 +14,7 @@ type mockFanOutDispatcher struct {
 	lastSummary string
 }
 
-func (m *mockFanOutDispatcher) DispatchFanOut(ctx context.Context, chatObj *thinkgraph.Chat, bundle *cognition.ThinkBundle, args map[string]any, summary string) error {
+func (m *mockFanOutDispatcher) DispatchFanOut(ctx context.Context, chatObj *thinkgraph.ChatAddress, bundle *cognition.ThinkBundle, args map[string]any, summary string) error {
 	m.lastArgs = args
 	m.lastSummary = summary
 	return nil

@@ -2,17 +2,68 @@ package session_test
 
 import (
 	"context"
+	"iter"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
+	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
+
+// Renamed from coordMockChatEngine to avoid cross-test collisions
+type dmMockChatEngine struct{}
+
+func (m *dmMockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
+func (m *dmMockChatEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+	return "mock-sha", nil
+}
+func (m *dmMockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+	return nil, nil
+}
+func (m *dmMockChatEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
+	return nil
+}
+func (m *dmMockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
+	return nil
+}
+func (m *dmMockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
+	return nil
+}
+func (m *dmMockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
+	return "+ mock diff", nil
+}
+
+// Renamed from coordMockModelClient
+type dmMockModelClient struct {
+	responses []llm.StreamChunk
+}
+
+func (c *dmMockModelClient) GenerateContentStream(
+	ctx context.Context,
+	model string,
+	bundle cognition.ThinkBundle,
+	registry *tools.Registry,
+	config spaces.ThinkStateConfig,
+) iter.Seq2[llm.StreamChunk, error] {
+	return func(yield func(llm.StreamChunk, error) bool) {
+		for _, resp := range c.responses {
+			yield(resp, nil)
+		}
+	}
+}
+
+type dmTestEmitter struct{}
+
+func (emitter *dmTestEmitter) Emit(channel string, event telemetry.Event) {}
 
 func TestDigestManager_CreateManualDigest(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -21,12 +72,12 @@ func TestDigestManager_CreateManualDigest(t *testing.T) {
 
 	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
 	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
-	emitter := &csTestEmitter{}
+	emitter := &dmTestEmitter{}
 
-	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, dispatcher, emitter)
+	svc := workspace.NewService(logger, &dmMockChatEngine{}, workspaceRoot, dispatcher, emitter)
 	chatSession, _ := svc.InitializeChat(context.Background(), spaceID, "test-digest-thread")
 
-	client := &coordMockModelClient{
+	client := &dmMockModelClient{
 		responses: []llm.StreamChunk{{Text: "Manual summary content"}},
 	}
 
@@ -38,7 +89,7 @@ func TestDigestManager_CreateManualDigest(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatSession.ID, "ledger", "digests")
+	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatSession.ChatID, "ledger", "digests")
 	entries, err := os.ReadDir(digestsDir)
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("expected digest markdown file to be created in %s", digestsDir)
@@ -61,9 +112,9 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 
 	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
 	dispatcher := thinkgraph.NewDispatcher(nil, ledger)
-	emitter := &csTestEmitter{}
+	emitter := &dmTestEmitter{}
 
-	svc := workspace.NewService(logger, &coordMockChatEngine{}, workspaceRoot, dispatcher, emitter)
+	svc := workspace.NewService(logger, &dmMockChatEngine{}, workspaceRoot, dispatcher, emitter)
 	chatSession, _ := svc.InitializeChat(context.Background(), spaceID, "test-bg-digest-thread")
 
 	jsonResponse := `
@@ -74,7 +125,7 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 		]
 	}`
 
-	client := &coordMockModelClient{
+	client := &dmMockModelClient{
 		responses: []llm.StreamChunk{{Text: jsonResponse}},
 	}
 
@@ -94,7 +145,7 @@ func TestDigestManager_CreateBackgroundDigest(t *testing.T) {
 		t.Errorf("expected 1 digest created, got %d", count)
 	}
 
-	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatSession.ID, "ledger", "digests")
+	digestsDir := filepath.Join(workspaceRoot, spaceID, "chats", chatSession.ChatID, "ledger", "digests")
 	entries, err := os.ReadDir(digestsDir)
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("expected digest markdown file to be created in %s", digestsDir)

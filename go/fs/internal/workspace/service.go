@@ -56,11 +56,14 @@ func (s *Service) Graph() thinkgraph.GraphRepository {
 	return nil
 }
 
-func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*thinkgraph.Chat, error) {
-	chat := &thinkgraph.Chat{
-		ID:           chatID,
-		SpaceID:      spaceID,
-		ActiveBranch: "main",
+func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*thinkgraph.ChatAddress, error) {
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    chatID,
+		ProjectID: spaceID,
+		SubGraph: thinkgraph.SubGraph{
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+			Name:    "main",
+		},
 	}
 
 	chatDir := filepath.Join(s.workspaceRoot, spaceID, "chats", chatID)
@@ -115,17 +118,17 @@ func (s *Service) InitializeChat(ctx context.Context, spaceID, chatID string) (*
 	return chat, nil
 }
 
-func (s *Service) PreviewCandidate(ctx context.Context, c *thinkgraph.Chat, candidateID string) error {
-	return s.engine.PreviewCandidate(ctx, c.ID, candidateID)
+func (s *Service) PreviewCandidate(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string) error {
+	return s.engine.PreviewCandidate(ctx, c.ChatID, candidateID)
 }
 
-func (s *Service) ResolveCandidate(ctx context.Context, c *thinkgraph.Chat, candidateID string, accept bool, reason string) error {
+func (s *Service) ResolveCandidate(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string, accept bool, reason string) error {
 	if accept {
-		if err := s.engine.Accept(ctx, c.ID, candidateID, reason); err != nil {
+		if err := s.engine.Accept(ctx, c.ChatID, candidateID, reason); err != nil {
 			return fmt.Errorf("accepting candidate: %w", err)
 		}
 	} else {
-		if err := s.engine.Reject(ctx, c.ID, candidateID, reason); err != nil {
+		if err := s.engine.Reject(ctx, c.ChatID, candidateID, reason); err != nil {
 			return fmt.Errorf("rejecting candidate: %w", err)
 		}
 	}
@@ -137,13 +140,13 @@ func (s *Service) ResolveCandidate(ctx context.Context, c *thinkgraph.Chat, cand
 	return nil
 }
 
-func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.Chat, toolName string, files map[string][]byte) (*Candidate, error) {
+func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.ChatAddress, toolName string, files map[string][]byte) (*Candidate, error) {
 	now := time.Now().UTC()
 	candidateID := fmt.Sprintf("%s-%d", toolName, now.Unix())
 
 	s.logger.InfoContext(ctx, "proposing candidate", slog.String("candidate_id", candidateID))
 
-	sandbox, err := s.engine.SpawnCandidateSandbox(ctx, c.ID, candidateID)
+	sandbox, err := s.engine.SpawnCandidateSandbox(ctx, c.ChatID, candidateID)
 	if err != nil {
 		return nil, fmt.Errorf("spawning sandbox: %w", err)
 	}
@@ -152,7 +155,7 @@ func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.Chat, tool
 	var fileList []string
 	for relativePath, content := range files {
 		cleanPath := filepath.Clean(relativePath)
-		if err := sandbox.WriteFile(ctx, filepath.Join("chats", c.ID, "docs", cleanPath), content); err != nil {
+		if err := sandbox.WriteFile(ctx, filepath.Join("chats", c.ChatID, "docs", cleanPath), content); err != nil {
 			return nil, fmt.Errorf("writing file %s to sandbox: %w", cleanPath, err)
 		}
 		fileList = append(fileList, cleanPath)
@@ -167,7 +170,7 @@ func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.Chat, tool
 		return nil, fmt.Errorf("delivering sandbox for review: %w", err)
 	}
 
-	if err := s.engine.PreviewCandidate(ctx, c.ID, candidateID); err != nil {
+	if err := s.engine.PreviewCandidate(ctx, c.ChatID, candidateID); err != nil {
 		return nil, fmt.Errorf("previewing candidate: %w", err)
 	}
 
@@ -178,7 +181,7 @@ func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.Chat, tool
 
 	return &Candidate{
 		ID:        candidateID,
-		ThreadID:  c.ID,
+		ThreadID:  c.ChatID,
 		Branch:    "candidate/" + candidateID,
 		CommitSHA: "head",
 		Status:    StatusPending,
@@ -186,11 +189,11 @@ func (s *Service) ProposeCandidate(ctx context.Context, c *thinkgraph.Chat, tool
 	}, nil
 }
 
-func (s *Service) Checkpoint(ctx context.Context, c *thinkgraph.Chat, reason string) (string, error) {
-	s.logger.DebugContext(ctx, "checkpointing chat state", slog.String("chat_id", c.ID))
+func (s *Service) Checkpoint(ctx context.Context, c *thinkgraph.ChatAddress, reason string) (string, error) {
+	s.logger.DebugContext(ctx, "checkpointing chat state", slog.String("chat_id", c.ChatID))
 
 	msg := fmt.Sprintf("chore(ledger): %s", reason)
-	sha, err := s.engine.Snapshot(ctx, c.ID, msg)
+	sha, err := s.engine.Snapshot(ctx, c.ChatID, msg)
 	if err != nil {
 		return "", fmt.Errorf("snapshotting checkpoint: %w", err)
 	}
@@ -198,12 +201,12 @@ func (s *Service) Checkpoint(ctx context.Context, c *thinkgraph.Chat, reason str
 	return sha, nil
 }
 
-func (s *Service) LogUserPrompt(ctx context.Context, c *thinkgraph.Chat, content string) error {
+func (s *Service) LogUserPrompt(ctx context.Context, c *thinkgraph.ChatAddress, content string) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventPrompt, content)
 	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
-func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.Chat, content string, usage *telemetry.TokenUsage) error {
+func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.ChatAddress, content string, usage *telemetry.TokenUsage) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventModel, content)
 
 	if usage != nil && usage.TotalTokens > 0 {
@@ -217,7 +220,7 @@ func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.Chat, cont
 	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
-func (s *Service) LogProposal(ctx context.Context, c *thinkgraph.Chat, candidateID string, description string, tags []string, fileList []string) error {
+func (s *Service) LogProposal(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string, description string, tags []string, fileList []string) error {
 	event := thinkgraph.NewEvent(EventCandidateProposal, description)
 	event.Tags = tags
 
@@ -231,7 +234,7 @@ func (s *Service) LogProposal(ctx context.Context, c *thinkgraph.Chat, candidate
 	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
-func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.Chat, candidateID string, accepted bool, reason string) error {
+func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string, accepted bool, reason string) error {
 	status := "REJECTED"
 	if accepted {
 		status = "ACCEPTED"
@@ -249,10 +252,10 @@ func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.Chat, candida
 	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
-func (s *Service) ReadCandidate(ctx context.Context, c *thinkgraph.Chat, candidateID string) (string, error) {
+func (s *Service) ReadCandidate(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string) (string, error) {
 	s.logger.DebugContext(ctx, "reading candidate contents", slog.String("candidate_id", candidateID))
 
-	diff, err := s.engine.ReadCandidateDiff(ctx, c.ID, candidateID)
+	diff, err := s.engine.ReadCandidateDiff(ctx, c.ChatID, candidateID)
 	if err != nil {
 		return "", fmt.Errorf("reading candidate diff: %w", err)
 	}
@@ -264,10 +267,10 @@ func (s *Service) SpawnSandbox(ctx context.Context, chatID, candidateID string) 
 	return s.engine.SpawnCandidateSandbox(ctx, chatID, candidateID)
 }
 
-func (s *Service) SaveContextPreview(ctx context.Context, c *thinkgraph.Chat, content string) (string, error) {
+func (s *Service) SaveContextPreview(ctx context.Context, c *thinkgraph.ChatAddress, content string) (string, error) {
 	id := uuid.NewV7()
 	previewID := id.String()
-	previewsDir := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "previews")
+	previewsDir := filepath.Join(s.workspaceRoot, c.ProjectID, "chats", c.ChatID, "previews")
 
 	if err := os.MkdirAll(previewsDir, 0755); err != nil {
 		return "", fmt.Errorf("creating previews directory: %w", err)
@@ -296,12 +299,12 @@ func (s *Service) SaveContextPreview(ctx context.Context, c *thinkgraph.Chat, co
 	return previewID, nil
 }
 
-func (s *Service) GetContextPreview(ctx context.Context, c *thinkgraph.Chat, previewID string) ([]byte, error) {
-	path := filepath.Join(s.workspaceRoot, c.SpaceID, "chats", c.ID, "previews", fmt.Sprintf("%s.md", previewID))
+func (s *Service) GetContextPreview(ctx context.Context, c *thinkgraph.ChatAddress, previewID string) ([]byte, error) {
+	path := filepath.Join(s.workspaceRoot, c.ProjectID, "chats", c.ChatID, "previews", fmt.Sprintf("%s.md", previewID))
 	return os.ReadFile(path)
 }
 
-func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.Chat, summary string, tags []string, isSticky bool, summarized []uuid.UUID) error {
+func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.ChatAddress, summary string, tags []string, isSticky bool, summarized []uuid.UUID) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventDigest, summary)
 	event.Tags = tags
 
@@ -321,14 +324,14 @@ func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.Chat, summary str
 	})
 }
 
-func (s *Service) SaveMutation(ctx context.Context, c *thinkgraph.Chat, mut thinkgraph.MutationEvent) error {
+func (s *Service) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddress, mut thinkgraph.MutationEvent) error {
 	if s.dispatcher == nil {
 		return fmt.Errorf("dispatcher is not initialized")
 	}
 	return s.dispatcher.SaveMutation(ctx, c, mut)
 }
 
-func (s *Service) SaveSpaceContext(ctx context.Context, c *thinkgraph.Chat, sc thinkgraph.SpaceContext) error {
+func (s *Service) SaveSpaceContext(ctx context.Context, c *thinkgraph.ChatAddress, sc thinkgraph.SpaceContext) error {
 	if s.dispatcher == nil {
 		return fmt.Errorf("dispatcher is not initialized")
 	}

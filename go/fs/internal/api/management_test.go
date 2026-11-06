@@ -145,7 +145,7 @@ func TestManagementAPI_GetEvents(t *testing.T) {
 	spaceID := "sandbox"
 	chatID := "chat-1"
 
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
 	event1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "First test event")
 	event1.Timestamp = time.Now().Add(-2 * time.Hour)

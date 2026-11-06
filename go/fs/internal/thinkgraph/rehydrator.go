@@ -31,12 +31,12 @@ func NewRehydrator(store *GraphStore, workspaceRoot string) *Rehydrator {
 	return &Rehydrator{store: store, workspaceRoot: workspaceRoot}
 }
 
-func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *LedgerManifest, *LedgerManifest, error) {
+func (r *Rehydrator) CheckSync(ctx context.Context, c *ChatAddress) (SyncStatus, *LedgerManifest, *LedgerManifest, error) {
 	branchID := c.ActiveBranch
 	if branchID == "" {
 		branchID = "main"
 	}
-	ledgerDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger")
+	ledgerDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger")
 
 	diskManifest, err := LoadOrRebuildManifest(ledgerDir, branchID)
 	if err != nil {
@@ -74,12 +74,12 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *Chat) (SyncStatus, *Ledge
 	return SyncStatusMismatch, diskManifest, graphManifest, nil
 }
 
-func (r *Rehydrator) FastForward(ctx context.Context, c *Chat, graphManifest, diskManifest *LedgerManifest) error {
+func (r *Rehydrator) FastForward(ctx context.Context, c *ChatAddress, graphManifest, diskManifest *LedgerManifest) error {
 	branchID := c.ActiveBranch
 	if branchID == "" {
 		branchID = "main"
 	}
-	logsDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "logs", branchID)
+	logsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "logs", branchID)
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		return err
@@ -131,13 +131,13 @@ func (r *Rehydrator) FastForward(ctx context.Context, c *Chat, graphManifest, di
 	return r.store.Repository().SetSyncState(ctx, c, *diskManifest)
 }
 
-func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
+func (r *Rehydrator) Rebuild(ctx context.Context, c *ChatAddress) error {
 	if err := r.store.Repository().ClearChatGraph(ctx, c); err != nil {
 		return fmt.Errorf("failed to clear graph: %w", err)
 	}
 
 	// 1. Re-ingest SpaceContexts (Markdown -> Badger)
-	contextsDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "contexts")
+	contextsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "contexts")
 	entries, err := os.ReadDir(contextsDir)
 	if err == nil {
 		for _, e := range entries {
@@ -154,7 +154,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 	}
 
 	// 2. Re-ingest Digests (Markdown -> Badger)
-	digestsDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "digests")
+	digestsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "digests")
 	entries, err = os.ReadDir(digestsDir)
 	if err == nil {
 		for _, e := range entries {
@@ -171,7 +171,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 	}
 
 	// 3. Re-ingest Event Shards for ALL branches (.jsonl -> Badger)
-	ledgerDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger")
+	ledgerDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger")
 	logsBaseDir := filepath.Join(ledgerDir, "logs")
 	branches, err := os.ReadDir(logsBaseDir)
 	if err == nil {
@@ -180,7 +180,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 				branchID := branchDir.Name()
 				diskManifest, err := LoadOrRebuildManifest(ledgerDir, branchID)
 				if err == nil {
-					branchChat := &Chat{ID: c.ID, SpaceID: c.SpaceID, ActiveBranch: branchID}
+					branchChat := &ChatAddress{ChatID: c.ChatID, ProjectID: c.ProjectID, ActiveBranch: branchID}
 					emptyGraphManifest := &LedgerManifest{TotalEvents: 0}
 					if err := r.FastForward(ctx, branchChat, emptyGraphManifest, diskManifest); err != nil {
 						return fmt.Errorf("fast-forwarding branch %s: %w", branchID, err)
@@ -191,7 +191,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *Chat) error {
 	}
 
 	// 4. Replay Mutations chronologically to re-establish tombstone and update states
-	mutationsDir := filepath.Join(r.workspaceRoot, c.SpaceID, "chats", c.ID, "ledger", "mutations")
+	mutationsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "mutations")
 	entries, err = os.ReadDir(mutationsDir)
 	if err == nil {
 		var mutFiles []string

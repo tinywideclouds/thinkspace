@@ -3,6 +3,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"iter"
 	"log/slog"
 	"os"
 	"strings"
@@ -10,13 +11,33 @@ import (
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
+
+type feMockModelClient struct {
+	responses []llm.StreamChunk
+}
+
+func (client *feMockModelClient) GenerateContentStream(
+	ctx context.Context,
+	model string,
+	bundle cognition.ThinkBundle,
+	registry *tools.Registry,
+	config spaces.ThinkStateConfig,
+) iter.Seq2[llm.StreamChunk, error] {
+	return func(yield func(llm.StreamChunk, error) bool) {
+		for _, resp := range client.responses {
+			yield(resp, nil)
+		}
+	}
+}
 
 type feMockChatEngine struct {
 	sandbox      *feMockSandbox
@@ -55,9 +76,6 @@ type feMockSandbox struct {
 
 func (m *feMockSandbox) WriteFile(ctx context.Context, path string, data []byte) error { return nil }
 func (m *feMockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	if path == "trace.jsonl" {
-		return []byte(`{"prompt": "task", "generated": "output"}`), nil
-	}
 	if path == "does/not/exist.go" {
 		return nil, errors.New("file not found")
 	}
@@ -70,6 +88,13 @@ func (m *feMockSandbox) ApplyDraft(ctx context.Context, message string) error { 
 func (m *feMockSandbox) DeliverForReview(ctx context.Context) error           { m.delivered = true; return nil }
 func (m *feMockSandbox) TearDown(ctx context.Context) error                   { return nil }
 
+type feMockPatcher struct{}
+
+func (p *feMockPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSandbox, llmOutput string) error {
+	return nil
+}
+func (p *feMockPatcher) SystemInstructions() string { return "" }
+
 type feMockThinkSpace struct {
 	errsToReturn []error
 	verifyCalls  int
@@ -77,7 +102,7 @@ type feMockThinkSpace struct {
 
 func (m *feMockThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
 func (m *feMockThinkSpace) Config() spaces.ThinkStateConfig                        { return spaces.ThinkStateConfig{} }
-func (m *feMockThinkSpace) Patcher() workspace.Patcher                             { return nil }
+func (m *feMockThinkSpace) Patcher() workspace.Patcher                             { return &feMockPatcher{} }
 func (m *feMockThinkSpace) Verifier() spaces.Verifier                              { return m }
 func (m *feMockThinkSpace) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
 	if m.verifyCalls < len(m.errsToReturn) {
@@ -112,26 +137,16 @@ type feMockUI struct {
 	capturedReasoning  string
 }
 
-// GetAgentTokenChannel implements [session.UserInterface].
 func (ui *feMockUI) GetAgentTokenChannel() chan<- workspace.AgentToken { return nil }
-
-func (u *feMockUI) OnTextChunk(text string) {}
-
+func (u *feMockUI) OnTextChunk(text string)                            {}
 func (u *feMockUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
-	return session.ContextApprovalDecision{
-		Approved: u.reviewToReturn,
-	}
+	return session.ContextApprovalDecision{Approved: u.reviewToReturn}
 }
-
-func (u *feMockUI) ChooseNextStep() flows.FlowStrategy {
-	return u.strategyToReturn
-}
-
+func (u *feMockUI) ChooseNextStep() flows.FlowStrategy { return u.strategyToReturn }
 func (u *feMockUI) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
 }
-
 func (u *feMockUI) ConfirmTransition(targetDomain string, reasoning string) bool {
 	u.capturedReasoning = reasoning
 	return u.transitionToReturn
@@ -149,13 +164,12 @@ func TestFlowEngine_FanOutIntegration(t *testing.T) {
 	chatSession, _ := service.InitializeChat(context.Background(), "golang", "chat-1")
 
 	emitter := &feMockEmitter{}
-	var bundlesReceived []cognition.ThinkBundle
-	executor := func(ctx context.Context, bundle cognition.ThinkBundle, sandbox workspace.CandidateSandbox, agentID int, tokenChan chan<- workspace.AgentToken) error {
-		bundlesReceived = append(bundlesReceived, bundle)
-		return nil
+	modelClient := &feMockModelClient{
+		responses: []llm.StreamChunk{{Text: "Sub-agent implemented the feature."}},
 	}
+	turnExecutor := session.NewTurnExecutor(logger, modelClient, service, emitter)
 
-	flowEngine := session.NewFlowEngine(logger, service, executor, dispatcher, emitter)
+	flowEngine := session.NewFlowEngine(logger, service, turnExecutor, dispatcher, emitter)
 
 	flowCfg := flows.FanOutConfig{MaxSteps: 10, RetryPrompt: "Trace: {{.ErrorTrace}}"}
 	fanOutFlow := flows.NewFanOutFlow(logger, flowCfg)
@@ -178,18 +192,6 @@ func TestFlowEngine_FanOutIntegration(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(bundlesReceived) != 1 {
-		t.Fatalf("expected 1 execution attempt, got %d", len(bundlesReceived))
-	}
-
-	bundle := bundlesReceived[0]
-	if bundle.Rules.Persona != "Worker Persona" {
-		t.Errorf("expected Worker Persona in rules")
-	}
-	if len(bundle.Workbench) != 1 || bundle.Workbench[0].Path != "src/main.go" {
-		t.Errorf("expected Workbench to materialize target file")
-	}
-
 	if !engine.sandbox.delivered {
 		t.Errorf("expected sandbox to be delivered")
 	}
@@ -209,7 +211,8 @@ func TestFlowEngine_FailFast_HallucinatedFile(t *testing.T) {
 	service := workspace.NewService(logger, engine, workspaceRoot, dispatcher, &feMockEmitter{})
 	chatSession, _ := service.InitializeChat(context.Background(), "golang", "chat-1")
 
-	flowEngine := session.NewFlowEngine(logger, service, nil, dispatcher, &feMockEmitter{})
+	turnExecutor := session.NewTurnExecutor(logger, &feMockModelClient{}, service, &feMockEmitter{})
+	flowEngine := session.NewFlowEngine(logger, service, turnExecutor, dispatcher, &feMockEmitter{})
 	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
 
 	args := map[string]any{

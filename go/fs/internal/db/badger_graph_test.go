@@ -29,7 +29,7 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
 
-	chat := &thinkgraph.Chat{ID: "chat-123", SpaceID: "test-space", ActiveBranch: "main"}
+	chat := &thinkgraph.ChatAddress{ChatID: "chat-123", ProjectID: "test-space", ActiveBranch: "main"}
 
 	node1 := thinkgraph.Node{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "First event")}
 	node1.Tags = []string{"init"}
@@ -61,7 +61,7 @@ func TestBadgerGraph_AppendAndGetTimeline(t *testing.T) {
 func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-page", SpaceID: "test-space", ActiveBranch: "main"}
+	chat := &thinkgraph.ChatAddress{ChatID: "chat-page", ProjectID: "test-space", ActiveBranch: "main"}
 
 	var nodes []thinkgraph.Node
 	for i := 0; i < 5; i++ {
@@ -119,7 +119,7 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-mutations", SpaceID: "test-space", ActiveBranch: "main"}
+	chat := &thinkgraph.ChatAddress{ChatID: "chat-mutations", ProjectID: "test-space", ActiveBranch: "main"}
 
 	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Will be deleted")
 	ev1.BranchID = "main"
@@ -180,7 +180,7 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 func TestBadgerGraph_GetLenses(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-lenses", SpaceID: "test-space", ActiveBranch: "main"}
+	chat := &thinkgraph.ChatAddress{ChatID: "chat-lenses", ProjectID: "test-space", ActiveBranch: "main"}
 
 	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Query DB")
 	ev1.Tags = []string{"database", "backend"}

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
-	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
 const QueryLens ToolName = "query_lens"
@@ -49,13 +48,12 @@ func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionC
 	var toolResponse strings.Builder
 	fmt.Fprintf(&toolResponse, "[System Tool Response: query_lens(%s)]\n", request.Tag)
 
-	chatObj := &thinkgraph.Chat{ID: executionContext.ChatID, SpaceID: executionContext.SpaceID}
 	graph := t.workspace.Graph()
 
 	if graph == nil {
 		toolResponse.WriteString("Error: Graph database is not initialized.\n")
 	} else {
-		lensResult, err := graph.GetLenses(ctx, chatObj, request.Tag)
+		lensResult, err := graph.GetLenses(ctx, executionContext.Address, request.Tag)
 		if err != nil {
 			toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", err))
 		} else if len(lensResult.Nodes) == 0 && len(lensResult.Digests) == 0 {

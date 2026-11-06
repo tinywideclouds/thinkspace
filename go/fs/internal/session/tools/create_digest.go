@@ -24,7 +24,7 @@ type CreateDigestRequest struct {
 }
 
 type DigestCommitter interface {
-	CommitDigest(ctx context.Context, chatObj *thinkgraph.Chat, topicName string, tags []string, instruction string, contextData string) error
+	CommitDigest(ctx context.Context, chatObj *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error
 }
 
 type CreateDigestTool struct {
@@ -67,11 +67,9 @@ func (t *CreateDigestTool) Execute(ctx context.Context, executionContext Executi
 		}
 	}
 
-	chatObj := &thinkgraph.Chat{ID: executionContext.ChatID, SpaceID: executionContext.SpaceID}
-
 	err = t.committer.CommitDigest(
 		ctx,
-		chatObj,
+		executionContext.Address,
 		request.TopicName,
 		request.Tags,
 		request.Instruction,

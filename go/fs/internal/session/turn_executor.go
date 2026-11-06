@@ -19,81 +19,58 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type TurnCoordinator struct {
+// TurnExecutor handles the universal LLM generation and tool interception loop.
+// It relies entirely on the provided ThinkState and ChatAddress for boundaries.
+type TurnExecutor struct {
 	logger           *slog.Logger
-	workspaceService *workspace.Service
 	modelClient      llm.ModelClient
+	workspaceService *workspace.Service
 	emitter          telemetry.Emitter
-	flowEngine       *FlowEngine
-	fanOutFlow       flows.Flow
-	digestManager    *DigestManager
-	spaceID          string
-	workerPrompt     string
-	workerModel      string
-	registry         *tools.Registry
-	thinkSpace       spaces.ThinkState
-	ui               UserInterface
 }
 
-func NewTurnCoordinator(
+func NewTurnExecutor(
 	logger *slog.Logger,
-	workspaceService *workspace.Service,
 	modelClient llm.ModelClient,
+	wsService *workspace.Service,
 	emitter telemetry.Emitter,
-	flowEngine *FlowEngine,
-	fanOutFlow flows.Flow,
-	digestManager *DigestManager,
-	spaceID string,
-	workerPrompt string,
-	workerModel string,
-	registry *tools.Registry,
-	thinkSpace spaces.ThinkState,
-	ui UserInterface,
-) *TurnCoordinator {
-	return &TurnCoordinator{
+) *TurnExecutor {
+	return &TurnExecutor{
 		logger:           logger,
-		workspaceService: workspaceService,
 		modelClient:      modelClient,
+		workspaceService: wsService,
 		emitter:          emitter,
-		flowEngine:       flowEngine,
-		fanOutFlow:       fanOutFlow,
-		digestManager:    digestManager,
-		spaceID:          spaceID,
-		workerPrompt:     workerPrompt,
-		workerModel:      workerModel,
-		registry:         registry,
-		thinkSpace:       thinkSpace,
-		ui:               ui,
 	}
 }
 
-func (c *TurnCoordinator) RunAgentLoop(
+// Execute runs a single cognitive turn bounded strictly by the provided ThinkState.
+func (e *TurnExecutor) Execute(
 	ctx context.Context,
-	chatObj *thinkgraph.Chat,
-	activeSession *ChatSession,
-	thinkSpace spaces.ThinkState,
+	address *thinkgraph.ChatAddress,
+	thinkState spaces.ThinkState,
 	bundle cognition.ThinkBundle,
+	registry *tools.Registry,
+	ui UserInterface,
 ) error {
-	turnContext, cancel := context.WithTimeout(ctx, thinkSpace.Config().TurnTimeout())
+	turnContext, cancel := context.WithTimeout(ctx, thinkState.Config().TurnTimeout())
 	defer cancel()
 
-	managerModel := thinkSpace.Config().Roles.Manager.Model
+	managerModel := thinkState.Config().Roles.Manager.Model
 	maxIterations := 3
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
-		c.emitter.Emit("manager", telemetry.Event{
+		e.emitter.Emit("manager", telemetry.Event{
 			ID:        uuid.NewV7(),
 			Type:      "log",
 			Timestamp: time.Now(),
 			Message:   "Analyzing context and formulating a plan...",
 		})
 
-		stream := c.modelClient.GenerateContentStream(
+		stream := e.modelClient.GenerateContentStream(
 			turnContext,
 			managerModel,
 			bundle,
-			c.registry,
-			thinkSpace.Config(),
+			registry,
+			thinkState.Config(),
 		)
 
 		var fullModelResponse strings.Builder
@@ -105,7 +82,7 @@ func (c *TurnCoordinator) RunAgentLoop(
 				return fmt.Errorf("generation stream failed: %w", err)
 			}
 			if chunk.Text != "" {
-				c.ui.OnTextChunk(chunk.Text)
+				ui.OnTextChunk(chunk.Text)
 				fullModelResponse.WriteString(chunk.Text)
 			}
 			if len(chunk.ToolCalls) > 0 {
@@ -116,7 +93,7 @@ func (c *TurnCoordinator) RunAgentLoop(
 			}
 		}
 
-		c.logger.DebugContext(ctx, "raw LLM generation complete", "output", fullModelResponse.String())
+		e.logger.DebugContext(ctx, "raw LLM generation complete", "output", fullModelResponse.String())
 
 		if fullModelResponse.Len() > 0 {
 			var usage *telemetry.TokenUsage
@@ -128,7 +105,7 @@ func (c *TurnCoordinator) RunAgentLoop(
 				}
 			}
 
-			_ = c.workspaceService.LogModelResponse(turnContext, chatObj, fullModelResponse.String(), usage)
+			_ = e.workspaceService.LogModelResponse(turnContext, address, fullModelResponse.String(), usage)
 			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 				Role:    "model",
 				Content: fullModelResponse.String(),
@@ -145,19 +122,18 @@ func (c *TurnCoordinator) RunAgentLoop(
 		for k := range call.Args {
 			argKeys = append(argKeys, k)
 		}
-		c.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name, "args", argKeys)
+		e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name, "args", argKeys)
 
-		tool, exists := c.registry.Get(call.Name)
+		tool, exists := registry.Get(call.Name)
 		if !exists {
-			c.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
+			e.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
 			break
 		}
 
 		ec := tools.ExecutionContext{
-			ChatID:       chatObj.ID,
-			SpaceID:      c.spaceID,
+			Address:      address,
 			Bundle:       &bundle,
-			UI:           c.ui,
+			UI:           ui,
 			RawArguments: call.Args,
 		}
 
@@ -165,7 +141,7 @@ func (c *TurnCoordinator) RunAgentLoop(
 
 		// Catch the flow's synthesis request and rewrite the bundle to focus purely on the dossier
 		if synthReq, ok := err.(*flows.SynthesisRequest); ok {
-			c.logger.InfoContext(ctx, "manager synthesis requested by flow engine")
+			e.logger.InfoContext(ctx, "manager synthesis requested by flow engine")
 
 			bundle = cognition.ThinkBundle{
 				Rules:     bundle.Rules,
@@ -193,39 +169,6 @@ func (c *TurnCoordinator) RunAgentLoop(
 		}
 	}
 
-	_, err := c.workspaceService.Checkpoint(turnContext, chatObj, "End of session turn")
+	_, err := e.workspaceService.Checkpoint(turnContext, address, "End of session turn")
 	return err
-}
-
-func (c *TurnCoordinator) DispatchFanOut(ctx context.Context, chatObj *thinkgraph.Chat, bundle *cognition.ThinkBundle, args map[string]any, summary string) error {
-	flowContext := flows.FlowContext{
-		FlowID:         uuid.NewV7().String(),
-		SpaceID:        c.spaceID,
-		BaseAgentRules: c.workerPrompt,
-		FlowSummary:    summary,
-	}
-
-	return c.flowEngine.Run(ctx, chatObj, c.thinkSpace, c.fanOutFlow, args, flowContext, c.ui)
-}
-
-func (c *TurnCoordinator) CommitDigest(ctx context.Context, chatObj *thinkgraph.Chat, topicName string, tags []string, instruction string, contextData string) error {
-	return c.digestManager.CreateManualDigest(
-		ctx,
-		c.workspaceService,
-		chatObj,
-		topicName,
-		tags,
-		instruction,
-		contextData,
-		c.workerModel,
-		c.workerPrompt,
-	)
-}
-
-func (c *TurnCoordinator) Graph() thinkgraph.GraphRepository {
-	return c.workspaceService.Graph()
-}
-
-func (c *TurnCoordinator) WorkspaceRoot() string {
-	return c.workspaceService.WorkspaceRoot()
 }

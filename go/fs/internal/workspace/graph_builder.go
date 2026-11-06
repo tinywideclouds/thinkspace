@@ -19,7 +19,7 @@ func NewWorkspaceGraphBuilder(engine ChatVersioner) *WorkspaceGraphBuilder {
 	}
 }
 
-func (b *WorkspaceGraphBuilder) Build(ctx context.Context, c *thinkgraph.Chat, ev thinkgraph.Event) (thinkgraph.Node, error) {
+func (b *WorkspaceGraphBuilder) Build(ctx context.Context, c *thinkgraph.ChatAddress, ev thinkgraph.Event) (thinkgraph.Node, error) {
 	node := thinkgraph.Node{
 		Event: ev,
 	}
@@ -28,7 +28,7 @@ func (b *WorkspaceGraphBuilder) Build(ctx context.Context, c *thinkgraph.Chat, e
 		var payload CandidateProposal
 		if err := json.Unmarshal(ev.Data, &payload); err == nil {
 			// Hydrate the Git diff from the physical ChatEngine
-			diff, err := b.engine.ReadCandidateDiff(ctx, c.ID, payload.CandidateID)
+			diff, err := b.engine.ReadCandidateDiff(ctx, c.ChatID, payload.CandidateID)
 			if err == nil && diff != "" {
 				// Cache the diff natively on the graph read-model
 				stateBytes, _ := json.Marshal(map[string]string{"diff": diff})

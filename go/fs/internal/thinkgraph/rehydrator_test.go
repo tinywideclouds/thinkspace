@@ -20,9 +20,9 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 	chatID := "chat-rehydrate"
 	branchID := "main"
 
-	chat := &thinkgraph.Chat{
-		ID:           chatID,
-		SpaceID:      spaceID,
+	chat := &thinkgraph.ChatAddress{
+		ChatID:       chatID,
+		ProjectID:    spaceID,
 		ActiveBranch: branchID,
 	}
 
@@ -116,7 +116,7 @@ func TestRehydrator_SyncScenarios(t *testing.T) {
 
 func TestRehydrator_MutationReplay(t *testing.T) {
 	tempDir := t.TempDir()
-	chat := &thinkgraph.Chat{ID: "chat-mut", SpaceID: "space", ActiveBranch: "main"}
+	chat := &thinkgraph.ChatAddress{ChatID: "chat-mut", ProjectID: "space", ActiveBranch: "main"}
 
 	ledger := thinkgraph.NewFileLedger(1000, tempDir)
 

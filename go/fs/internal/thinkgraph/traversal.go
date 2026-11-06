@@ -15,7 +15,7 @@ func NewTraversalEngine(graph GraphRepository) *TraversalEngine {
 
 func (t *TraversalEngine) GetTimelinePage(
 	ctx context.Context,
-	c *Chat,
+	c *ChatAddress,
 	cursor string,
 	limit int,
 	topology map[string]BranchTopology,
@@ -66,7 +66,7 @@ func (t *TraversalEngine) GetTimelinePage(
 
 func (t *TraversalEngine) WalkTimelineReverse(
 	ctx context.Context,
-	c *Chat,
+	c *ChatAddress,
 	topology map[string]BranchTopology,
 	fn func(Node) bool,
 ) error {
@@ -105,7 +105,7 @@ func (t *TraversalEngine) WalkTimelineReverse(
 	return nil
 }
 
-func (t *TraversalEngine) GetFullTimeline(ctx context.Context, c *Chat, topology map[string]BranchTopology) ([]Node, error) {
+func (t *TraversalEngine) GetFullTimeline(ctx context.Context, c *ChatAddress, topology map[string]BranchTopology) ([]Node, error) {
 	var allNodes []Node
 	err := t.WalkTimelineReverse(ctx, c, topology, func(node Node) bool {
 		allNodes = append(allNodes, node)

@@ -26,7 +26,7 @@ func NewDispatcher(graphStore *GraphStore, ledger EventWriter) *Dispatcher {
 	}
 }
 
-func (d *Dispatcher) AppendEvent(ctx context.Context, c *Chat, event Event) error {
+func (d *Dispatcher) AppendEvent(ctx context.Context, c *ChatAddress, event Event) error {
 	if d.ledger != nil {
 		if err := d.ledger.AppendEvent(ctx, c, event); err != nil {
 			return fmt.Errorf("ledger append failed: %w", err)
@@ -40,7 +40,7 @@ func (d *Dispatcher) AppendEvent(ctx context.Context, c *Chat, event Event) erro
 	return nil
 }
 
-func (d *Dispatcher) SaveDigest(ctx context.Context, c *Chat, digest DigestMeta) error {
+func (d *Dispatcher) SaveDigest(ctx context.Context, c *ChatAddress, digest DigestMeta) error {
 	if d.ledger != nil {
 		if err := d.ledger.SaveDigest(ctx, c, digest); err != nil {
 			return fmt.Errorf("ledger save digest failed: %w", err)
@@ -54,7 +54,7 @@ func (d *Dispatcher) SaveDigest(ctx context.Context, c *Chat, digest DigestMeta)
 	return nil
 }
 
-func (d *Dispatcher) SaveSpaceContext(ctx context.Context, c *Chat, spaceCtx SpaceContext) error {
+func (d *Dispatcher) SaveSpaceContext(ctx context.Context, c *ChatAddress, spaceCtx SpaceContext) error {
 	if d.ledger != nil {
 		if err := d.ledger.SaveSpaceContext(ctx, c, spaceCtx); err != nil {
 			return fmt.Errorf("ledger save space context failed: %w", err)
@@ -68,7 +68,7 @@ func (d *Dispatcher) SaveSpaceContext(ctx context.Context, c *Chat, spaceCtx Spa
 	return nil
 }
 
-func (d *Dispatcher) SaveMutation(ctx context.Context, c *Chat, mutation MutationEvent) error {
+func (d *Dispatcher) SaveMutation(ctx context.Context, c *ChatAddress, mutation MutationEvent) error {
 	if d.ledger != nil {
 		if err := d.ledger.SaveMutation(ctx, c, mutation); err != nil {
 			return fmt.Errorf("ledger save mutation failed: %w", err)

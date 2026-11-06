@@ -16,11 +16,11 @@ type LedgerManifest struct {
 	TotalEvents int    `json:"total_events"`
 }
 
-func LoadOrRebuildManifest(ledgerDirectory string, branchID string) (*LedgerManifest, error) {
-	if branchID == "" {
-		branchID = "main"
+func LoadOrRebuildManifest(ledgerDirectory string, subGraphName string) (*LedgerManifest, error) {
+	if subGraphName == "" {
+		subGraphName = "main"
 	}
-	branchDir := filepath.Join(ledgerDirectory, "logs", branchID)
+	branchDir := filepath.Join(ledgerDirectory, "logs", subGraphName)
 	_ = os.MkdirAll(branchDir, 0755)
 
 	manifestPath := filepath.Join(branchDir, "manifest.json")
@@ -31,14 +31,14 @@ func LoadOrRebuildManifest(ledgerDirectory string, branchID string) (*LedgerMani
 			return &m, nil
 		}
 	}
-	return RebuildManifest(ledgerDirectory, branchID)
+	return RebuildManifest(ledgerDirectory, subGraphName)
 }
 
-func RebuildManifest(ledgerDirectory string, branchID string) (*LedgerManifest, error) {
-	if branchID == "" {
-		branchID = "main"
+func RebuildManifest(ledgerDirectory string, subGraphName string) (*LedgerManifest, error) {
+	if subGraphName == "" {
+		subGraphName = "main"
 	}
-	branchDir := filepath.Join(ledgerDirectory, "logs", branchID)
+	branchDir := filepath.Join(ledgerDirectory, "logs", subGraphName)
 	entries, err := os.ReadDir(branchDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -84,15 +84,15 @@ func RebuildManifest(ledgerDirectory string, branchID string) (*LedgerManifest, 
 	}
 
 	m := &LedgerManifest{ActiveShard: activeShard, EventCount: eventCount, TotalEvents: totalCount}
-	_ = m.Save(ledgerDirectory, branchID)
+	_ = m.Save(ledgerDirectory, subGraphName)
 	return m, nil
 }
 
-func (m *LedgerManifest) Save(ledgerDirectory string, branchID string) error {
-	if branchID == "" {
-		branchID = "main"
+func (m *LedgerManifest) Save(ledgerDirectory string, subGraphName string) error {
+	if subGraphName == "" {
+		subGraphName = "main"
 	}
-	branchDir := filepath.Join(ledgerDirectory, "logs", branchID)
+	branchDir := filepath.Join(ledgerDirectory, "logs", subGraphName)
 	_ = os.MkdirAll(branchDir, 0755)
 
 	data, err := json.MarshalIndent(m, "", "  ")

@@ -11,23 +11,23 @@ type mockEventWriter struct {
 	appendCount int
 }
 
-func (m *mockEventWriter) AppendEvent(ctx context.Context, c *thinkgraph.Chat, event thinkgraph.Event) error {
+func (m *mockEventWriter) AppendEvent(ctx context.Context, c *thinkgraph.ChatAddress, event thinkgraph.Event) error {
 	m.appendCount++
 	return nil
 }
-func (m *mockEventWriter) SaveDigest(ctx context.Context, c *thinkgraph.Chat, digest thinkgraph.DigestMeta) error {
+func (m *mockEventWriter) SaveDigest(ctx context.Context, c *thinkgraph.ChatAddress, digest thinkgraph.DigestMeta) error {
 	return nil
 }
-func (m *mockEventWriter) SaveSpaceContext(ctx context.Context, c *thinkgraph.Chat, spaceCtx thinkgraph.SpaceContext) error {
+func (m *mockEventWriter) SaveSpaceContext(ctx context.Context, c *thinkgraph.ChatAddress, spaceCtx thinkgraph.SpaceContext) error {
 	return nil
 }
-func (m *mockEventWriter) SaveMutation(ctx context.Context, c *thinkgraph.Chat, mutation thinkgraph.MutationEvent) error {
+func (m *mockEventWriter) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddress, mutation thinkgraph.MutationEvent) error {
 	return nil
 }
 
 func TestDispatcher_NilSafety(t *testing.T) {
 	ctx := context.Background()
-	chat := &thinkgraph.Chat{ID: "chat-1", SpaceID: "space-1"}
+	chat := &thinkgraph.ChatAddress{ChatID: "chat-1", ProjectID: "space-1"}
 	event := thinkgraph.NewEvent(thinkgraph.EventPrompt, "hello")
 
 	// Test with completely nil sinks (should warn but not panic)

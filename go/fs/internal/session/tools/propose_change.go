@@ -20,7 +20,7 @@ const (
 // FanOutDispatcher defines the capability to trigger a flow execution.
 type FanOutDispatcher interface {
 	// The interface no longer requires UI; the dispatcher holds it natively.
-	DispatchFanOut(ctx context.Context, chatObj *thinkgraph.Chat, bundle *cognition.ThinkBundle, args map[string]any, summary string) error
+	DispatchFanOut(ctx context.Context, chatObj *thinkgraph.ChatAddress, bundle *cognition.ThinkBundle, args map[string]any, summary string) error
 }
 
 type ProposeChangeTool struct {
@@ -95,10 +95,8 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (b
 		ec.UI.OnTextChunk(fmt.Sprintf("\n\n🚀 **Dispatching Flow:** %s\n", summary))
 	}
 
-	chatObj := &thinkgraph.Chat{ID: ec.ChatID, SpaceID: ec.SpaceID}
-
 	// Dispatcher already has the UI stored inside it
-	if err := t.dispatcher.DispatchFanOut(ctx, chatObj, ec.Bundle, flowArgs, summary); err != nil {
+	if err := t.dispatcher.DispatchFanOut(ctx, ec.Address, ec.Bundle, flowArgs, summary); err != nil {
 		return true, fmt.Errorf("dispatching fanout flow: %w", err)
 	}
 

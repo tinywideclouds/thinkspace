@@ -39,7 +39,7 @@ func NewDigestManager(logger *slog.Logger, client llm.ModelClient, config Digest
 func (m *DigestManager) CreateManualDigest(
 	ctx context.Context,
 	svc *workspace.Service,
-	chatSession *thinkgraph.Chat,
+	chatSession *thinkgraph.ChatAddress,
 	topicName string,
 	tags []string,
 	instruction string,
@@ -107,7 +107,7 @@ type backgroundDigestResponse struct {
 func (m *DigestManager) CreateBackgroundDigest(
 	ctx context.Context,
 	svc *workspace.Service,
-	chatSession *thinkgraph.Chat,
+	chatSession *thinkgraph.ChatAddress,
 	targetWindow []thinkgraph.Event,
 	activeBuffer []thinkgraph.Event,
 	force bool,

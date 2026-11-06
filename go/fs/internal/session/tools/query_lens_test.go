@@ -22,7 +22,7 @@ type mockGraphRepo struct {
 	thinkgraph.GraphRepository
 }
 
-func (m *mockGraphRepo) GetLenses(ctx context.Context, c *thinkgraph.Chat, tag string) (thinkgraph.LensResult, error) {
+func (m *mockGraphRepo) GetLenses(ctx context.Context, c *thinkgraph.ChatAddress, tag string) (thinkgraph.LensResult, error) {
 	return thinkgraph.LensResult{
 		Nodes: []thinkgraph.Node{
 			{

@@ -23,7 +23,7 @@ type mockDigestCommitter struct {
 	lastContext     string
 }
 
-func (m *mockDigestCommitter) CommitDigest(ctx context.Context, chatObj *thinkgraph.Chat, topicName string, tags []string, instruction string, contextData string) error {
+func (m *mockDigestCommitter) CommitDigest(ctx context.Context, chatObj *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error {
 	m.lastTopic = topicName
 	m.lastTags = tags
 	m.lastInstruction = instruction

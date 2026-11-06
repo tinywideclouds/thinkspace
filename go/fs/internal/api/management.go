@@ -165,7 +165,7 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID, ActiveBranch: activeBranch}
+	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID, ActiveBranch: activeBranch}
 	var events []thinkgraph.Node
 	var err error
 
@@ -232,7 +232,7 @@ func (api *ManagementAPI) handleGetContexts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
 	contexts, err := api.manager.GraphRepository().GetSpaceContexts(r.Context(), chat)
 	if err != nil {
@@ -265,7 +265,7 @@ func (api *ManagementAPI) handleCreateContext(w http.ResponseWriter, r *http.Req
 	}
 
 	svc := api.manager.GetService(spaceID)
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
 	sc := thinkgraph.SpaceContext{
 		ID:      uuid.NewV7(),
@@ -300,7 +300,7 @@ func (api *ManagementAPI) handleGetLenses(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
 	result, err := api.manager.GraphRepository().GetLenses(r.Context(), chat, tag)
 	if err != nil {
@@ -326,7 +326,7 @@ func (api *ManagementAPI) handleTombstoneEvent(w http.ResponseWriter, r *http.Re
 	}
 
 	svc := api.manager.GetService(spaceID)
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
 	mut := thinkgraph.MutationEvent{
 		TargetID:  targetID,
@@ -354,7 +354,7 @@ func (api *ManagementAPI) handleRestoreEvent(w http.ResponseWriter, r *http.Requ
 	}
 
 	svc := api.manager.GetService(spaceID)
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
 	mut := thinkgraph.MutationEvent{
 		TargetID:  targetID,
@@ -390,7 +390,7 @@ func (api *ManagementAPI) handleUpdateEvent(w http.ResponseWriter, r *http.Reque
 	}
 
 	svc := api.manager.GetService(spaceID)
-	chat := &thinkgraph.Chat{ID: chatID, SpaceID: spaceID}
+	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
 	mut := thinkgraph.MutationEvent{
 		TargetID:  targetID,

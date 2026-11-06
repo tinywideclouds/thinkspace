@@ -130,8 +130,8 @@ func TestService_StartThread(t *testing.T) {
 		t.Errorf("Expected ChatEngine.InitChat to be called")
 	}
 
-	if thread.ID != "test-thread" {
-		t.Errorf("Expected thread ID 'test-thread', got '%s'", thread.ID)
+	if thread.ChatID != "test-thread" {
+		t.Errorf("Expected thread ID 'test-thread', got '%s'", thread.ChatID)
 	}
 }
 
@@ -192,7 +192,7 @@ func TestService_LedgerTags(t *testing.T) {
 		t.Fatalf("LogProposal failed: %v", err)
 	}
 
-	logsDir := filepath.Join(workspaceRoot, thread.SpaceID, "chats", thread.ID, "ledger", "logs", thread.ActiveBranch)
+	logsDir := filepath.Join(workspaceRoot, thread.ProjectID, "chats", thread.ChatID, "ledger", "logs", thread.ActiveBranch)
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		t.Fatalf("failed to read logs dir: %v", err)

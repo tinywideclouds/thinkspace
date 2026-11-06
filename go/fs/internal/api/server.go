@@ -7,12 +7,13 @@ import (
 	"net/http"
 	"time"
 
+	"uuid"
+
 	"github.com/coder/websocket"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
-	"uuid"
 )
 
 type Server struct {
@@ -52,9 +53,9 @@ func (server *Server) handleGetPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	service := server.manager.GetService(spaceID)
-	chatSession := &thinkgraph.Chat{
-		ID:      chatID,
-		SpaceID: spaceID,
+	chatSession := &thinkgraph.ChatAddress{
+		ChatID:    chatID,
+		ProjectID: spaceID,
 	}
 
 	data, err := service.GetContextPreview(r.Context(), chatSession, previewID)
@@ -190,7 +191,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			chatSess.Mu().RUnlock()
 
-			chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID, ActiveBranch: activeBranch}
+			chatObj := &thinkgraph.ChatAddress{ChatID: payload.ChatID, ProjectID: payload.SpaceID, ActiveBranch: activeBranch}
 			limit := payload.Limit
 			if limit <= 0 {
 				limit = 50
@@ -255,7 +256,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed to update chat meta on fork", "error", err)
 			}
 
-			chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID, ActiveBranch: newBranchID}
+			chatObj := &thinkgraph.ChatAddress{ChatID: payload.ChatID, ProjectID: payload.SpaceID, ActiveBranch: newBranchID}
 			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
 
 			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatObj, "", 50, topo)
@@ -278,7 +279,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			activeBranch := chatSess.Meta.ActiveBranch
 			chatSess.Mu().RUnlock()
 
-			chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID, ActiveBranch: activeBranch}
+			chatObj := &thinkgraph.ChatAddress{ChatID: payload.ChatID, ProjectID: payload.SpaceID, ActiveBranch: activeBranch}
 
 			if err := server.manager.GetService(payload.SpaceID).LogUserPrompt(ctx, chatObj, payload.NewText); err != nil {
 				server.logger.Error("Failed logging amended prompt", "error", err)
@@ -321,7 +322,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed updating meta on switch branch", "error", err)
 			}
 
-			chatObj := &thinkgraph.Chat{ID: payload.ChatID, SpaceID: payload.SpaceID, ActiveBranch: payload.TargetBranch}
+			chatObj := &thinkgraph.ChatAddress{ChatID: payload.ChatID, ProjectID: payload.SpaceID, ActiveBranch: payload.TargetBranch}
 			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
 
 			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatObj, "", 50, topo)

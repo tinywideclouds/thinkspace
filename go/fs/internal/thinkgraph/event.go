@@ -24,7 +24,7 @@ type Event struct {
 	Content   string            `json:"content"`
 	Tags      []string          `json:"tags,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
-	BranchID  string            `json:"branch_id,omitempty"`
+	GraphID   GraphID           `json:"graph_id,omitempty"`
 	Data      json.RawMessage   `json:"data,omitempty"` // Strictly typed domain structs live here
 }
 
@@ -41,8 +41,8 @@ func NewEvent(eventType EventType, content string) Event {
 
 // EventWriter defines the shared write contract for both the physical ledger and the materialized graph.
 type EventWriter interface {
-	AppendEvent(ctx context.Context, c *Chat, event Event) error
-	SaveDigest(ctx context.Context, c *Chat, digest DigestMeta) error
-	SaveSpaceContext(ctx context.Context, c *Chat, spaceCtx SpaceContext) error
-	SaveMutation(ctx context.Context, c *Chat, mutation MutationEvent) error
+	AppendEvent(ctx context.Context, c *ChatAddress, event Event) error
+	SaveDigest(ctx context.Context, c *ChatAddress, digest DigestMeta) error
+	SaveSpaceContext(ctx context.Context, c *ChatAddress, spaceCtx SpaceContext) error
+	SaveMutation(ctx context.Context, c *ChatAddress, mutation MutationEvent) error
 }

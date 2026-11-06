@@ -44,7 +44,7 @@ func NewBundleAssembler(
 // Assemble executes the graph traversal, context filtering, and persona template injection.
 func (a *BundleAssembler) Assemble(
 	ctx context.Context,
-	chatObj *thinkgraph.Chat,
+	chatObj *thinkgraph.ChatAddress,
 	topology map[string]thinkgraph.BranchTopology,
 	digestionHorizon uuid.UUID,
 	activeThinkState string,
@@ -152,7 +152,7 @@ func (a *BundleAssembler) Assemble(
 
 func (a *BundleAssembler) gatherTimeline(
 	ctx context.Context,
-	chatObj *thinkgraph.Chat,
+	chatObj *thinkgraph.ChatAddress,
 	topology map[string]thinkgraph.BranchTopology,
 	digestionHorizon uuid.UUID,
 	focusDepth int,

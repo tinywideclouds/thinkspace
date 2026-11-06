@@ -18,21 +18,18 @@ func (n ToolName) String() string {
 	return string(n)
 }
 
-// UI defines the subset of UserInterface methods needed by tools.
 type UI interface {
 	OnTextChunk(text string)
 	ConfirmTransition(targetThinkState, reasoning string) bool
 }
 
-// Workspace defines the subset of workspace operations needed by tools.
 type Workspace interface {
 	Graph() thinkgraph.GraphRepository
 	WorkspaceRoot() string
 }
 
 type ExecutionContext struct {
-	ChatID       string
-	SpaceID      string
+	Address      *thinkgraph.ChatAddress // The universal DAG coordinate
 	Bundle       *cognition.ThinkBundle
 	UI           UI
 	RawArguments map[string]any
