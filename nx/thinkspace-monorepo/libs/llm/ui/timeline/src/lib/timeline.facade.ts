@@ -39,6 +39,12 @@ export class TimelineFacade {
   public isLoadingHistory = this.domainTimeline.isLoadingHistory;
   public paginationSettings = this.uiSettings.pagination;
 
+  // --- Exposed Interactive Prompt Signals ---
+  public inspectedFlow = this.flow.inspectedFlow;
+  public pendingStrategy = this.cognitive.pendingStrategy;
+  public pendingReviewBranch = this.cognitive.pendingReviewBranch;
+  public pendingTransition = this.cognitive.pendingTransition;
+
   public enhancedFeed = computed<EnrichedChatItem[]>(() => {
     const feed = this.rawFeed();
     const bundledFeed: EnrichedChatItem[] = [];
@@ -131,6 +137,10 @@ export class TimelineFacade {
 
   public inspectFlow(item: FlowExecutionChatItem): void {
     this.flow.inspectFlow(item);
+  }
+
+  public closeInspector(): void {
+    this.flow.inspectedFlow.set(null);
   }
 
   public setHoveredTag(tag: string | null): void {

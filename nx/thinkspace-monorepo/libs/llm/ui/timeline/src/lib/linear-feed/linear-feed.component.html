@@ -52,6 +52,28 @@
         }
       </llm-turn-group>
     }
+
+    <!-- Appended Blocking Interactions -->
+    @if (facade.pendingTransition(); as transition) {
+      <llm-chat-transition-prompt
+        [targetDomain]="transition.targetThinkState"
+        [reasoning]="transition.reasoning"
+        (transitionDecided)="connection.submitTransitionDecision($event)">
+      </llm-chat-transition-prompt>
+    }
+
+    @if (facade.pendingStrategy()) {
+      <llm-chat-strategy-prompt
+        (strategySelected)="connection.selectStrategy($event)">
+      </llm-chat-strategy-prompt>
+    }
+
+    @if (facade.pendingReviewBranch(); as branch) {
+      <llm-chat-review-prompt
+        [branch]="branch"
+        (reviewDecided)="connection.submitReview($event)">
+      </llm-chat-review-prompt>
+    }
   </llm-scroll-viewport>
 
   @if (viewport.scrollState() === 'manual') {
@@ -65,5 +87,13 @@
         ↓
       }
     </button>
+  }
+
+  <!-- Flow Inspector Modal Overlay -->
+  @if (facade.inspectedFlow(); as flowItem) {
+    <llm-flow-inspector
+      [flowItem]="flowItem"
+      (inspectorClosed)="facade.closeInspector()">
+    </llm-flow-inspector>
   }
 </div>

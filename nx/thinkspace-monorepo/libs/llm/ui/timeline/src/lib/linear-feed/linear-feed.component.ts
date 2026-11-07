@@ -7,6 +7,12 @@ import { BlockRouterComponent } from '../blocks/block-router.component';
 import { SkeletonBlockComponent } from '../blocks/skeleton-block.component';
 import { TurnGroupComponent } from './turn-group.component';
 import { ActionBarComponent } from '../action-bar.component';
+import { 
+  ChatStrategyPromptComponent, 
+  ChatReviewPromptComponent, 
+  ChatTransitionPromptComponent,
+  FlowInspectorComponent
+} from '@org/llm-ui-core';
 
 @Component({
   selector: 'llm-linear-feed',
@@ -17,7 +23,11 @@ import { ActionBarComponent } from '../action-bar.component';
     BlockRouterComponent,
     SkeletonBlockComponent,
     TurnGroupComponent,
-    ActionBarComponent
+    ActionBarComponent,
+    ChatStrategyPromptComponent,
+    ChatReviewPromptComponent,
+    ChatTransitionPromptComponent,
+    FlowInspectorComponent
   ],
   templateUrl: './linear-feed.component.html'
 })
