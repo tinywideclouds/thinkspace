@@ -78,9 +78,9 @@ func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
 				_ = json.Unmarshal(n.MaterializedState, &state)
 			}
 
-			var agents []*pb.AgentRecordPayload
+			var agents []*pb.AgentRecord
 			for _, a := range state.Agents {
-				agents = append(agents, &pb.AgentRecordPayload{
+				agents = append(agents, &pb.AgentRecord{
 					AgentId:           a.AgentID,
 					Passed:            a.Passed,
 					Instruction:       a.Instruction,

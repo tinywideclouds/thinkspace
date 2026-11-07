@@ -16,6 +16,7 @@ type InboundEvent struct {
 	ApproveContext     *ApproveContext
 	TransitionDecision *TransitionDecision
 	LoadHistory        *LoadHistory
+	LoadSubGraph       *LoadSubGraph
 	ForkChat           *ForkChat
 	InlineEdit         *InlineEdit
 	SwitchBranch       *SwitchBranch
@@ -51,6 +52,12 @@ type LoadHistory struct {
 	ChatID  string
 	Cursor  string
 	Limit   int
+}
+
+type LoadSubGraph struct {
+	SpaceID string
+	ChatID  string
+	GraphID string
 }
 
 type ForkChat struct {

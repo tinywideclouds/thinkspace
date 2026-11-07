@@ -5,3 +5,7 @@ nx g @nx/workspace:move --project=llm-ui-chat --destination=libs/llm/ui/core
 
 npx nx g @nx/angular:library --name=llm-ui-cognitive-graph --directory=libs/llm/ui/cognitive-graph --tags="scope:llm"
 
+nx g @nx/workspace:move --project=llm-ui-graph --destination=libs/llm/ui/graph
+
+npx nx g @nx/angular:library --name=llm-ui-graph --directory=libs/llm/ui/graph
+

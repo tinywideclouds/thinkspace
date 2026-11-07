@@ -1,0 +1,115 @@
+[
+  {
+    "offsetMs": 100,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "anchor-stream-456",
+          "timestamp": "2026-10-23T12:05:00Z",
+          "tags": ["frontend"],
+          "tombstoned": false,
+          "metadata": {},
+          "flowExecution": {
+            "flowId": "mock-subgraph-stream",
+            "taskId": "task-xyz",
+            "task": "Streaming a live DAG visualization.",
+            "status": 1,
+            "error": "",
+            "summary": "Generating nodes in real-time...",
+            "agents": []
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 200,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "manager",
+        "event": {
+          "id": "tel-stream-start",
+          "type": "flow_start",
+          "timestamp": "2026-10-23T12:05:00Z",
+          "message": "",
+          "summary": "Starting live graph generation...",
+          "payloadJson": "{\"flow_id\": \"mock-subgraph-stream\", \"task_id\": \"task-xyz\", \"agent_count\": 1}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 1000,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "live-node-1",
+          "timestamp": "2026-10-23T12:05:01Z",
+          "branchId": "mock-subgraph-stream",
+          "message": {
+            "type": "SYSTEM",
+            "text": "Agent 1: Beginning work on component."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 2500,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "live-node-2",
+          "timestamp": "2026-10-23T12:05:02Z",
+          "branchId": "mock-subgraph-stream",
+          "edges": {
+            "parent_id": "live-node-1"
+          },
+          "message": {
+            "type": "MODEL",
+            "text": "Agent 1: Scaffolding complete."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 3500,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "anchor-stream-456",
+          "timestamp": "2026-10-23T12:05:03Z",
+          "tags": ["frontend"],
+          "tombstoned": false,
+          "metadata": {},
+          "flowExecution": {
+            "flowId": "mock-subgraph-stream",
+            "taskId": "task-xyz",
+            "task": "Streaming a live DAG visualization.",
+            "status": 2,
+            "error": "",
+            "summary": "Live graph generated successfully.",
+            "agents": []
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 3600,
+    "payload": {
+      "telemetryEvent": {
+        "channel": "manager",
+        "event": {
+          "id": "tel-stream-end",
+          "type": "flow_complete",
+          "timestamp": "2026-10-23T12:05:03Z",
+          "message": "",
+          "summary": "",
+          "payloadJson": "{\"flow_id\": \"mock-subgraph-stream\", \"passed\": true}"
+        }
+      }
+    }
+  }
+]

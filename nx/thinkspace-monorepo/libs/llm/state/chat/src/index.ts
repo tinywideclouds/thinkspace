@@ -2,6 +2,7 @@ export * from './lib/thinkspace-state.service';
 export * from './lib/chat.models';
 export * from './lib/timeline.store';
 export * from './lib/flow.store';
+export * from './lib/graph.store';
 export * from './lib/cognitive.store';
 export * from './lib/chat-connection.service';
 export * from './lib/workspace-state.service';

@@ -229,6 +229,31 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 			ui.SendSyncHistory(syncData)
 
+		case "load_sub_graph":
+			payload := inbound.LoadSubGraph
+
+			chatObj := &thinkgraph.ChatAddress{
+				ChatID:    payload.ChatID,
+				ProjectID: payload.SpaceID,
+				SubGraph: thinkgraph.SubGraph{
+					Name: payload.GraphID, // In Badger GraphID correlates to the bounded SubGraph Name
+				},
+			}
+
+			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
+			events, err := engine.GetFullTimeline(ctx, chatObj, nil)
+			if err != nil {
+				server.logger.Error("Failed to fetch subgraph timeline", "error", err)
+				continue
+			}
+
+			syncData, err := MarshalSyncSubGraph(events)
+			if err != nil {
+				server.logger.Error("Failed to marshal sync subgraph payload", "error", err)
+				continue
+			}
+			ui.SendSyncSubGraph(syncData)
+
 		case "fork_chat":
 			payload := inbound.ForkChat
 

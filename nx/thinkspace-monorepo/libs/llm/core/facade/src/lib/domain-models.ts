@@ -114,6 +114,7 @@ export type AppEvent =
       activeBranch: string;
       branches: Record<string, BranchTopology>;
     }
+  | { type: 'sync_subgraph'; events: GraphEvent[] }
   | { type: 'preview_context'; context: PreviewContext }
   | { type: 'agent_stream'; agentId: number; text: string }
   | { type: 'streamed_graph_event'; event: GraphEvent }

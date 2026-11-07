@@ -173,6 +173,37 @@ func TestMarshalSyncHistory(t *testing.T) {
 	}
 }
 
+func TestMarshalSyncSubGraph(t *testing.T) {
+	evID := uuid.NewV7()
+
+	nodes := []thinkgraph.Node{
+		{
+			Event: thinkgraph.Event{
+				ID:        evID,
+				Timestamp: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
+				Type:      thinkgraph.EventModel,
+				Content:   "SubGraph message",
+			},
+		},
+	}
+
+	data, err := api.MarshalSyncSubGraph(nodes)
+	if err != nil {
+		t.Fatalf("failed to marshal sync subgraph: %v", err)
+	}
+
+	jsonStr := string(data)
+	if !strings.Contains(jsonStr, "syncSubGraph") {
+		t.Errorf("expected wrapper 'syncSubGraph', got: %s", jsonStr)
+	}
+	if !strings.Contains(jsonStr, evID.String()) {
+		t.Errorf("expected event ID %s to be present", evID.String())
+	}
+	if !strings.Contains(jsonStr, `"message"`) {
+		t.Errorf("expected oneof payload 'message' to be present, got: %s", jsonStr)
+	}
+}
+
 func TestMarshalRequestTransition(t *testing.T) {
 	data, err := api.MarshalRequestTransition("golang", "need to compile")
 	if err != nil {

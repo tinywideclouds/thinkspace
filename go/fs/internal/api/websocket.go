@@ -63,6 +63,10 @@ func (ui *WebSocketUI) SendSyncHistory(data []byte) {
 	ui.sendBytes(data)
 }
 
+func (ui *WebSocketUI) SendSyncSubGraph(data []byte) {
+	ui.sendBytes(data)
+}
+
 func (ui *WebSocketUI) OnTextChunk(text string) {
 	data, err := MarshalChatStream(text)
 	if err != nil {

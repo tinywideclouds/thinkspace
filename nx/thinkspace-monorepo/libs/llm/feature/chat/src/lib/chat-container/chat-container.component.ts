@@ -20,6 +20,7 @@ import { TimelineFacade, LinearFeedComponent } from '@org/llm-ui-timeline';
 import { CognitiveGraphComponent } from '@org/llm-ui-cognitive-graph';
 import { FocusHudComponent } from '@org/llm-ui-hud';
 import { DeskComponent } from '@org/llm-ui-workbench';
+import { FlowGraphComponent } from '@org/llm-ui-flow-graph';
 
 @Component({
   selector: 'llm-chat-container',
@@ -37,12 +38,13 @@ import { DeskComponent } from '@org/llm-ui-workbench';
     LinearFeedComponent,
     CognitiveGraphComponent,
     FocusHudComponent,
-    DeskComponent
+    DeskComponent,
+    FlowGraphComponent,
   ],
   templateUrl: './chat-container.component.html',
   styleUrl: './chat-container.component.scss',
   host: {
-    class: 'block h-full w-full'
+    class: 'block h-full w-full relative' // Added relative for overlay positioning
   }
 })
 export class ChatContainerComponent {

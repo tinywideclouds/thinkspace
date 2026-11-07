@@ -110,7 +110,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 
 	// Test 3: SendSyncHistory Direct Payload Routing
 	go func() {
-		ui.SendSyncHistory([]byte(`{"type":"sync_history"}`))
+		ui.SendSyncHistory([]byte(`{"syncHistory":{}}`))
 	}()
 
 	_, data, err = conn.Read(ctx)
@@ -118,7 +118,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Fatalf("failed to read sync history: %v", err)
 	}
 
-	if string(data) != `{"type":"sync_history"}` {
+	if string(data) != `{"syncHistory":{}}` {
 		t.Errorf("expected sync history payload, got '%s'", string(data))
 	}
 
@@ -159,5 +159,19 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for transition channel to unblock")
+	}
+
+	// Test 5: SendSyncSubGraph Direct Payload Routing
+	go func() {
+		ui.SendSyncSubGraph([]byte(`{"syncSubGraph":{}}`))
+	}()
+
+	_, data, err = conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("failed to read sync subgraph: %v", err)
+	}
+
+	if string(data) != `{"syncSubGraph":{}}` {
+		t.Errorf("expected sync subgraph payload, got '%s'", string(data))
 	}
 }

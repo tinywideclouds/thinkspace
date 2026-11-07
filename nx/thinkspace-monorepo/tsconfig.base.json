@@ -44,7 +44,9 @@
       "@org/llm-ui-cognitive-graph": [
         "./libs/llm/ui/cognitive-graph/src/index.ts"
       ],
-      "@org/core-logger": ["./libs/core/logger/src/index.ts"]
+      "@org/core-logger": ["./libs/core/logger/src/index.ts"],
+      "@org/llm-ui-graph": ["./libs/llm/ui/graph/src/index.ts"],
+      "@org/llm-ui-flow-graph": ["./libs/llm/ui/flow-graph/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

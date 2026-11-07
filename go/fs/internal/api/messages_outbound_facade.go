@@ -22,7 +22,7 @@ func MarshalSyncHistory(recentEvents []thinkgraph.Node, digests []thinkgraph.Dig
 		}
 	}
 
-	pbFocus := &pb.AttentionFocusPayload{
+	pbFocus := &pb.AttentionFocus{
 		PrimaryFocus:   focus.PrimaryFocus,
 		RelatedContext: focus.RelatedContext,
 		DormantLenses:  focus.DormantLenses,
@@ -30,12 +30,25 @@ func MarshalSyncHistory(recentEvents []thinkgraph.Node, digests []thinkgraph.Dig
 
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_SyncHistory{
-			SyncHistory: &pb.SyncHistoryPayload{
+			SyncHistory: &pb.SyncHistory{
 				RecentEvents: pbEvents,
 				Digests:      pbDigests,
 				Focus:        pbFocus,
 				NextCursor:   nextCursor,
 				HasMore:      hasMore,
+			},
+		},
+	}
+	return protoMarshaler.Marshal(event)
+}
+
+func MarshalSyncSubGraph(events []thinkgraph.Node) ([]byte, error) {
+	pbEvents := ProjectTimeline(events)
+
+	event := &pb.WSEvent{
+		Payload: &pb.WSEvent_SyncSubGraph{
+			SyncSubGraph: &pb.SyncSubGraph{
+				Events: pbEvents,
 			},
 		},
 	}
@@ -87,7 +100,7 @@ func MarshalAvailableSpaces(spaces []SpaceState) ([]byte, error) {
 
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_AvailableSpaces{
-			AvailableSpaces: &pb.AvailableSpacesPayload{Spaces: pbSpaces},
+			AvailableSpaces: &pb.AvailableSpaces{Spaces: pbSpaces},
 		},
 	}
 	return protoMarshaler.Marshal(event)
@@ -96,7 +109,7 @@ func MarshalAvailableSpaces(spaces []SpaceState) ([]byte, error) {
 func MarshalChatStream(text string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_ChatStream{
-			ChatStream: &pb.ChatStreamPayload{Text: text},
+			ChatStream: &pb.ChatStream{Text: text},
 		},
 	}
 	return protoMarshaler.Marshal(event)
@@ -105,7 +118,7 @@ func MarshalChatStream(text string) ([]byte, error) {
 func MarshalRequestStrategy() ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_RequestStrategy{
-			RequestStrategy: &pb.RequestStrategyPayload{Active: true},
+			RequestStrategy: &pb.RequestStrategy{Active: true},
 		},
 	}
 	return protoMarshaler.Marshal(event)
@@ -114,7 +127,7 @@ func MarshalRequestStrategy() ([]byte, error) {
 func MarshalRequestReview(branch string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_RequestReview{
-			RequestReview: &pb.RequestReviewPayload{Branch: branch},
+			RequestReview: &pb.RequestReview{Branch: branch},
 		},
 	}
 	return protoMarshaler.Marshal(event)
@@ -123,7 +136,7 @@ func MarshalRequestReview(branch string) ([]byte, error) {
 func MarshalRequestTransition(targetThinkState string, reasoning string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_RequestTransition{
-			RequestTransition: &pb.RequestTransitionPayload{
+			RequestTransition: &pb.RequestTransition{
 				TargetThinkState: targetThinkState,
 				Reasoning:        reasoning,
 			},
@@ -135,7 +148,7 @@ func MarshalRequestTransition(targetThinkState string, reasoning string) ([]byte
 func MarshalAgentStream(agentID int, text string) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_AgentStream{
-			AgentStream: &pb.AgentStreamPayload{AgentId: int32(agentID), Text: text},
+			AgentStream: &pb.AgentStream{AgentId: int32(agentID), Text: text},
 		},
 	}
 	return protoMarshaler.Marshal(event)
@@ -151,7 +164,7 @@ func MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
 		})
 	}
 
-	pbFocus := &pb.AttentionFocusPayload{
+	pbFocus := &pb.AttentionFocus{
 		PrimaryFocus:   ctxData.Focus.PrimaryFocus,
 		RelatedContext: ctxData.Focus.RelatedContext,
 		DormantLenses:  ctxData.Focus.DormantLenses,
@@ -159,7 +172,7 @@ func MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
 
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_PreviewContext{
-			PreviewContext: &pb.PreviewContextPayload{
+			PreviewContext: &pb.PreviewContext{
 				SpaceId:             ctxData.SpaceID,
 				ChatId:              ctxData.ChatID,
 				PreviewId:           ctxData.PreviewID,
@@ -186,9 +199,9 @@ func MarshalTelemetryEvent(channel string, event telemetry.Event) ([]byte, error
 
 	pbEvent := &pb.WSEvent{
 		Payload: &pb.WSEvent_TelemetryEvent{
-			TelemetryEvent: &pb.TelemetryEventPayload{
+			TelemetryEvent: &pb.TelemetryEvent{
 				Channel: channel,
-				Event: &pb.TelemetryEvent{
+				Event: &pb.TelemetryData{
 					Id:          event.ID.String(),
 					Type:        event.Type,
 					Timestamp:   event.Timestamp.Format(time.RFC3339),

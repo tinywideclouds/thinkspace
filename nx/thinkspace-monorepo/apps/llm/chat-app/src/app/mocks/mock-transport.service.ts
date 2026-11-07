@@ -74,6 +74,9 @@ export class MockTransportService {
     if (message.payload.case === 'loadHistory') {
       this.showMockSnackbar(`📡 Pagination Triggered: Loading ${message.payload.value.limit} items`);
       this.handleLoadHistory(message.payload.value);
+    } else if (message.payload.case === 'loadSubGraph') {
+      this.showMockSnackbar(`🕸️ DAG Projection Triggered: Loading SubGraph ${message.payload.value.graphId}`);
+      this.handleLoadSubGraph(message.payload.value);
     } else if (message.payload.case === 'submitPrompt') {
       const text = message.payload.value.text.trim();
       if (text.startsWith('/debug ') || text.startsWith('/d ')) {
@@ -124,6 +127,28 @@ export class MockTransportService {
     }, this.currentLatencyMs);
   }
 
+  private handleLoadSubGraph(payload: { spaceId: string, chatId: string, graphId: string }): void {
+    setTimeout(() => {
+      const subgraphs = (mockGraph as any).subgraphs || {};
+      const graphData = subgraphs[payload.graphId] || [];
+
+      try {
+        const mappedEvents = graphData.map((e: any) => fromJson(GraphEventSchema, e as JsonValue));
+
+        this.inbound$.next(create(WSEventSchema, {
+          payload: {
+            case: 'syncSubGraph',
+            value: {
+              events: mappedEvents
+            }
+          }
+        }));
+      } catch (err) {
+        this.logger.error('MockTransport', 'FATAL: Failed to construct syncSubGraph payload!', err);
+      }
+    }, this.currentLatencyMs);
+  }
+
   private playScenario(name: string): void {
     const scenarioData = (mockGraph.scenarios as Record<string, MockScenarioStep[]>)[name];
     if (!scenarioData || !Array.isArray(scenarioData)) {
@@ -163,7 +188,6 @@ export class MockTransportService {
     const taskId = 'task-' + flowId.substring(0, 5);
     const durableEventId = crypto.randomUUID();
 
-    // 1. Drop the durable anchor into the timeline first
     setTimeout(() => {
       const startAnchor = create(WSEventSchema, {
         payload: {
@@ -182,7 +206,7 @@ export class MockTransportService {
                   flowId: flowId,
                   taskId: taskId,
                   task: 'Synthesize Response',
-                  status: 1, // FlowStatus.RUNNING
+                  status: 1, 
                   error: '',
                   agents: []
                 }
@@ -191,11 +215,9 @@ export class MockTransportService {
           }
         }
       });
-      console.log('[DEBUG MockTransport] Emitting Start Anchor:', startAnchor);
       this.inbound$.next(startAnchor);
     }, 100);
 
-    // 2. Fire the ephemeral telemetry for the live overlay
     setTimeout(() => {
       this.inbound$.next(fromJson(WSEventSchema, {
         telemetryEvent: {
@@ -212,14 +234,12 @@ export class MockTransportService {
       } as JsonValue));
     }, 200);
 
-    // 3. Emit standard model response
     setTimeout(() => {
       this.inbound$.next(fromJson(WSEventSchema, {
         chatStream: { text: `Mock response to: "${promptText}"` }
       } as JsonValue));
     }, 800);
 
-    // 4. Complete the live telemetry
     setTimeout(() => {
       this.inbound$.next(fromJson(WSEventSchema, {
         telemetryEvent: {
@@ -236,7 +256,6 @@ export class MockTransportService {
       } as JsonValue));
     }, 1200);
 
-    // 5. Update the durable anchor to COMPLETED
     setTimeout(() => {
       const endAnchor = create(WSEventSchema, {
         payload: {
@@ -255,7 +274,7 @@ export class MockTransportService {
                   flowId: flowId,
                   taskId: taskId,
                   task: 'Synthesize Response',
-                  status: 2, // FlowStatus.COMPLETED
+                  status: 2, 
                   error: '',
                   agents: [{
                     agentId: 'mock-agent',
@@ -271,7 +290,6 @@ export class MockTransportService {
           }
         }
       });
-      console.log('[DEBUG MockTransport] Emitting End Anchor:', endAnchor);
       this.inbound$.next(endAnchor);
     }, 1300);
   }

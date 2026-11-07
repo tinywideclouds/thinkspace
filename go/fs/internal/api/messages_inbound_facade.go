@@ -71,6 +71,13 @@ func UnmarshalInbound(data []byte) (*InboundEvent, error) {
 			Cursor:  payload.LoadHistory.Cursor,
 			Limit:   int(payload.LoadHistory.Limit),
 		}
+	case *pb.WSEvent_LoadSubGraph:
+		domainEvent.Type = "load_sub_graph"
+		domainEvent.LoadSubGraph = &LoadSubGraph{
+			SpaceID: payload.LoadSubGraph.SpaceId,
+			ChatID:  payload.LoadSubGraph.ChatId,
+			GraphID: payload.LoadSubGraph.GraphId,
+		}
 	case *pb.WSEvent_ForkChat:
 		domainEvent.Type = "fork_chat"
 		domainEvent.ForkChat = &ForkChat{

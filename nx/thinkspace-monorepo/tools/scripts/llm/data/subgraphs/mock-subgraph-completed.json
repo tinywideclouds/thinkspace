@@ -1,0 +1,35 @@
+[
+  {
+    "id": "subnode-1",
+    "timestamp": "2026-10-23T12:00:01Z",
+    "branchId": "mock-subgraph-completed",
+    "message": {
+      "type": "SYSTEM",
+      "text": "Initializing architectural review..."
+    }
+  },
+  {
+    "id": "subnode-2",
+    "timestamp": "2026-10-23T12:00:02Z",
+    "branchId": "mock-subgraph-completed",
+    "edges": {
+      "parent_id": "subnode-1"
+    },
+    "message": {
+      "type": "MODEL",
+      "text": "Analyzed projection layer requirements. Generating layout."
+    }
+  },
+  {
+    "id": "subnode-3",
+    "timestamp": "2026-10-23T12:00:05Z",
+    "branchId": "mock-subgraph-completed",
+    "edges": {
+      "parent_id": "subnode-2"
+    },
+    "message": {
+      "type": "MODEL",
+      "text": "Layout applied. Canvas separated from data source."
+    }
+  }
+]

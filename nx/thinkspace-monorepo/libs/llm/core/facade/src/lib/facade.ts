@@ -152,6 +152,17 @@ export class LlmFacade {
         };
       }
 
+      case 'syncSubGraph': {
+        const validEvents = protocolBufferEvent.payload.value.events
+          .map(e => this.mapGraphEvent(e))
+          .filter((e): e is GraphEvent => e !== null);
+
+        return {
+          type: 'sync_subgraph',
+          events: validEvents
+        };
+      }
+
       case 'previewContext':
         return {
           type: 'preview_context',
@@ -242,6 +253,12 @@ export class LlmFacade {
   static createReviewDecision(branch: string, accepted: boolean): WSEvent {
     return create(WSEventSchema, {
       payload: { case: 'reviewDecision', value: { branch, accepted } }
+    });
+  }
+
+  static createLoadSubGraph(spaceId: string, chatId: string, graphId: string): WSEvent {
+    return create(WSEventSchema, {
+      payload: { case: 'loadSubGraph', value: { spaceId, chatId, graphId } }
     });
   }
 

@@ -1,0 +1,25 @@
+[
+  {
+    "offsetMs": 200,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "anchor-completed-123",
+          "timestamp": "2026-10-23T12:00:00Z",
+          "tags": ["backend"],
+          "tombstoned": false,
+          "metadata": {},
+          "flowExecution": {
+            "flowId": "mock-subgraph-completed",
+            "taskId": "task-abc",
+            "task": "Extract the data projection layer.",
+            "status": 2,
+            "error": "",
+            "summary": "Data projection layer extracted successfully.",
+            "agents": []
+          }
+        }
+      }
+    }
+  }
+]

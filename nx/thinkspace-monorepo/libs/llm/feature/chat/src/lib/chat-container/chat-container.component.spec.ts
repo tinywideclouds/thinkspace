@@ -32,6 +32,9 @@ vi.mock('@org/llm-ui-hud', () => ({
 vi.mock('@org/llm-ui-workbench', () => ({
   DeskComponent: { standalone: true, template: '<div id="mock-desk"></div>' }
 }));
+vi.mock('@org/llm-ui-flowgraph', () => ({
+  FlowGraphComponent: { standalone: true, template: '<div id="mock-flow-graph"></div>' }
+}));
 
 interface MockConnectionService {
   connected: WritableSignal<boolean>;
@@ -43,6 +46,7 @@ interface MockFlowStore {
   flowStates: WritableSignal<Map<string, FlowState>>;
   retainLogs: WritableSignal<boolean>;
   inspectedFlow: WritableSignal<FlowExecutionChatItem | null>;
+  inspectedGraphId: WritableSignal<string | null>;
   manualClearLogs: Mock<() => void>;
 }
 
@@ -96,6 +100,7 @@ describe('ChatContainerComponent', () => {
       flowStates: signal(new Map<string, FlowState>()), 
       retainLogs: signal(false), 
       inspectedFlow: signal<FlowExecutionChatItem | null>(null), 
+      inspectedGraphId: signal<string | null>(null),
       manualClearLogs: vi.fn() 
     };
     

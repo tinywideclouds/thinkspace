@@ -58,10 +58,10 @@ message FlowExecution {
   FlowStatus status = 4;
   string summary = 5;
   string error = 6;
-  repeated AgentRecordPayload agents = 7;
+  repeated AgentRecord agents = 7;
 }
 
-message AgentRecordPayload {
+message AgentRecord {
   string agent_id = 1;
   bool passed = 2;
   string instruction = 3;
@@ -70,7 +70,6 @@ message AgentRecordPayload {
   string state_delta = 6;
 }
 
-// RESTORED: The missing FileDelta message
 message FileDelta {
   string summary = 1;
   string path = 2;
@@ -79,9 +78,7 @@ message FileDelta {
   string parent_id = 5;
 }
 
-// The generic core memory block, mirroring `thinkgraph.Node` exactly.
 message GraphEvent {
-  // Universal routing & graph data
   string id = 1;
   string timestamp = 2;
   repeated string tags = 3;
@@ -90,13 +87,12 @@ message GraphEvent {
   map<string, string> edges = 6; 
   map<string, string> metadata = 7;
 
-  // Strongly-typed timeline projections
   oneof payload {
     Message message = 8;
     CandidateProposal candidate_proposal = 9;
     CandidateResolution candidate_resolution = 10;
     FlowExecution flow_execution = 11;
-    FileDelta file_delta = 12; // RESTORED
+    FileDelta file_delta = 12; 
   }
 }
 
@@ -106,7 +102,7 @@ message DigestMeta {
   bool is_sticky = 3;
 }
 
-message AttentionFocusPayload {
+message AttentionFocus {
   repeated string primary_focus = 1;
   repeated string related_context = 2;
   repeated string dormant_lenses = 3;
@@ -117,62 +113,70 @@ message BranchTopology {
   string fork_point = 2;
 }
 
-// --- Outbound Payloads (Server -> Client) ---
+// --- Outbound Data (Server -> Client) ---
 
-message ChatStreamPayload {
+message ChatStream {
   string text = 1;
 }
 
-message AgentStreamPayload {
+message AgentStream {
   int32 agent_id = 1;
   string text = 2;
 }
 
-// Real-time delivery of a GraphEvent over the WebSocket before it is batched into a SyncHistoryPayload.
 message StreamedGraphEvent {
   GraphEvent event = 1;
 }
 
-message SyncHistoryPayload {
+message SyncHistory {
   repeated GraphEvent recent_events = 1;
   map<string, DigestMeta> digests = 2;
-  AttentionFocusPayload focus = 3;
+  AttentionFocus focus = 3;
   
-  // Pagination additions
   string next_cursor = 4;
   bool has_more = 5;
 
-  // Topology additions
   string active_branch = 6;
   map<string, BranchTopology> branches = 7;
 }
 
-message LoadHistoryPayload {
-  string space_id = 1;
-  string chat_id = 2;
-  string cursor = 3;  // The ID of the oldest event currently visible
-  int32 limit = 4;    // Number of events to fetch (e.g., 50)
+// NEW: Raw SubGraph synchronization for the DAG visualizer
+message SyncSubGraph {
+  repeated GraphEvent events = 1;
 }
 
-// Core System Payloads
-message RequestStrategyPayload {
+message LoadHistory {
+  string space_id = 1;
+  string chat_id = 2;
+  string cursor = 3;  
+  int32 limit = 4;    
+}
+
+// NEW: Command to fetch an entire bounded SubGraph
+message LoadSubGraph {
+  string space_id = 1;
+  string chat_id = 2;
+  string graph_id = 3;
+}
+
+message RequestStrategy {
   bool active = 1;
 }
 
-message RequestReviewPayload {
+message RequestReview {
   string branch = 1;
 }
 
-message RequestTransitionPayload {
+message RequestTransition {
   string target_think_state = 1;
   string reasoning = 2;
 }
 
-message AvailableSpacesPayload {
+message AvailableSpaces {
   repeated SpaceInfo spaces = 1;
 }
 
-message PreviewContextPayload {
+message PreviewContext {
   string space_id = 1;
   string chat_id = 2;
   string preview_id = 3; 
@@ -180,7 +184,7 @@ message PreviewContextPayload {
   repeated string sticky_digests = 5;
   repeated string recent_history = 6;
   repeated FileContextMetaData file_contexts = 7;
-  AttentionFocusPayload focus = 8;
+  AttentionFocus focus = 8;
 }
 
 message FileContextMetaData {
@@ -189,23 +193,22 @@ message FileContextMetaData {
   int32 token_count = 3;
 }
 
-// --- The New Unified Telemetry Protocol ---
-message TelemetryEvent {
-  string id = 1;            // UUID
-  string type = 2;          // e.g., "log", "flow_start", "flow_status"
-  string timestamp = 3;     // RFC3339 formatted time string
-  string message = 4;       // Human readable context
-  string summary = 5;       // Optional overarching task summary
-  string payload_json = 6;  // Arbitrary untyped contextual data (e.g., EnginePayload, ManagerPayload)
+message TelemetryData {
+  string id = 1;            
+  string type = 2;          
+  string timestamp = 3;     
+  string message = 4;       
+  string summary = 5;       
+  string payload_json = 6;  
 }
 
-message TelemetryEventPayload {
-  string channel = 1;       // Destination UI Tab (e.g., "manager", "agent-1")
-  TelemetryEvent event = 2;
+message TelemetryEvent {
+  string channel = 1;       
+  TelemetryData event = 2;
 }
 
 // --- Schema Registry for UI ---
-message FanOutPayload {
+message FanOut {
   string flow_id = 1;
   string task_id = 2;
   int32 agent_count = 3;
@@ -217,127 +220,122 @@ message FanOutPayload {
   bool passed = 9;
 }
 
-message ManagerPayload {
+message Manager {
   string branch = 1;
   string strategy = 2;
 }
 
-// --- Inbound Payloads (Client -> Server) ---
-message SubmitPromptPayload {
+// --- Inbound Commands (Client -> Server) ---
+message SubmitPrompt {
   string text = 1;
   string space_id = 2;
   string chat_id = 3;
 }
 
-message SelectStrategyPayload {
+message SelectStrategy {
   DelegationStrategy strategy_id = 1;
 }
 
-message ReviewDecisionPayload {
+message ReviewDecision {
   string branch = 1;
   bool accepted = 2;
 }
 
-message ApproveContextPayload {
+message ApproveContext {
   bool approved = 1;
   repeated string retained_file_paths = 2;
   repeated int32 retained_history_indices = 3;
 }
 
-message TransitionDecisionPayload {
+message TransitionDecision {
   bool approved = 1;
 }
 
-// --- New Branching & Editing Payloads (Client -> Server) ---
-message ForkChatPayload {
+message ForkChat {
   string space_id = 1;
   string chat_id = 2;
   string target_event_id = 3;
 }
 
-message InlineEditPayload {
+message InlineEdit {
   string space_id = 1;
   string chat_id = 2;
   string target_event_id = 3;
   string new_text = 4;
 }
 
-message SwitchBranchPayload {
+message SwitchBranch {
   string space_id = 1;
   string chat_id = 2;
   string target_branch = 3;
 }
 
 // --- Internal Debug / Core Logic (Optional) ---
-message SystemRulesPayload {
+message SystemRules {
 	string persona = 1;
 	string formatting_constraints = 2;
 }
 
-message MapbookPayload {
+message Mapbook {
 	map<string, string> maps = 1;
 }
 
-message TrajectoryEventPayload {
+message TrajectoryEvent {
 	string role = 1;
 	string content = 2;
 }
 
-message TrajectoryPayload {
+message Trajectory {
 	repeated string long_term_memory = 1;
-	repeated TrajectoryEventPayload working_memory = 2;
-	TrajectoryEventPayload catalyst = 3;
+	repeated TrajectoryEvent working_memory = 2;
+	TrajectoryEvent catalyst = 3;
 }
 
-message WorkbenchItemPayload {
+message WorkbenchItem {
 	string path = 1;
 	string content = 2;
 	int32 token_count = 3;
 }
 
-message ThinkBundlePayload {
+message ThinkBundle {
 	string space_id = 1;
 	string chat_id = 2;
 	string preview_id = 3;
-	SystemRulesPayload rules = 4;
-	MapbookPayload mapbook = 5;
-	TrajectoryPayload trajectory = 6;
-	repeated WorkbenchItemPayload workbench = 7;
+	SystemRules rules = 4;
+	Mapbook mapbook = 5;
+	Trajectory trajectory = 6;
+	repeated WorkbenchItem workbench = 7;
 }
 
 // --- The Master Envelope ---
 message WSEvent {
   oneof payload {
-    // Outbound Live Streams (Server -> Client)
-    ChatStreamPayload chat_stream = 1;
-    TelemetryEventPayload telemetry_event = 2; 
-    AgentStreamPayload agent_stream = 6;
+    ChatStream chat_stream = 1;
+    TelemetryEvent telemetry_event = 2; 
+    AgentStream agent_stream = 6;
     StreamedGraphEvent streamed_graph_event = 23;
 
-    // Outbound Interactive Requests (Server -> Client)
-    RequestStrategyPayload request_strategy = 8;
-    RequestReviewPayload request_review = 9;
-    RequestTransitionPayload request_transition = 20;
+    RequestStrategy request_strategy = 8;
+    RequestReview request_review = 9;
+    RequestTransition request_transition = 20;
 
-    // Outbound State Syncs (Server -> Client)
-    AvailableSpacesPayload available_spaces = 10;
-    SyncHistoryPayload sync_history = 15;
-    PreviewContextPayload preview_context = 18; 
+    AvailableSpaces available_spaces = 10;
+    SyncHistory sync_history = 15;
+    SyncSubGraph sync_sub_graph = 27; // NEW
+    PreviewContext preview_context = 18; 
     
-    // Internal state dumps
-    ThinkBundlePayload think_bundle = 16;
+    ThinkBundle think_bundle = 16;
 
-    // Inbound Commands (Client -> Server)
-    SubmitPromptPayload submit_prompt = 11;
-    SelectStrategyPayload select_strategy = 12;
-    ReviewDecisionPayload review_decision = 13;
-    ApproveContextPayload approve_context = 17;
-    TransitionDecisionPayload transition_decision = 21;
-    LoadHistoryPayload load_history = 22;
+    SubmitPrompt submit_prompt = 11;
+    SelectStrategy select_strategy = 12;
+    ReviewDecision review_decision = 13;
+    ApproveContext approve_context = 17;
+    TransitionDecision transition_decision = 21;
+    LoadHistory load_history = 22;
+    LoadSubGraph load_sub_graph = 28; // NEW
 
-    // Branch/Edit Commands
-    ForkChatPayload fork_chat = 24;
-    InlineEditPayload inline_edit = 25;
-    SwitchBranchPayload switch_branch = 26;
+    ForkChat fork_chat = 24;
+    InlineEdit inline_edit = 25;
+    SwitchBranch switch_branch = 26;
   }
 }

@@ -9,7 +9,8 @@ const graph = {
   digests: {}, 
   focus: { primaryFocus: ['ui'], relatedContext: ['angular'], dormantLenses: [] },
   scenarios: {},
-  files: {}
+  files: {},
+  subgraphs: {}
 };
 
 // 1. Parse JSONL Shards
@@ -79,7 +80,22 @@ if (fs.existsSync(filesDir)) {
   }
 }
 
+// 5. Parse Subgraphs
+const subgraphsDir = path.join(DATA_DIR, 'subgraphs');
+if (fs.existsSync(subgraphsDir)) {
+  const subgraphFiles = fs.readdirSync(subgraphsDir).filter(f => f.endsWith('.json'));
+  for (const file of subgraphFiles) {
+    const graphId = file.replace('.json', '');
+    try {
+      const nodes = JSON.parse(fs.readFileSync(path.join(subgraphsDir, file), 'utf8'));
+      graph.subgraphs[graphId] = nodes;
+    } catch (e) {
+      console.error(`Error parsing subgraph ${file}:`, e);
+    }
+  }
+}
+
 fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
 fs.writeFileSync(OUTPUT_FILE, JSON.stringify(graph, null, 2));
 
-console.log(`✅ Generated mock graph with ${graph.events.length} events, ${Object.keys(graph.digests).length} digests, ${Object.keys(graph.scenarios).length} scenarios, and ${Object.keys(graph.files).length} files.`);
+console.log(`✅ Generated mock graph with ${graph.events.length} events, ${Object.keys(graph.digests).length} digests, ${Object.keys(graph.scenarios).length} scenarios, ${Object.keys(graph.files).length} files, and ${Object.keys(graph.subgraphs).length} subgraphs.`);

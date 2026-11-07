@@ -180,6 +180,34 @@ func TestUnmarshalInbound_LoadHistory(t *testing.T) {
 	}
 }
 
+func TestUnmarshalInbound_LoadSubGraph(t *testing.T) {
+	payload := []byte(`{
+		"loadSubGraph": {
+			"spaceId": "golang",
+			"chatId": "chat-123",
+			"graphId": "flow-456"
+		}
+	}`)
+
+	inbound, err := api.UnmarshalInbound(payload)
+	if err != nil {
+		t.Fatalf("unexpected error unmarshaling: %v", err)
+	}
+
+	if inbound.Type != "load_sub_graph" {
+		t.Errorf("expected 'load_sub_graph', got '%s'", inbound.Type)
+	}
+	if inbound.LoadSubGraph.SpaceID != "golang" {
+		t.Errorf("expected spaceId 'golang', got '%s'", inbound.LoadSubGraph.SpaceID)
+	}
+	if inbound.LoadSubGraph.ChatID != "chat-123" {
+		t.Errorf("expected chatId 'chat-123', got '%s'", inbound.LoadSubGraph.ChatID)
+	}
+	if inbound.LoadSubGraph.GraphID != "flow-456" {
+		t.Errorf("expected graphId 'flow-456', got '%s'", inbound.LoadSubGraph.GraphID)
+	}
+}
+
 func TestUnmarshalInbound_ForkChat(t *testing.T) {
 	payload := []byte(`{
 		"forkChat": {

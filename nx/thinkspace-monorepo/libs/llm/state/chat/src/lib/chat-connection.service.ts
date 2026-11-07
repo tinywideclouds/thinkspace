@@ -1,195 +1,198 @@
-import { Injectable, signal, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { LlmFacade, AppEvent, DelegationStrategy, GraphEvent } from '@org/llm-core-facade';
 import { TransportService } from '@org/llm-core-transport';
-import { ThinkspaceStateService } from './thinkspace-state.service';
+import { GraphStore } from './graph.store';
 import { TimelineStore } from './timeline.store';
-import { FlowStore } from './flow.store';
 import { CognitiveStore } from './cognitive.store';
-import { UiSettingsService } from './ui-settings.service';
-import { LlmFacade, AppEvent, DelegationStrategy } from '@org/llm-core-facade';
+import { FlowStore } from './flow.store';
+import { ThinkspaceStateService } from './thinkspace-state.service';
+import { ChatItem } from './chat.models';
 
 @Injectable({ providedIn: 'root' })
 export class ChatConnectionService {
-  private transport = inject(TransportService);
+  private graphStore = inject(GraphStore);
+  private timelineStore = inject(TimelineStore);
+  private cognitiveStore = inject(CognitiveStore);
+  private flowStore = inject(FlowStore);
   private workspace = inject(ThinkspaceStateService);
-  private timeline = inject(TimelineStore);
-  private flow = inject(FlowStore);
-  private cognitive = inject(CognitiveStore);
-  private uiSettings = inject(UiSettingsService);
+  private transport = inject(TransportService);
 
   public connected = signal<boolean>(false);
+  private connectionSub: Subscription | null = null;
 
-  public connect(url: string): void {
-    this.transport.connect(url).subscribe({
-      next: (protocolBufferEvent) => {
-        const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+  constructor() {
+    this.initConnection();
+  }
+
+  public initConnection(wsUrl = 'ws://localhost:8080/ws'): void {
+    if (this.connectionSub) {
+      this.connectionSub.unsubscribe();
+    }
+
+    this.connectionSub = this.transport.connect(wsUrl).subscribe({
+      next: (wsEvent) => {
+        this.connected.set(true);
+        const domainEvent = LlmFacade.toDomain(wsEvent);
         if (domainEvent) {
-          this.routeIncomingEvent(domainEvent);
-        } else {
-          console.warn('[DEBUG ChatConnection] LlmFacade.toDomain returned null for:', protocolBufferEvent);
+          this.handleEvent(domainEvent);
         }
       },
-      error: (err) => {
-        this.flow.appendSystemLog('ERROR', `Connection error: ${err}`);
+      error: () => {
         this.connected.set(false);
       },
       complete: () => {
-        this.flow.appendSystemLog('INFO', 'Connection closed.');
         this.connected.set(false);
       }
     });
-    this.connected.set(true);
   }
 
-  public disconnect(): void {
-    this.transport.disconnect();
-    this.connected.set(false);
+  private mapGraphEventToChatItem(ev: GraphEvent): ChatItem {
+    return ev as ChatItem;
   }
 
-  public clearSession(): void {
-    this.timeline.clearSession();
-    this.flow.clearSession();
-    this.cognitive.clearSession();
+  public handleEvent(event: AppEvent): void {
+    switch (event.type) {
+      case 'sync_history':
+        this.graphStore.upsert(event.recentEvents.map(e => this.mapGraphEventToChatItem(e)));
+        this.timelineStore.setHistoryMetadata(
+          event.nextCursor,
+          event.hasMore,
+          event.activeBranch,
+          event.branches
+        );
+        this.cognitiveStore.activeDigests.set(event.digests);
+        this.cognitiveStore.activeFocus.set(event.focus);
+        this.timelineStore.isLoadingHistory.set(false);
+        break;
+
+      case 'sync_subgraph':
+        this.graphStore.upsert(event.events.map(e => this.mapGraphEventToChatItem(e)));
+        break;
+
+      case 'streamed_graph_event':
+        this.graphStore.upsert([this.mapGraphEventToChatItem(event.event)]);
+        break;
+        
+      case 'telemetry_event':
+        this.flowStore.processTelemetry(event);
+        break;
+
+      case 'preview_context':
+        this.cognitiveStore.pendingContextReview.set(event.context);
+        break;
+
+      case 'request_transition':
+        this.cognitiveStore.pendingTransition.set({
+          targetThinkState: event.targetThinkState,
+          reasoning: event.reasoning
+        });
+        break;
+
+      case 'request_strategy':
+        this.cognitiveStore.pendingStrategy.set(event.active);
+        break;
+
+      case 'request_review':
+        this.cognitiveStore.pendingReviewBranch.set(event.branch);
+        break;
+        
+      case 'chat_stream':
+      case 'agent_stream':
+      case 'available_spaces':
+        break;
+    }
   }
 
   public submitPrompt(text: string): void {
     const spaceId = this.workspace.activeSpaceId();
     const chatId = this.workspace.activeChatId();
     if (!spaceId || !chatId) return;
-
-    this.flow.resetTurn();
-    this.cognitive.resetTurn();
-
-    if (text.trim() !== '') {
-      this.timeline.appendCoreChat('prompt', text);
-      this.timeline.appendCoreChat('system', 'Manager Thinking...');
-    }
-    this.transport.send(LlmFacade.createSubmitPrompt(text, spaceId, chatId));
+    const msg = LlmFacade.createSubmitPrompt(text, spaceId, chatId);
+    this.transport.send(msg);
   }
 
   public loadHistoryPage(): void {
-    if (!this.timeline.hasMoreHistory() || this.timeline.isLoadingHistory()) return;
+    if (this.timelineStore.isLoadingHistory() || !this.timelineStore.hasMore()) return;
+    
     const spaceId = this.workspace.activeSpaceId();
     const chatId = this.workspace.activeChatId();
     if (!spaceId || !chatId) return;
 
-    this.timeline.isLoadingHistory.set(true);
-    this.transport.send(LlmFacade.createLoadHistory(
-      spaceId, 
-      chatId, 
-      this.timeline.nextCursor(), 
-      this.uiSettings.pagination().size
-    ));
+    this.timelineStore.isLoadingHistory.set(true);
+    const msg = LlmFacade.createLoadHistory(
+      spaceId,
+      chatId,
+      this.timelineStore.nextCursor(),
+      50
+    );
+    this.transport.send(msg);
   }
 
-  public submitContextApproval(approved: boolean, paths: string[] = [], indices: number[] = []): void {
-    this.flow.resetTurn();
-    this.cognitive.pendingContextReview.set(null);
-    if (!approved) {
-      this.flow.appendSystemLog('INFO', 'Turn aborted by user.');
-      this.timeline.clearThinkingIndicators();
-    }
-    this.transport.send(LlmFacade.createApproveContext(approved, paths, indices));
+  public loadSubGraph(graphId: string): void {
+    const spaceId = this.workspace.activeSpaceId();
+    const chatId = this.workspace.activeChatId();
+    if (!spaceId || !chatId) return;
+    
+    const msg = LlmFacade.createLoadSubGraph(spaceId, chatId, graphId);
+    this.transport.send(msg);
   }
 
   public selectStrategy(strategy: DelegationStrategy): void {
-    this.flow.resetTurn();
-    this.cognitive.pendingStrategy.set(false);
-    this.timeline.appendCoreChat('prompt', `Selected Strategy: ${DelegationStrategy[strategy]}`);
-    this.transport.send(LlmFacade.createSelectStrategy(strategy));
+    const msg = LlmFacade.createSelectStrategy(strategy);
+    this.transport.send(msg);
+    this.cognitiveStore.pendingStrategy.set(false);
   }
 
   public submitReview(accepted: boolean): void {
-    this.flow.resetTurn();
-    const branch = this.cognitive.pendingReviewBranch();
-    this.cognitive.pendingReviewBranch.set(null);
-    if (branch) {
-      this.timeline.appendCoreChat('prompt', `Review for ${branch}: ${accepted ? 'ACCEPTED' : 'REJECTED'}`);
-      this.transport.send(LlmFacade.createReviewDecision(branch, accepted));
-    }
+    const branch = this.cognitiveStore.pendingReviewBranch();
+    if (!branch) return;
+    
+    const msg = LlmFacade.createReviewDecision(branch, accepted);
+    this.transport.send(msg);
+    this.cognitiveStore.pendingReviewBranch.set(null);
   }
 
   public submitTransitionDecision(approved: boolean): void {
-    this.flow.resetTurn();
-    this.cognitive.pendingTransition.set(null);
-    this.flow.appendSystemLog('INFO', approved ? 'Transition approved.' : 'Transition aborted.');
-    this.transport.send(LlmFacade.createTransitionDecision(approved));
+    const msg = LlmFacade.createTransitionDecision(approved);
+    this.transport.send(msg);
+    this.cognitiveStore.pendingTransition.set(null);
+  }
+
+  public submitContextApproval(approved: boolean, retainedFiles: string[] = [], retainedHistory: number[] = []): void {
+    const msg = LlmFacade.createApproveContext(approved, retainedFiles, retainedHistory);
+    this.transport.send(msg);
+    this.cognitiveStore.pendingContextReview.set(null);
   }
 
   public forkChat(targetEventId: string): void {
     const spaceId = this.workspace.activeSpaceId();
     const chatId = this.workspace.activeChatId();
     if (!spaceId || !chatId) return;
-
-    this.transport.send(LlmFacade.createForkChat(spaceId, chatId, targetEventId));
+    const msg = LlmFacade.createForkChat(spaceId, chatId, targetEventId);
+    this.transport.send(msg);
   }
 
   public inlineEdit(targetEventId: string, newText: string): void {
     const spaceId = this.workspace.activeSpaceId();
     const chatId = this.workspace.activeChatId();
     if (!spaceId || !chatId) return;
-
-    this.transport.send(LlmFacade.createInlineEdit(spaceId, chatId, targetEventId, newText));
+    const msg = LlmFacade.createInlineEdit(spaceId, chatId, targetEventId, newText);
+    this.transport.send(msg);
   }
 
   public switchBranch(targetBranch: string): void {
     const spaceId = this.workspace.activeSpaceId();
     const chatId = this.workspace.activeChatId();
     if (!spaceId || !chatId) return;
-
-    // Fixed: Target the new normalized nodeMap instead of the read-only computed coreChat array
-    this.timeline.nodeMap.set(new Map());
-    this.timeline.isLoadingHistory.set(true);
-
-    this.transport.send(LlmFacade.createSwitchBranch(spaceId, chatId, targetBranch));
+    const msg = LlmFacade.createSwitchBranch(spaceId, chatId, targetBranch);
+    this.transport.send(msg);
   }
 
-  private routeIncomingEvent(event: AppEvent): void {
-    switch (event.type) {
-      case 'sync_history':
-        this.cognitive.activeFocus.set(event.focus);
-        if (Object.keys(event.digests).length > 0) this.cognitive.activeDigests.set(event.digests);
-        
-        if (event.activeBranch && event.branches) {
-          this.timeline.processSyncHistory(event.recentEvents, event.nextCursor, event.hasMore, event.activeBranch, event.branches);
-        }
-        break;
-
-      case 'streamed_graph_event':
-        this.timeline.ingestEvent(event.event);
-        break;
-
-      case 'preview_context':
-        this.cognitive.activeFocus.set(event.context.focus);
-        this.cognitive.activeWorkbench.set(event.context.fileContexts);
-        if (this.cognitive.autoApproveContext()) {
-          const filePaths = event.context.fileContexts.map(f => f.path);
-          const historyIndices = event.context.recentHistory.map((_, i) => i);
-          this.submitContextApproval(true, filePaths, historyIndices);
-        } else {
-          this.cognitive.pendingContextReview.set(event.context);
-        }
-        break;
-
-      case 'chat_stream':
-        this.timeline.appendToLastModelMessage(event.text);
-        break;
-
-      case 'telemetry_event':
-        this.flow.processTelemetry(event);
-        break;
-
-      case 'request_strategy':
-        this.cognitive.pendingStrategy.set(event.active);
-        break;
-      case 'request_review':
-        this.cognitive.pendingReviewBranch.set(event.branch);
-        break;
-      case 'request_transition':
-        this.cognitive.pendingTransition.set({ 
-          targetThinkState: event.targetThinkState, 
-          reasoning: event.reasoning 
-        });
-        break;
-    }
+  public clearSession(): void {
+    this.graphStore.clear();
+    this.flowStore.manualClearLogs();
+    this.cognitiveStore.clearSession();
+    this.timelineStore.setHistoryMetadata('', false, 'main', {});
   }
 }

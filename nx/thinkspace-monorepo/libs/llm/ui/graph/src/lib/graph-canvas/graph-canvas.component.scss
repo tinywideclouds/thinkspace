@@ -1,0 +1,16 @@
+:host {
+  display: block;
+}
+
+.graph-viewport {
+  /* Prevent browser-level overscroll bouncing and highlighting during drag */
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.graph-stage {
+  /* Hardware acceleration for smooth panning and zooming */
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
