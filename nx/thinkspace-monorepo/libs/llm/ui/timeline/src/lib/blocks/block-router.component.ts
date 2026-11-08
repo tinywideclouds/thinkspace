@@ -33,7 +33,8 @@ import { ChatFlowCardComponent } from '@org/llm-ui-core';
               <llm-chat-flow-card 
                 [item]="item"
                 [liveFlow]="facade.flowStates().get(item.flowId)" 
-                (inspect)="facade.inspectFlow($event)">
+                (inspect)="facade.inspectFlow($event)"
+                (viewGraph)="facade.viewGraph($event)">
               </llm-chat-flow-card>
             }
           </div>

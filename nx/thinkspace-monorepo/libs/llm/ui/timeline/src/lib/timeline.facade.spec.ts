@@ -13,6 +13,7 @@ interface MockTimelineStore {
 interface MockFlowStore {
   flowStates: WritableSignal<Map<string, FlowState>>;
   inspectFlow: Mock<(item: FlowExecutionChatItem) => void>;
+  inspectedGraphId: WritableSignal<string | null>;
 }
 
 interface MockCognitiveStore {
@@ -40,7 +41,8 @@ describe('TimelineFacade', () => {
 
     mockFlow = {
       flowStates: signal(new Map()),
-      inspectFlow: vi.fn()
+      inspectFlow: vi.fn(),
+      inspectedGraphId: signal(null)
     };
 
     mockCognitive = {
@@ -114,5 +116,10 @@ describe('TimelineFacade', () => {
 
     facade.toggleEditMode();
     expect(facade.selectedTurnIds().size).toBe(0);
+  });
+
+  it('should set inspectedGraphId on viewGraph', () => {
+    facade.viewGraph('flow-xyz');
+    expect(mockFlow.inspectedGraphId()).toBe('flow-xyz');
   });
 });

@@ -9,6 +9,9 @@ export class FlowStore {
   public retainLogs = signal(false);
   
   public inspectedFlow = signal<FlowExecutionChatItem | null>(null);
+  
+  // ADDED: The signal driving the full-screen DAG overlay
+  public inspectedGraphId = signal<string | null>(null);
 
   public appendSystemLog(level: string, message: string): void {
     this.systemLogs.update(logs => [

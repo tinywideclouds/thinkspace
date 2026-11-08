@@ -62,12 +62,23 @@ describe('ChatFlowCardComponent', () => {
     expect(compiled.textContent).not.toContain('Root Cause Analysis');
   });
 
-  it('should emit inspect event with the full flow item on click', () => {
+  it('should emit inspect event with the full flow item on click of Inspect Details', () => {
     const emitSpy = vi.spyOn(component.inspect, 'emit');
-    const button = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    const buttons = fixture.nativeElement.querySelectorAll('button');
+    const inspectButton = Array.from(buttons).find((b: any) => b.textContent.includes('Inspect Details')) as HTMLButtonElement;
 
-    button.click();
+    inspectButton.click();
 
     expect(emitSpy).toHaveBeenCalledWith(mockItem);
+  });
+
+  it('should emit viewGraph event with the flowId on click of View Graph', () => {
+    const emitSpy = vi.spyOn(component.viewGraph, 'emit');
+    const buttons = fixture.nativeElement.querySelectorAll('button');
+    const viewGraphButton = Array.from(buttons).find((b: any) => b.textContent.includes('View Graph')) as HTMLButtonElement;
+
+    viewGraphButton.click();
+
+    expect(emitSpy).toHaveBeenCalledWith('flow-123');
   });
 });

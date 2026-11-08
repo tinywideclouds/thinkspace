@@ -139,6 +139,10 @@ export class TimelineFacade {
     this.flow.inspectFlow(item);
   }
 
+  public viewGraph(flowId: string): void {
+    this.flow.inspectedGraphId.set(flowId);
+  }
+
   public closeInspector(): void {
     this.flow.inspectedFlow.set(null);
   }

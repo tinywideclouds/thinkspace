@@ -17,12 +17,21 @@ export interface DisplayAgent extends AgentRecord {
         <div style="color: #212529; font-size: 14px; font-weight: bold; flex: 1; margin-right: 16px;">
           Task: {{ item().task }}
         </div>
-        <button
-          (click)="inspect.emit(item())"
-          style="background: #fff; border: 1px solid #adb5bd; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #495057; white-space: nowrap;"
-        >
-          🔍 Inspect Details
-        </button>
+        
+        <div style="display: flex; gap: 8px;">
+          <button
+            (click)="viewGraph.emit(item().flowId)"
+            style="background: #e7f5ff; border: 1px solid #74c0fc; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #1864ab; white-space: nowrap;"
+          >
+            🕸️ View Graph
+          </button>
+          <button
+            (click)="inspect.emit(item())"
+            style="background: #fff; border: 1px solid #adb5bd; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #495057; white-space: nowrap;"
+          >
+            🔍 Inspect Details
+          </button>
+        </div>
       </div>
 
       <!-- Live Ephemeral Agent State Overlay -->
@@ -60,7 +69,9 @@ export interface DisplayAgent extends AgentRecord {
 export class ChatFlowCardComponent {
   public item = input.required<FlowExecutionChatItem>();
   public liveFlow = input<FlowState | undefined>();
+  
   public inspect = output<FlowExecutionChatItem>();
+  public viewGraph = output<string>();
 
   public isLive = computed(() => {
     return this.item().status === 'RUNNING' && this.liveFlow() !== undefined;

@@ -11,18 +11,18 @@
     "payload": {
       "syncHistory": {
         "recentEvents": [
-          { "id": "hist-1", "timestamp": "2026-10-20T09:00:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "Oldest message way back in history." } },
-          { "id": "hist-2", "timestamp": "2026-10-20T09:05:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "Let's test pagination." } },
-          { "id": "hist-3", "timestamp": "2026-10-20T09:10:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "I am generating a deep history." } },
-          { "id": "hist-4", "timestamp": "2026-10-20T09:15:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "Keep going." } },
-          { "id": "hist-5", "timestamp": "2026-10-20T09:20:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "Here is message 5." } },
-          { "id": "hist-6", "timestamp": "2026-10-20T09:25:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "And message 6." } },
-          { "id": "hist-7", "timestamp": "2026-10-20T09:15:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "Keep going." } },
-          { "id": "hist-8", "timestamp": "2026-10-20T09:20:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "Here is message 8." } },
-          { "id": "hist-9", "timestamp": "2026-10-20T09:25:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "And message 9." } },
-          { "id": "hist-10", "timestamp": "2026-10-20T09:30:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "Almost at the bottom." } },
-          { "id": "hist-11", "timestamp": "2026-10-20T09:35:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "Show me the recent stuff." } },
-          { "id": "hist-12", "timestamp": "2026-10-20T09:40:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "This is the message you see on load." } }
+          { "id": "hist-1", "branchId": "main", "timestamp": "2026-10-20T09:00:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "Oldest message way back in history." } },
+          { "id": "hist-2", "branchId": "main", "timestamp": "2026-10-20T09:05:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "Let's test pagination." } },
+          { "id": "hist-3", "branchId": "main", "timestamp": "2026-10-20T09:10:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "I am generating a deep history." } },
+          { "id": "hist-4", "branchId": "main", "timestamp": "2026-10-20T09:15:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "Keep going." } },
+          { "id": "hist-5", "branchId": "main", "timestamp": "2026-10-20T09:20:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "Here is message 5." } },
+          { "id": "hist-6", "branchId": "main", "timestamp": "2026-10-20T09:25:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "And message 6." } },
+          { "id": "hist-7", "branchId": "main", "timestamp": "2026-10-20T09:15:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "Keep going." } },
+          { "id": "hist-8", "branchId": "main", "timestamp": "2026-10-20T09:20:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "Here is message 8." } },
+          { "id": "hist-9", "branchId": "main", "timestamp": "2026-10-20T09:25:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "And message 9." } },
+          { "id": "hist-10", "branchId": "main", "timestamp": "2026-10-20T09:30:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "Almost at the bottom." } },
+          { "id": "hist-11", "branchId": "main", "timestamp": "2026-10-20T09:35:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "PROMPT", "text": "Show me the recent stuff." } },
+          { "id": "hist-12", "branchId": "main", "timestamp": "2026-10-20T09:40:00Z", "tags": [], "tombstoned": false, "metadata": {}, "message": { "type": "MODEL", "text": "This is the message you see on load." } }
         ],
         "nextCursor": "hist-1",
         "hasMore": true

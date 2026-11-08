@@ -9,7 +9,6 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 
 declare const Temporal: { Now: { instant: () => unknown } };
 
-// Define every method and signal that nested components (UserMessage, ModelMessage, etc.) will call
 interface MockTimelineFacade {
   isItemDimmed: Mock<(item: ChatItem) => boolean>;
   isItemCollapsed: Mock<(item: ChatItem) => boolean>;
@@ -18,6 +17,7 @@ interface MockTimelineFacade {
   setHoveredTag: Mock<(tag: string | null) => void>;
   toggleSelectedTag: Mock<(tag: string) => void>;
   inspectFlow: Mock<(item: FlowExecutionChatItem) => void>;
+  viewGraph: Mock<(flowId: string) => void>;
   flowStates: WritableSignal<Map<string, FlowState>>;
   isDebugMode: WritableSignal<boolean>;
   isEditMode: WritableSignal<boolean>;
@@ -39,6 +39,7 @@ describe('BlockRouterComponent', () => {
       setHoveredTag: vi.fn(),
       toggleSelectedTag: vi.fn(),
       inspectFlow: vi.fn(),
+      viewGraph: vi.fn(),
       flowStates: signal(new Map<string, FlowState>()),
       isDebugMode: signal(false),
       isEditMode: signal(false),
@@ -49,7 +50,6 @@ describe('BlockRouterComponent', () => {
       imports: [BlockRouterComponent],
       providers: [
         { provide: TimelineFacade, useValue: mockFacade },
-        // Provide HTTP Client Testing to suppress the spurious /api/spaces fetch error from inner blocks
         provideHttpClient(),
         provideHttpClientTesting()
       ]

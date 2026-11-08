@@ -110,4 +110,29 @@ files:
   - libs/llm/ui/timeline/src/lib/inline-edit-composer.component.ts
   - libs/llm/ui/timeline/src/lib/tag-ribbon.component.spec.ts
   - libs/llm/ui/timeline/src/lib/linear-feed/turn-group.component.spec.ts
+  - libs/llm/ui/flow-graph/eslint.config.mjs
+  - libs/llm/ui/flow-graph/project.json
+  - libs/llm/ui/flow-graph/README.md
+  - libs/llm/ui/flow-graph/tsconfig.json
+  - libs/llm/ui/flow-graph/tsconfig.lib.json
+  - libs/llm/ui/flow-graph/tsconfig.spec.json
+  - libs/llm/ui/flow-graph/vite.config.mts
+  - libs/llm/ui/flow-graph/src/index.ts
+  - libs/llm/ui/flow-graph/src/test-setup.ts
+  - libs/llm/ui/flow-graph/src/lib/flow-graph/flow-graph.component.html
+  - libs/llm/ui/flow-graph/src/lib/flow-graph/flow-graph.component.scss
+  - libs/llm/ui/flow-graph/src/lib/flow-graph/flow-graph.component.ts
+  - libs/llm/ui/graph/eslint.config.mjs
+  - libs/llm/ui/graph/project.json
+  - libs/llm/ui/graph/README.md
+  - libs/llm/ui/graph/tsconfig.json
+  - libs/llm/ui/graph/tsconfig.lib.json
+  - libs/llm/ui/graph/tsconfig.spec.json
+  - libs/llm/ui/graph/vite.config.mts
+  - libs/llm/ui/graph/src/index.ts
+  - libs/llm/ui/graph/src/test-setup.ts
+  - libs/llm/ui/graph/src/lib/graph-canvas/graph-canvas.component.html
+  - libs/llm/ui/graph/src/lib/graph-canvas/graph-canvas.component.scss
+  - libs/llm/ui/graph/src/lib/graph-canvas/graph-canvas.component.spec.ts
+  - libs/llm/ui/graph/src/lib/graph-canvas/graph-canvas.component.ts
 last_context: llm_ui_04.md

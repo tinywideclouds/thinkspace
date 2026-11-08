@@ -157,7 +157,13 @@ export class MockTransportService {
     }
 
     this.logger.info('MockTransport', `🎬 Playing scenario: ${name}`);
+    
+    // Accumulate the offsets so they are evaluated relatively
+    let cumulativeOffset = 0;
+
     for (const step of scenarioData) {
+      cumulativeOffset += step.offsetMs || 0;
+
       setTimeout(() => {
         if (step.latencyMs !== undefined) {
           this.currentLatencyMs = step.latencyMs;
@@ -179,7 +185,7 @@ export class MockTransportService {
         } catch (err) {
            this.logger.error('MockTransport', `FATAL: Failed to parse scenario payload!`, err);
         }
-      }, step.offsetMs);
+      }, cumulativeOffset);
     }
   }
 

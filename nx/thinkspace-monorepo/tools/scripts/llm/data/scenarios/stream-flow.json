@@ -1,10 +1,49 @@
 [
   {
-    "offsetMs": 100,
+    "offsetMs": 50,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "stream-prompt-1",
+          "branchId": "main",
+          "timestamp": "2026-10-23T12:04:58Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": {
+            "type": "PROMPT",
+            "text": "Please build the authentication module."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 450,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "stream-sys-1",
+          "branchId": "main",
+          "timestamp": "2026-10-23T12:04:59Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": {
+            "type": "SYSTEM",
+            "text": "Dispatching frontend and backend agents in parallel..."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 500,
     "payload": {
       "streamedGraphEvent": {
         "event": {
           "id": "anchor-stream-456",
+          "branchId": "main",
           "timestamp": "2026-10-23T12:05:00Z",
           "tags": ["frontend"],
           "tombstoned": false,
@@ -12,10 +51,10 @@
           "flowExecution": {
             "flowId": "mock-subgraph-stream",
             "taskId": "task-xyz",
-            "task": "Streaming a live DAG visualization.",
+            "task": "Build Authentication Module",
             "status": 1,
             "error": "",
-            "summary": "Generating nodes in real-time...",
+            "summary": "Dispatching agents for frontend and backend auth...",
             "agents": []
           }
         }
@@ -23,7 +62,7 @@
     }
   },
   {
-    "offsetMs": 200,
+    "offsetMs": 100,
     "payload": {
       "telemetryEvent": {
         "channel": "manager",
@@ -32,8 +71,100 @@
           "type": "flow_start",
           "timestamp": "2026-10-23T12:05:00Z",
           "message": "",
-          "summary": "Starting live graph generation...",
-          "payloadJson": "{\"flow_id\": \"mock-subgraph-stream\", \"task_id\": \"task-xyz\", \"agent_count\": 1}"
+          "summary": "Starting parallel graph generation...",
+          "payloadJson": "{\"flow_id\": \"mock-subgraph-stream\", \"task_id\": \"task-xyz\", \"agent_count\": 2}"
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 900,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "live-root",
+          "timestamp": "2026-10-23T12:05:01Z",
+          "branchId": "mock-subgraph-stream",
+          "message": {
+            "type": "SYSTEM",
+            "text": "Root Manager: Analyzing auth requirements and splitting tasks."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 1500,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "live-backend-1",
+          "timestamp": "2026-10-23T12:05:02Z",
+          "branchId": "mock-subgraph-stream",
+          "edges": {
+            "parent_id": "live-root"
+          },
+          "message": {
+            "type": "SYSTEM",
+            "text": "Backend Agent: Generating JWT middleware."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 500,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "live-frontend-1",
+          "timestamp": "2026-10-23T12:05:03Z",
+          "branchId": "mock-subgraph-stream",
+          "edges": {
+            "parent_id": "live-root"
+          },
+          "message": {
+            "type": "SYSTEM",
+            "text": "Frontend Agent: Scaffolding login component."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 2000,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "live-backend-2",
+          "timestamp": "2026-10-23T12:05:04Z",
+          "branchId": "mock-subgraph-stream",
+          "edges": {
+            "parent_id": "live-backend-1"
+          },
+          "message": {
+            "type": "MODEL",
+            "text": "Backend Agent: Middleware complete. Routes protected."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 1500,
+    "payload": {
+      "streamedGraphEvent": {
+        "event": {
+          "id": "live-frontend-2",
+          "timestamp": "2026-10-23T12:05:05Z",
+          "branchId": "mock-subgraph-stream",
+          "edges": {
+            "parent_id": "live-frontend-1"
+          },
+          "message": {
+            "type": "MODEL",
+            "text": "Frontend Agent: Login UI wired to API."
+          }
         }
       }
     }
@@ -43,53 +174,39 @@
     "payload": {
       "streamedGraphEvent": {
         "event": {
-          "id": "live-node-1",
-          "timestamp": "2026-10-23T12:05:01Z",
-          "branchId": "mock-subgraph-stream",
-          "message": {
-            "type": "SYSTEM",
-            "text": "Agent 1: Beginning work on component."
-          }
-        }
-      }
-    }
-  },
-  {
-    "offsetMs": 2500,
-    "payload": {
-      "streamedGraphEvent": {
-        "event": {
-          "id": "live-node-2",
-          "timestamp": "2026-10-23T12:05:02Z",
+          "id": "live-terminal",
+          "timestamp": "2026-10-23T12:05:06Z",
           "branchId": "mock-subgraph-stream",
           "edges": {
-            "parent_id": "live-node-1"
+            "parent_1": "live-backend-2",
+            "parent_2": "live-frontend-2"
           },
           "message": {
-            "type": "MODEL",
-            "text": "Agent 1: Scaffolding complete."
+            "type": "SYSTEM",
+            "text": "Merging branches. Flow complete. Yielding to main timeline."
           }
         }
       }
     }
   },
   {
-    "offsetMs": 3500,
+    "offsetMs": 500,
     "payload": {
       "streamedGraphEvent": {
         "event": {
           "id": "anchor-stream-456",
-          "timestamp": "2026-10-23T12:05:03Z",
-          "tags": ["frontend"],
+          "branchId": "main",
+          "timestamp": "2026-10-23T12:05:07Z",
+          "tags": ["frontend", "backend"],
           "tombstoned": false,
           "metadata": {},
           "flowExecution": {
             "flowId": "mock-subgraph-stream",
             "taskId": "task-xyz",
-            "task": "Streaming a live DAG visualization.",
+            "task": "Build Authentication Module",
             "status": 2,
             "error": "",
-            "summary": "Live graph generated successfully.",
+            "summary": "Both agents finished successfully.",
             "agents": []
           }
         }
@@ -97,18 +214,26 @@
     }
   },
   {
-    "offsetMs": 3600,
+    "offsetMs": 100,
     "payload": {
       "telemetryEvent": {
         "channel": "manager",
         "event": {
           "id": "tel-stream-end",
           "type": "flow_complete",
-          "timestamp": "2026-10-23T12:05:03Z",
+          "timestamp": "2026-10-23T12:05:07Z",
           "message": "",
           "summary": "",
           "payloadJson": "{\"flow_id\": \"mock-subgraph-stream\", \"passed\": true}"
         }
+      }
+    }
+  },
+  {
+    "offsetMs": 200,
+    "payload": {
+      "requestStrategy": {
+        "active": true
       }
     }
   }

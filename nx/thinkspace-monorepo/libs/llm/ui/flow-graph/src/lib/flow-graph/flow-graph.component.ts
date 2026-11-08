@@ -20,7 +20,10 @@ interface LayoutEdge {
   standalone: true,
   imports: [CommonModule, GraphCanvasComponent],
   templateUrl: './flow-graph.component.html',
-  styleUrl: './flow-graph.component.scss'
+  styleUrl: './flow-graph.component.scss',
+  host: {
+    class: 'block w-full h-full'
+  }
 })
 export class FlowGraphComponent {
   private graphStore = inject(GraphStore);
@@ -29,7 +32,6 @@ export class FlowGraphComponent {
   public flowId = input.required<string>();
 
   constructor() {
-    // Automatically fetch the bounded subgraph data when this component mounts
     effect(() => {
       const id = this.flowId();
       if (id) {
@@ -38,12 +40,10 @@ export class FlowGraphComponent {
     });
   }
 
-  // Pure mathematical projection from the universal GraphStore
   public layout = computed(() => {
     const targetFlowId = this.flowId();
     const allNodes = Array.from(this.graphStore.nodes().values());
     
-    // 1. Filter for this specific DAG
     const flowNodes = allNodes
       .filter(n => n.branchId === targetFlowId && !n.tombstoned)
       .sort((a, b) => a.timestamp.toString().localeCompare(b.timestamp.toString()));
@@ -52,13 +52,16 @@ export class FlowGraphComponent {
       return { nodes: [], edges: [] };
     }
 
-    // 2. Build adjacency list and find root(s)
     const childrenMap = new Map<string, string[]>();
     const isChild = new Set<string>();
 
     for (const node of flowNodes) {
-      const parentId = node.edges?.['parent_id'];
-      if (parentId) {
+      const edges = node.edges || {};
+      const parentIds = Object.keys(edges)
+        .filter(k => k.startsWith('parent'))
+        .map(k => edges[k]);
+
+      for (const parentId of parentIds) {
         if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
         childrenMap.get(parentId)!.push(node.id);
         isChild.add(node.id);
@@ -67,16 +70,19 @@ export class FlowGraphComponent {
 
     const roots = flowNodes.filter(n => !isChild.has(n.id));
     
-    // 3. Simple depth-first coordinate calculation (MVP Grid Layout)
     const NODE_WIDTH = 280;
     const NODE_HEIGHT = 100;
     const GAP_X = 50;
     const GAP_Y = 80;
 
     const layoutNodes: LayoutNode[] = [];
+    const visited = new Set<string>();
     let currentX = 0;
 
     const traverse = (nodeId: string, depthY: number) => {
+      if (visited.has(nodeId)) return;
+      visited.add(nodeId);
+
       const nodeData = flowNodes.find(n => n.id === nodeId);
       if (!nodeData) return;
 
@@ -91,7 +97,6 @@ export class FlowGraphComponent {
           traverse(childId, depthY + 1);
         }
       } else {
-        // Only increment X when we hit a leaf, keeping branches spread horizontally
         currentX += NODE_WIDTH + GAP_X;
       }
     };
@@ -100,20 +105,21 @@ export class FlowGraphComponent {
       traverse(root.id, 0);
     }
 
-    // 4. Calculate SVG Bezier Paths for Edges
     const layoutEdges: LayoutEdge[] = [];
     for (const node of layoutNodes) {
-      const parentId = node.data.edges?.['parent_id'];
-      if (parentId) {
+      const edges = node.data.edges || {};
+      const parentIds = Object.keys(edges)
+        .filter(k => k.startsWith('parent'))
+        .map(k => edges[k]);
+
+      for (const parentId of parentIds) {
         const parentNode = layoutNodes.find(n => n.id === parentId);
         if (parentNode) {
-          // Draw from bottom-center of parent to top-center of child
           const startX = parentNode.x + (NODE_WIDTH / 2);
           const startY = parentNode.y + NODE_HEIGHT;
           const endX = node.x + (NODE_WIDTH / 2);
           const endY = node.y;
 
-          // Simple smooth cubic bezier curve
           const controlY = startY + (endY - startY) / 2;
           const pathData = `M ${startX} ${startY} C ${startX} ${controlY}, ${endX} ${controlY}, ${endX} ${endY}`;
 
