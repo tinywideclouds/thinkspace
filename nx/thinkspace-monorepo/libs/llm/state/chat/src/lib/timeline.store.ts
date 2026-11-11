@@ -1,42 +1,47 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { GraphStore } from './graph.store';
 import { ChatItem } from './chat.models';
-import { BranchTopology } from '@org/llm-core-facade';
+import { ThinkspaceStateService } from './thinkspace-state.service';
+import { ProjectionCoordinate } from '@org/llm-core-facade';
 
 @Injectable({ providedIn: 'root' })
 export class TimelineStore {
   private graph = inject(GraphStore);
+  private workspace = inject(ThinkspaceStateService);
 
   public isLoadingHistory = signal<boolean>(false);
-  public activeBranch = signal<string>('main');
-  public branches = signal<Record<string, BranchTopology>>({});
+  public activeProjectionId = signal<string>('main');
   
   public nextCursor = signal<string>('');
   public hasMore = signal<boolean>(false);
 
-  // Project the timeline from the unified graph cache
   public coreChat = computed<ChatItem[]>(() => {
-    const branch = this.activeBranch();
-    const allNodes = Array.from(this.graph.nodes().values());
-    
-    return allNodes
-      .filter(node => node.branchId === branch && !node.tombstoned)
-      .sort((a, b) => {
-        const timeA = a.timestamp.toString();
-        const timeB = b.timestamp.toString();
-        return timeA.localeCompare(timeB);
-      });
+    const spaceId = this.workspace.activeSpaceId();
+    const chatId = this.workspace.activeChatId();
+    const projectionId = this.activeProjectionId();
+
+    if (!spaceId || !chatId || !projectionId) return [];
+
+    const key = GraphStore.makeKey({ spaceId, chatId, projectionId });
+    const pointers = this.graph.projections().get(key) || [];
+    const cache = this.graph.nodes();
+
+    return pointers
+      .map(id => cache.get(id))
+      .filter((node): node is ChatItem => node !== undefined && !node.tombstoned);
   });
 
-  public setHistoryMetadata(
-    cursor: string, 
-    more: boolean, 
-    branch: string, 
-    topology: Record<string, BranchTopology>
-  ): void {
+  public isActiveView(coordinate: ProjectionCoordinate): boolean {
+    return (
+      this.workspace.activeSpaceId() === coordinate.spaceId &&
+      this.workspace.activeChatId() === coordinate.chatId &&
+      this.activeProjectionId() === coordinate.projectionId
+    );
+  }
+
+  public setHistoryMetadata(cursor: string, more: boolean, projectionId: string): void {
     this.nextCursor.set(cursor);
     this.hasMore.set(more);
-    this.activeBranch.set(branch);
-    this.branches.set(topology);
+    this.activeProjectionId.set(projectionId);
   }
 }

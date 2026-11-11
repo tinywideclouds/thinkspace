@@ -4,12 +4,13 @@ import { WSEvent, WSEventSchema, GraphEventSchema } from '@org/llm-core-protos';
 import { create, fromJson, JsonValue } from '@bufbuild/protobuf';
 import { UiSettingsService } from '@org/llm-state-chat';
 import { LoggerService } from '@org/core-logger';
-import mockGraph from './mock-graph.json';
+import rawMockGraph from './mock-graph.json';
 
-interface MockScenarioStep {
+export interface MockScenarioStep {
   offsetMs: number;
-  payload?: any;
+  payload?: JsonValue;
   latencyMs?: number;
+  awaitAction?: string;
   uiSettings?: {
     pagination: {
       size: number;
@@ -18,13 +19,27 @@ interface MockScenarioStep {
   };
 }
 
+export interface MockGraphData {
+  events: JsonValue[];
+  digests: Record<string, unknown>;
+  focus: unknown;
+  scenarios: Record<string, MockScenarioStep[]>;
+  files: Record<string, string>;
+  subgraphs: Record<string, JsonValue[]>;
+}
+
+const mockGraph = rawMockGraph as unknown as MockGraphData;
+
 @Injectable({ providedIn: 'root' })
 export class MockTransportService {
   private logger = inject(LoggerService);
   private inbound$ = new Subject<WSEvent>();
-  private allEvents = [...mockGraph.events];
+  private allEvents: JsonValue[] = [...mockGraph.events];
   private uiSettings = inject(UiSettingsService);
   private currentLatencyMs = 500;
+  
+  private pendingActionResolver: ((value: unknown) => void) | null = null;
+  private expectedAction: string | null = null;
 
   constructor() {
     this.validateMockGraph();
@@ -34,23 +49,34 @@ export class MockTransportService {
     let hasErrors = false;
     this.logger.info('MockTransport', 'Validating mock-graph.json structure...');
 
-    this.allEvents.forEach((event: any, index: number) => {
-      if (event.type || event.payload?.case) {
-        this.logger.error('MockTransport', `[Invalid History Event] Index ${index} (ID: ${event.id}): Uses legacy format. Expected standard Protobuf JSON.`);
+    this.allEvents.forEach((event, index) => {
+      const ev = event as Record<string, unknown>;
+      if (ev['type'] || (ev['payload'] && (ev['payload'] as Record<string, unknown>)['case'])) {
+        this.logger.error('MockTransport', `[Invalid History Event] Index ${index} (ID: ${ev['id']}): Uses legacy format. Expected standard Protobuf JSON.`);
         hasErrors = true;
+      }
+      if (ev['branchId']) {
+         this.logger.error('MockTransport', `[Invalid History Event] Index ${index} (ID: ${ev['id']}): Contains deprecated branchId field.`);
+         hasErrors = true;
       }
     });
 
-    const scenarios = mockGraph.scenarios as Record<string, MockScenarioStep[]>;
-    for (const [scenarioName, steps] of Object.entries(scenarios)) {
+    for (const [scenarioName, steps] of Object.entries(mockGraph.scenarios)) {
       steps.forEach((step, index) => {
         if (step.payload) {
-          if (step.payload.case || (step.payload.payload && step.payload.payload.case)) {
+          const payload = step.payload as Record<string, unknown>;
+          if (payload['case'] || (payload['payload'] && (payload['payload'] as Record<string, unknown>)['case'])) {
             this.logger.error('MockTransport', `[Invalid Scenario Step] Scenario "${scenarioName}" Step ${index}: Uses legacy "case/value" format.`);
             hasErrors = true;
           }
-          if (step.payload.streamedGraphEvent?.event?.type) {
+          
+          const streamed = payload['streamedGraphEvent'] as Record<string, unknown>;
+          if (streamed?.['event'] && (streamed['event'] as Record<string, unknown>)['type']) {
             this.logger.error('MockTransport', `[Invalid Scenario Step] Scenario "${scenarioName}" Step ${index}: Nested GraphEvent uses legacy format.`);
+            hasErrors = true;
+          }
+          if (streamed?.['event'] && (streamed['event'] as Record<string, unknown>)['branchId']) {
+            this.logger.error('MockTransport', `[Invalid Scenario Step] Scenario "${scenarioName}" Step ${index}: Nested GraphEvent contains deprecated branchId.`);
             hasErrors = true;
           }
         }
@@ -71,13 +97,24 @@ export class MockTransportService {
   }
 
   public send(message: WSEvent): void {
-    if (message.payload.case === 'loadHistory') {
+    if (!message.payload || message.payload.case === undefined) return;
+    
+    const actionCase = message.payload.case;
+
+    // Check if the scenario playback is currently blocked waiting for this exact action
+    if (this.pendingActionResolver && actionCase === this.expectedAction) {
+      this.pendingActionResolver(null);
+      // Return here to prevent triggering standard mock behavior while a scenario is orchestrating
+      return; 
+    }
+
+    if (actionCase === 'loadHistory') {
       this.showMockSnackbar(`📡 Pagination Triggered: Loading ${message.payload.value.limit} items`);
       this.handleLoadHistory(message.payload.value);
-    } else if (message.payload.case === 'loadSubGraph') {
+    } else if (actionCase === 'loadSubGraph') {
       this.showMockSnackbar(`🕸️ DAG Projection Triggered: Loading SubGraph ${message.payload.value.graphId}`);
       this.handleLoadSubGraph(message.payload.value);
-    } else if (message.payload.case === 'submitPrompt') {
+    } else if (actionCase === 'submitPrompt') {
       const text = message.payload.value.text.trim();
       if (text.startsWith('/debug ') || text.startsWith('/d ')) {
         const scenarioName = text.replace('/d ', '').replace('/debug ', '');
@@ -96,7 +133,7 @@ export class MockTransportService {
     setTimeout(() => {
       let endIndex = this.allEvents.length;
       if (payload.cursor) {
-        const cursorIdx = this.allEvents.findIndex((e: any) => e.id === payload.cursor);
+        const cursorIdx = this.allEvents.findIndex(e => (e as Record<string, unknown>)['id'] === payload.cursor);
         if (cursorIdx !== -1) endIndex = cursorIdx;
       }
 
@@ -104,10 +141,10 @@ export class MockTransportService {
       const page = this.allEvents.slice(startIndex, endIndex);
 
       const hasMore = startIndex > 0;
-      const nextCursor = page.length > 0 ? (page[0] as any).id : (payload.cursor || '');
+      const nextCursor = page.length > 0 ? ((page[0] as Record<string, unknown>)['id'] as string) : (payload.cursor || '');
 
       try {
-        const mappedEvents = page.map((e: any) => fromJson(GraphEventSchema, e as JsonValue));
+        const mappedEvents = page.map(e => fromJson(GraphEventSchema, e));
 
         this.inbound$.next(create(WSEventSchema, {
           payload: {
@@ -117,7 +154,10 @@ export class MockTransportService {
               digests: payload.cursor ? {} : mockGraph.digests as Record<string, any>,
               focus: payload.cursor ? undefined : mockGraph.focus as any,
               nextCursor,
-              hasMore
+              hasMore,
+              spaceId: 'golang',
+              chatId: 'chat-1',
+              projectionId: 'main'
             }
           }
         }));
@@ -127,19 +167,21 @@ export class MockTransportService {
     }, this.currentLatencyMs);
   }
 
-  private handleLoadSubGraph(payload: { spaceId: string, chatId: string, graphId: string }): void {
+  private handleLoadSubGraph(payload: { spaceId: string; chatId: string; graphId: string }): void {
     setTimeout(() => {
-      const subgraphs = (mockGraph as any).subgraphs || {};
-      const graphData = subgraphs[payload.graphId] || [];
+      const graphData = mockGraph.subgraphs[payload.graphId] || [];
 
       try {
-        const mappedEvents = graphData.map((e: any) => fromJson(GraphEventSchema, e as JsonValue));
+        const mappedEvents = graphData.map(e => fromJson(GraphEventSchema, e));
 
         this.inbound$.next(create(WSEventSchema, {
           payload: {
             case: 'syncSubGraph',
             value: {
-              events: mappedEvents
+              events: mappedEvents,
+              spaceId: payload.spaceId,
+              chatId: payload.chatId,
+              projectionId: payload.graphId
             }
           }
         }));
@@ -149,43 +191,62 @@ export class MockTransportService {
     }, this.currentLatencyMs);
   }
 
-  private playScenario(name: string): void {
-    const scenarioData = (mockGraph.scenarios as Record<string, MockScenarioStep[]>)[name];
+  private async playScenario(name: string): Promise<void> {
+    const scenarioData = mockGraph.scenarios[name];
     if (!scenarioData || !Array.isArray(scenarioData)) {
       this.logger.warn('MockTransport', `Scenario "${name}" not found in mock-graph.scenarios`);
       return;
     }
 
     this.logger.info('MockTransport', `🎬 Playing scenario: ${name}`);
-    
-    // Accumulate the offsets so they are evaluated relatively
-    let cumulativeOffset = 0;
 
     for (const step of scenarioData) {
-      cumulativeOffset += step.offsetMs || 0;
+      if (step.offsetMs) {
+        await new Promise(resolve => setTimeout(resolve, step.offsetMs));
+      }
 
-      setTimeout(() => {
-        if (step.latencyMs !== undefined) {
-          this.currentLatencyMs = step.latencyMs;
-        }
+      if (step.latencyMs !== undefined) {
+        this.currentLatencyMs = step.latencyMs;
+      }
 
-        if (step.uiSettings?.pagination !== undefined) {
-          this.uiSettings.pagination.set(step.uiSettings.pagination);
-        }
+      if (step.uiSettings?.pagination !== undefined) {
+        this.uiSettings.pagination.set(step.uiSettings.pagination);
+      }
 
-        if (!step.payload) return;
-
+      if (step.payload) {
         try {
-          if (step.payload.syncHistory) {
-            this.allEvents = step.payload.syncHistory.recentEvents;
+          const payloadRecord = step.payload as Record<string, unknown>;
+          if (payloadRecord['syncHistory']) {
+            this.allEvents = (payloadRecord['syncHistory'] as Record<string, unknown>)['recentEvents'] as JsonValue[];
             this.handleLoadHistory({ limit: this.uiSettings.pagination().size, cursor: '' });
           } else {
-            this.inbound$.next(fromJson(WSEventSchema, step.payload as JsonValue));
+            if (payloadRecord['streamedGraphEvent']) {
+               const sge = payloadRecord['streamedGraphEvent'] as any;
+               sge.spaceId = 'golang';
+               sge.chatId = 'chat-1';
+               sge.projectionId = 'main';
+            }
+            this.logger.info('MockTransport', `[DEBUG] Parsing scenario payload: ${JSON.stringify(step.payload)}`);
+            const parsedEvent = fromJson(WSEventSchema, step.payload);
+            this.logger.info('MockTransport', `[DEBUG] Successfully parsed to Protobuf. Emitting...`);
+            this.inbound$.next(parsedEvent);
           }
         } catch (err) {
-           this.logger.error('MockTransport', `FATAL: Failed to parse scenario payload!`, err);
+           this.logger.error('MockTransport', `[DEBUG FATAL] Failed to parse scenario payload: ${JSON.stringify(step.payload)}`, err);
         }
-      }, cumulativeOffset);
+      }
+
+      if (step.awaitAction) {
+        this.logger.info('MockTransport', `⏸️ Pausing scenario, waiting for user action: ${step.awaitAction}`);
+        await new Promise(resolve => {
+          this.pendingActionResolver = resolve;
+          this.expectedAction = step.awaitAction!;
+        });
+        
+        this.pendingActionResolver = null;
+        this.expectedAction = null;
+        this.logger.info('MockTransport', `▶️ Resuming scenario after receiving ${step.awaitAction}`);
+      }
     }
   }
 
@@ -193,12 +254,16 @@ export class MockTransportService {
     const flowId = crypto.randomUUID();
     const taskId = 'task-' + flowId.substring(0, 5);
     const durableEventId = crypto.randomUUID();
+    const messageNodeId = crypto.randomUUID();
 
     setTimeout(() => {
       const startAnchor = create(WSEventSchema, {
         payload: {
           case: 'streamedGraphEvent',
           value: {
+            spaceId: 'golang',
+            chatId: 'chat-1',
+            projectionId: 'main',
             event: {
               id: durableEventId,
               timestamp: new Date().toISOString(),
@@ -237,13 +302,37 @@ export class MockTransportService {
             payloadJson: JSON.stringify({ flow_id: flowId, task_id: taskId, agent_count: 1 })
           }
         }
-      } as JsonValue));
+      }));
     }, 200);
 
     setTimeout(() => {
+      this.inbound$.next(create(WSEventSchema, {
+        payload: {
+          case: 'streamedGraphEvent',
+          value: {
+            spaceId: 'golang',
+            chatId: 'chat-1',
+            projectionId: 'main',
+            event: {
+              id: messageNodeId,
+              timestamp: new Date().toISOString(),
+              tags: [],
+              tombstoned: false,
+              metadata: {},
+              payload: {
+                case: 'message',
+                value: { type: 2, text: '' }
+              }
+            }
+          }
+        }
+      }));
+    }, 300);
+
+    setTimeout(() => {
       this.inbound$.next(fromJson(WSEventSchema, {
-        chatStream: { text: `Mock response to: "${promptText}"` }
-      } as JsonValue));
+        chatStream: { nodeId: messageNodeId, text: `Mock response to: "${promptText}"` }
+      }));
     }, 800);
 
     setTimeout(() => {
@@ -259,7 +348,7 @@ export class MockTransportService {
             payloadJson: JSON.stringify({ flow_id: flowId, agent_index: 1, passed: true })
           }
         }
-      } as JsonValue));
+      }));
     }, 1200);
 
     setTimeout(() => {
@@ -267,6 +356,9 @@ export class MockTransportService {
         payload: {
           case: 'streamedGraphEvent',
           value: {
+            spaceId: 'golang',
+            chatId: 'chat-1',
+            projectionId: 'main',
             event: {
               id: durableEventId, 
               timestamp: new Date().toISOString(),

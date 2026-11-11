@@ -14,9 +14,3 @@ type ChatAddress struct {
 
 	SubGraph // The strict DAG coordinate (GraphID + Name)
 }
-
-// BranchTopology maps a branch to its parent and the specific event where it diverged.
-type BranchTopology struct {
-	ParentBranch string
-	ForkPoint    string // Event ID
-}

@@ -7,15 +7,25 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
 type mockUI struct {
 	tools.UI
 }
 
-func (m *mockUI) OnTextChunk(text string)                             {}
+func (m *mockUI) OnTextChunk(chunk workspace.NodeChunk)               {}
 func (m *mockUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
+
+type mockToolEmitter struct {
+	events []telemetry.Event
+}
+
+func (m *mockToolEmitter) Emit(channel string, event telemetry.Event) {
+	m.events = append(m.events, event)
+}
 
 type mockDigestCommitter struct {
 	lastTopic       string
@@ -84,6 +94,7 @@ func TestCreateDigestTool_Execute(t *testing.T) {
 func TestCreateDigestTool_InvalidSchema(t *testing.T) {
 	committer := &mockDigestCommitter{}
 	tool := tools.NewCreateDigestTool(committer)
+	emitter := &mockToolEmitter{}
 
 	rawArgs := map[string]any{
 		"unknown_field": "data",
@@ -92,6 +103,7 @@ func TestCreateDigestTool_InvalidSchema(t *testing.T) {
 	ec := tools.ExecutionContext{
 		RawArguments: rawArgs,
 		UI:           &mockUI{},
+		Emitter:      emitter,
 	}
 
 	signal, err := tool.Execute(context.Background(), ec)
@@ -100,5 +112,15 @@ func TestCreateDigestTool_InvalidSchema(t *testing.T) {
 	}
 	if signal != nil {
 		t.Errorf("expected nil signal on error")
+	}
+
+	foundIntercept := false
+	for _, e := range emitter.events {
+		if e.Type == "system_intercept" {
+			foundIntercept = true
+		}
+	}
+	if !foundIntercept {
+		t.Errorf("expected system_intercept telemetry event to be fired")
 	}
 }

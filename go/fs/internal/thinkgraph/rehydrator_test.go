@@ -160,3 +160,73 @@ func TestRehydrator_MutationReplay(t *testing.T) {
 		t.Errorf("Mutation was not replayed correctly during rebuild, got: %s", t1[0].Content)
 	}
 }
+
+func TestRehydrator_PrefixRouting(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	spaceID := "golang"
+	chatID := "chat-prefix"
+
+	// Create multiplexed sub-agent flows physically mapping to "flow-123" directory
+	chatFlowAgent1 := &thinkgraph.ChatAddress{
+		ProjectID: spaceID,
+		ChatID:    chatID,
+		SubGraph: thinkgraph.SubGraph{
+			Name: "flow-123/agent-1",
+		},
+	}
+	chatFlowAgent2 := &thinkgraph.ChatAddress{
+		ProjectID: spaceID,
+		ChatID:    chatID,
+		SubGraph: thinkgraph.SubGraph{
+			Name: "flow-123/agent-2",
+		},
+	}
+
+	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
+
+	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Task for agent 1")
+	ev1.Metadata = map[string]string{"agent_id": "agent-1"}
+	_ = ledger.AppendEvent(context.Background(), chatFlowAgent1, ev1)
+
+	ev2 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Task for agent 2")
+	ev2.Metadata = map[string]string{"agent_id": "agent-2"}
+	_ = ledger.AppendEvent(context.Background(), chatFlowAgent2, ev2)
+
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graph, _ := db.NewBadgerGraph(opts)
+	defer graph.Close()
+
+	graphStore := thinkgraph.NewGraphStore(graph, nil)
+	rehydrator := thinkgraph.NewRehydrator(graphStore, workspaceRoot)
+
+	ctx := context.Background()
+
+	// Initial FastForward Check for agent-1 multiplexed file
+	status, diskMan, _, err := rehydrator.CheckSync(ctx, chatFlowAgent1)
+	if err != nil {
+		t.Fatalf("unexpected CheckSync error: %v", err)
+	}
+	if status != thinkgraph.SyncStatusOK {
+		t.Errorf("Expected OK status on initial fast forward due to empty db handling, got %v", status)
+	}
+	if diskMan.TotalEvents != 2 {
+		t.Errorf("Expected physical disk manifest to reflect 2 total multiplexed events, got %d", diskMan.TotalEvents)
+	}
+
+	err = rehydrator.Rebuild(ctx, chatFlowAgent1)
+	if err != nil {
+		t.Fatalf("unexpected Rebuild error: %v", err)
+	}
+
+	// Verify logical namespace separation in DB reading back specific subgraphs
+	// agent-1 should only have 1 timeline node returned logically, despite file having 2
+	t1, _ := graph.GetSubGraphTimeline(ctx, chatFlowAgent1, chatFlowAgent1.GraphID)
+	if len(t1) != 1 || t1[0].Content != "Task for agent 1" {
+		t.Errorf("Expected exactly 1 logically separated node for agent-1, got %d nodes", len(t1))
+	}
+
+	t2, _ := graph.GetSubGraphTimeline(ctx, chatFlowAgent2, chatFlowAgent2.GraphID)
+	if len(t2) != 1 || t2[0].Content != "Task for agent 2" {
+		t.Errorf("Expected exactly 1 logically separated node for agent-2, got %d nodes", len(t2))
+	}
+}

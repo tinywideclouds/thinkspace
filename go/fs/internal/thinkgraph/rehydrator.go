@@ -57,8 +57,6 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *ChatAddress) (SyncStatus,
 		return SyncStatusMismatch, diskManifest, nil, nil
 	}
 
-	slog.DebugContext(ctx, "CheckSync comparison", "disk_events", diskManifest.TotalEvents, "graph_events", graphManifest.TotalEvents)
-
 	if graphManifest.TotalEvents == diskManifest.TotalEvents {
 		return SyncStatusOK, diskManifest, graphManifest, nil
 	}
@@ -75,11 +73,8 @@ func (r *Rehydrator) CheckSync(ctx context.Context, c *ChatAddress) (SyncStatus,
 }
 
 func (r *Rehydrator) FastForward(ctx context.Context, c *ChatAddress, graphManifest, diskManifest *LedgerManifest) error {
-	subGraphName := c.Name
-	if subGraphName == "" {
-		subGraphName = "main"
-	}
-	logsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "logs", subGraphName)
+	dirName := ResolveLogDirName(c.Name)
+	logsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "logs", dirName)
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
 		return err
@@ -117,7 +112,14 @@ func (r *Rehydrator) FastForward(ctx context.Context, c *ChatAddress, graphManif
 				continue
 			}
 
-			if err := r.store.AppendEvent(ctx, c, event); err != nil {
+			saveAddr := *c
+			if event.Metadata["agent_id"] != "" && strings.HasPrefix(c.Name, "flow-") {
+				saveAddr.SubGraph.Name = fmt.Sprintf("%s/%s", dirName, event.Metadata["agent_id"])
+			} else if strings.HasPrefix(c.Name, "flow-") {
+				saveAddr.SubGraph.Name = dirName
+			}
+
+			if err := r.store.AppendEvent(ctx, &saveAddr, event); err != nil {
 				file.Close()
 				return err
 			}
@@ -136,7 +138,6 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *ChatAddress) error {
 		return fmt.Errorf("failed to clear graph: %w", err)
 	}
 
-	// 1. Re-ingest SpaceContexts (Markdown -> Badger)
 	contextsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "contexts")
 	entries, err := os.ReadDir(contextsDir)
 	if err == nil {
@@ -153,7 +154,6 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *ChatAddress) error {
 		}
 	}
 
-	// 2. Re-ingest Digests (Markdown -> Badger)
 	digestsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "digests")
 	entries, err = os.ReadDir(digestsDir)
 	if err == nil {
@@ -170,7 +170,6 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *ChatAddress) error {
 		}
 	}
 
-	// 3. Re-ingest Event Shards for ALL branches (.jsonl -> Badger)
 	ledgerDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger")
 	logsBaseDir := filepath.Join(ledgerDir, "logs")
 	subGraphs, err := os.ReadDir(logsBaseDir)
@@ -190,7 +189,6 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *ChatAddress) error {
 		}
 	}
 
-	// 4. Replay Mutations chronologically to re-establish tombstone and update states
 	mutationsDir := filepath.Join(r.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "mutations")
 	entries, err = os.ReadDir(mutationsDir)
 	if err == nil {

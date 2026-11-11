@@ -2,9 +2,12 @@ package thinkgraph
 
 import (
 	"context"
+	"encoding/json"
+
+	"uuid"
 )
 
-// TraversalEngine safely stitches timelines across branches by consulting the graph topology.
+// TraversalEngine safely stitches timelines across branches by tracing graph-native branch anchors.
 type TraversalEngine struct {
 	graph GraphRepository
 }
@@ -18,7 +21,6 @@ func (t *TraversalEngine) GetTimelinePage(
 	c *ChatAddress,
 	cursor string,
 	limit int,
-	topology map[string]BranchTopology,
 ) ([]Node, string, bool, error) {
 
 	var finalNodes []Node
@@ -31,27 +33,39 @@ func (t *TraversalEngine) GetTimelinePage(
 	remainingLimit := limit
 
 	for remainingLimit > 0 {
-		nodes, nextCursor, hasMore, err := t.graph.GetSubGraphTimelinePage(ctx, c, currentGraphID, currentCursor, remainingLimit)
+		var parentBranch string
+		var forkPoint uuid.UUID
+
+		nodes, nextCursor, hasMore, err := t.graph.GetSubGraphTimelinePage(ctx, &ChatAddress{ChatID: c.ChatID, ProjectID: c.ProjectID, SubGraph: SubGraph{Name: currentName}}, currentGraphID, currentCursor, remainingLimit)
 		if err != nil {
 			return nil, "", false, err
 		}
 
-		finalNodes = append(nodes, finalNodes...) // Prepend since Badger returns oldest-first within the limit block
+		// Look for a graph-native branch anchor to resolve ancestry dynamically
+		for _, node := range nodes {
+			if node.Type == EventBranchAnchor {
+				var anchor BranchAnchor
+				if err := json.Unmarshal(node.Data, &anchor); err == nil {
+					parentBranch = anchor.ParentBranch
+					forkPoint = anchor.ForkPoint
+				}
+			}
+		}
+
+		finalNodes = append(nodes, finalNodes...)
 		remainingLimit -= len(nodes)
 
 		if hasMore {
 			return finalNodes, nextCursor, true, nil
 		}
 
-		// Reached the end of the current branch. Hop to the parent if it exists.
-		topo, exists := topology[currentName]
-		if !exists || topo.ParentBranch == "" {
-			break // Root of the entire chat
+		if parentBranch == "" {
+			break // Reached root of the entire chat DAG
 		}
 
-		currentName = topo.ParentBranch
-		currentGraphID = GraphID{} // Parent graph ID is inherently unknown to string-based topology map
-		currentCursor = topo.ForkPoint
+		currentName = parentBranch
+		currentGraphID = GraphID{}
+		currentCursor = forkPoint.String()
 	}
 
 	hasMoreTotal := false
@@ -69,7 +83,6 @@ func (t *TraversalEngine) GetTimelinePage(
 func (t *TraversalEngine) WalkTimelineReverse(
 	ctx context.Context,
 	c *ChatAddress,
-	topology map[string]BranchTopology,
 	fn func(Node) bool,
 ) error {
 	currentName := c.Name
@@ -81,8 +94,18 @@ func (t *TraversalEngine) WalkTimelineReverse(
 
 	for {
 		continueWalk := true
+		var parentBranch string
+		var forkPoint uuid.UUID
 
-		err := t.graph.WalkSubGraphReverse(ctx, c, currentGraphID, currentCursor, func(node Node) bool {
+		err := t.graph.WalkSubGraphReverse(ctx, &ChatAddress{ChatID: c.ChatID, ProjectID: c.ProjectID, SubGraph: SubGraph{Name: currentName}}, currentGraphID, currentCursor, func(node Node) bool {
+			if node.Type == EventBranchAnchor {
+				var anchor BranchAnchor
+				if err := json.Unmarshal(node.Data, &anchor); err == nil {
+					parentBranch = anchor.ParentBranch
+					forkPoint = anchor.ForkPoint
+				}
+			}
+
 			if !fn(node) {
 				continueWalk = false
 				return false
@@ -93,25 +116,21 @@ func (t *TraversalEngine) WalkTimelineReverse(
 			return err
 		}
 
-		if !continueWalk {
+		if !continueWalk || parentBranch == "" {
 			break
 		}
 
-		topo, exists := topology[currentName]
-		if !exists || topo.ParentBranch == "" {
-			break
-		}
-		currentName = topo.ParentBranch
+		currentName = parentBranch
 		currentGraphID = GraphID{}
-		currentCursor = topo.ForkPoint
+		currentCursor = forkPoint.String()
 	}
 
 	return nil
 }
 
-func (t *TraversalEngine) GetFullTimeline(ctx context.Context, c *ChatAddress, topology map[string]BranchTopology) ([]Node, error) {
+func (t *TraversalEngine) GetFullTimeline(ctx context.Context, c *ChatAddress) ([]Node, error) {
 	var allNodes []Node
-	err := t.WalkTimelineReverse(ctx, c, topology, func(node Node) bool {
+	err := t.WalkTimelineReverse(ctx, c, func(node Node) bool {
 		allNodes = append(allNodes, node)
 		return true
 	})
@@ -119,7 +138,6 @@ func (t *TraversalEngine) GetFullTimeline(ctx context.Context, c *ChatAddress, t
 		return nil, err
 	}
 
-	// Walk returns newest first, so we reverse it to maintain chronological order
 	for i, j := 0, len(allNodes)-1; i < j; i, j = i+1, j-1 {
 		allNodes[i], allNodes[j] = allNodes[j], allNodes[i]
 	}

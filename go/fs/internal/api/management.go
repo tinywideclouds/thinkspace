@@ -157,12 +157,8 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 
 	meta, _ := api.manager.GetChatMeta(spaceID, chatID)
 	activeBranch := "main"
-	topo := make(map[string]thinkgraph.BranchTopology)
 	if meta.ActiveBranch != "" {
 		activeBranch = meta.ActiveBranch
-		for k, v := range meta.Branches {
-			topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
-		}
 	}
 
 	chat := &thinkgraph.ChatAddress{
@@ -187,7 +183,7 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 
 		var timeline []thinkgraph.Node
 		engine := thinkgraph.NewTraversalEngine(api.manager.GraphRepository())
-		timeline, err = engine.GetFullTimeline(r.Context(), chat, topo)
+		timeline, err = engine.GetFullTimeline(r.Context(), chat)
 
 		if err == nil {
 			endIdx := len(timeline)

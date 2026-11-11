@@ -65,7 +65,8 @@ describe('BlockRouterComponent', () => {
       id: '1', 
       type: 'prompt', 
       content: 'User text',
-      timestamp: Temporal.Now.instant()
+      timestamp: Temporal.Now.instant(),
+      tombstoned: false
     } as ChatItem);
     
     await fixture.whenStable();
@@ -74,12 +75,13 @@ describe('BlockRouterComponent', () => {
     expect(fixture.nativeElement.querySelector('llm-user-message-block')).toBeTruthy();
   });
 
-  it('should route to the model message block', async () => {
+  it('should route to the model message block for model type', async () => {
     componentRef.setInput('chatItem', { 
       id: '2', 
       type: 'model', 
       content: 'Model text',
-      timestamp: Temporal.Now.instant()
+      timestamp: Temporal.Now.instant(),
+      tombstoned: false
     } as ChatItem);
     
     await fixture.whenStable();
@@ -88,15 +90,31 @@ describe('BlockRouterComponent', () => {
     expect(fixture.nativeElement.querySelector('llm-model-message-block')).toBeTruthy();
   });
 
-  it('should route to the file delta block', async () => {
+  it('should route to the system whisper block for system type', async () => {
     componentRef.setInput('chatItem', { 
       id: '3', 
+      type: 'system', 
+      content: 'Workspace transitioned to golang',
+      timestamp: Temporal.Now.instant(),
+      tombstoned: false
+    } as ChatItem);
+    
+    await fixture.whenStable();
+    fixture.detectChanges();
+    
+    expect(fixture.nativeElement.querySelector('llm-system-whisper-block')).toBeTruthy();
+  });
+
+  it('should route to the file delta block', async () => {
+    componentRef.setInput('chatItem', { 
+      id: '4', 
       type: 'file_delta', 
       path: 'src/app.ts', 
       previewSnippet: 'patch', 
       fileRef: 'ref', 
       content: 'summary text',
-      timestamp: Temporal.Now.instant()
+      timestamp: Temporal.Now.instant(),
+      tombstoned: false
     } as ChatItem);
     
     await fixture.whenStable();
@@ -107,7 +125,7 @@ describe('BlockRouterComponent', () => {
 
   it('should route to the flow execution card component', async () => {
     componentRef.setInput('chatItem', { 
-      id: '4', 
+      id: '5', 
       type: 'flow_execution', 
       flowId: 'flow-123',
       taskId: 'task-123',
@@ -116,7 +134,8 @@ describe('BlockRouterComponent', () => {
       error: '',
       agents: [],
       content: 'Running agent tests',
-      timestamp: Temporal.Now.instant()
+      timestamp: Temporal.Now.instant(),
+      tombstoned: false
     } as ChatItem);
     
     await fixture.whenStable();

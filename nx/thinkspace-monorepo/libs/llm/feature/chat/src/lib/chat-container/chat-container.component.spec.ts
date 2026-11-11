@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { Component, input, output, signal, WritableSignal } from '@angular/core';
 import { ChatContainerComponent } from './chat-container.component';
 import { 
   ChatConnectionService, 
@@ -14,27 +15,38 @@ import {
   FileContextMetaData, 
   AttentionFocus 
 } from '@org/llm-core-facade';
-import { TimelineFacade } from '@org/llm-ui-timeline';
-import { signal, WritableSignal } from '@angular/core';
+import { TimelineFacade, LinearFeedComponent } from '@org/llm-ui-timeline';
+import { CognitiveGraphComponent } from '@org/llm-ui-cognitive-graph';
+import { FocusHudComponent } from '@org/llm-ui-hud';
+import { DeskComponent } from '@org/llm-ui-workbench';
+import { FlowGraphComponent } from '@org/llm-ui-flow-graph';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
 
-// Mocks for Dumb UI Components
-vi.mock('@org/llm-ui-timeline', () => ({
-  LinearFeedComponent: { standalone: true, template: '<div id="mock-linear-feed"></div>' },
-  TimelineFacade: vi.fn()
-}));
-vi.mock('@org/llm-ui-cognitive-graph', () => ({
-  CognitiveGraphComponent: { standalone: true, template: '<div id="mock-cognitive-graph"></div>' }
-}));
-vi.mock('@org/llm-ui-hud', () => ({
-  FocusHudComponent: { standalone: true, template: '<div id="mock-focus-hud"></div>' }
-}));
-vi.mock('@org/llm-ui-workbench', () => ({
-  DeskComponent: { standalone: true, template: '<div id="mock-desk"></div>' }
-}));
-vi.mock('@org/llm-ui-flowgraph', () => ({
-  FlowGraphComponent: { standalone: true, template: '<div id="mock-flow-graph"></div>' }
-}));
+// --- Angular Native Mocks for Child Standalone Components ---
+@Component({ selector: 'llm-linear-feed', standalone: true, template: '' })
+class MockLinearFeedComponent {}
+
+@Component({ selector: 'llm-cognitive-graph', standalone: true, template: '' })
+class MockCognitiveGraphComponent {}
+
+@Component({ selector: 'llm-focus-hud', standalone: true, template: '' })
+class MockFocusHudComponent {
+  focus = input<any>();
+  activeHoverTag = input<any>();
+  tagHovered = output<any>();
+  tagClicked = output<any>();
+}
+
+@Component({ selector: 'llm-desk', standalone: true, template: '' })
+class MockDeskComponent {
+  items = input<any>();
+  fileSelected = output<any>();
+}
+
+@Component({ selector: 'llm-flow-graph', standalone: true, template: '' })
+class MockFlowGraphComponent {
+  flowId = input<any>();
+}
 
 interface MockConnectionService {
   connected: WritableSignal<boolean>;
@@ -142,7 +154,12 @@ describe('ChatContainerComponent', () => {
         { provide: ThinkspaceStateService, useValue: mockWorkspace },
         { provide: TimelineFacade, useValue: mockTimelineFacade }
       ]
-    }).compileComponents();
+    })
+    .overrideComponent(ChatContainerComponent, {
+      remove: { imports: [LinearFeedComponent, CognitiveGraphComponent, FocusHudComponent, DeskComponent, FlowGraphComponent] },
+      add: { imports: [MockLinearFeedComponent, MockCognitiveGraphComponent, MockFocusHudComponent, MockDeskComponent, MockFlowGraphComponent] }
+    })
+    .compileComponents();
 
     fixture = TestBed.createComponent(ChatContainerComponent);
     component = fixture.componentInstance;

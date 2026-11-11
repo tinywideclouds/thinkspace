@@ -21,3 +21,8 @@ type Digest struct {
 	Promoted         bool        `json:"promoted"`
 	SummarizedEvents []uuid.UUID `json:"summarized_events,omitempty"`
 }
+
+type BranchAnchor struct {
+	ParentBranch string    `json:"parent_branch"`
+	ForkPoint    uuid.UUID `json:"fork_point"`
+}

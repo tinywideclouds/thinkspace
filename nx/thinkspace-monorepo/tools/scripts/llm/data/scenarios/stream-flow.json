@@ -3,9 +3,11 @@
     "offsetMs": 50,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
         "event": {
           "id": "stream-prompt-1",
-          "branchId": "main",
           "timestamp": "2026-10-23T12:04:58Z",
           "tags": [],
           "tombstoned": false,
@@ -22,9 +24,11 @@
     "offsetMs": 450,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
         "event": {
           "id": "stream-sys-1",
-          "branchId": "main",
           "timestamp": "2026-10-23T12:04:59Z",
           "tags": [],
           "tombstoned": false,
@@ -41,11 +45,15 @@
     "offsetMs": 500,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
         "event": {
           "id": "anchor-stream-456",
-          "branchId": "main",
           "timestamp": "2026-10-23T12:05:00Z",
-          "tags": ["frontend"],
+          "tags": [
+            "frontend"
+          ],
           "tombstoned": false,
           "metadata": {},
           "flowExecution": {
@@ -81,10 +89,15 @@
     "offsetMs": 900,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "mock-subgraph-stream",
         "event": {
           "id": "live-root",
           "timestamp": "2026-10-23T12:05:01Z",
-          "branchId": "mock-subgraph-stream",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
           "message": {
             "type": "SYSTEM",
             "text": "Root Manager: Analyzing auth requirements and splitting tasks."
@@ -97,10 +110,15 @@
     "offsetMs": 1500,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "mock-subgraph-stream",
         "event": {
           "id": "live-backend-1",
           "timestamp": "2026-10-23T12:05:02Z",
-          "branchId": "mock-subgraph-stream",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
           "edges": {
             "parent_id": "live-root"
           },
@@ -116,10 +134,15 @@
     "offsetMs": 500,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "mock-subgraph-stream",
         "event": {
           "id": "live-frontend-1",
           "timestamp": "2026-10-23T12:05:03Z",
-          "branchId": "mock-subgraph-stream",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
           "edges": {
             "parent_id": "live-root"
           },
@@ -135,10 +158,15 @@
     "offsetMs": 2000,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "mock-subgraph-stream",
         "event": {
           "id": "live-backend-2",
           "timestamp": "2026-10-23T12:05:04Z",
-          "branchId": "mock-subgraph-stream",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
           "edges": {
             "parent_id": "live-backend-1"
           },
@@ -154,10 +182,15 @@
     "offsetMs": 1500,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "mock-subgraph-stream",
         "event": {
           "id": "live-frontend-2",
           "timestamp": "2026-10-23T12:05:05Z",
-          "branchId": "mock-subgraph-stream",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
           "edges": {
             "parent_id": "live-frontend-1"
           },
@@ -173,10 +206,15 @@
     "offsetMs": 1000,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "mock-subgraph-stream",
         "event": {
           "id": "live-terminal",
           "timestamp": "2026-10-23T12:05:06Z",
-          "branchId": "mock-subgraph-stream",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
           "edges": {
             "parent_1": "live-backend-2",
             "parent_2": "live-frontend-2"
@@ -193,11 +231,16 @@
     "offsetMs": 500,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
         "event": {
           "id": "anchor-stream-456",
-          "branchId": "main",
           "timestamp": "2026-10-23T12:05:07Z",
-          "tags": ["frontend", "backend"],
+          "tags": [
+            "frontend",
+            "backend"
+          ],
           "tombstoned": false,
           "metadata": {},
           "flowExecution": {
@@ -230,7 +273,49 @@
     }
   },
   {
-    "offsetMs": 200,
+    "offsetMs": 100,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "mock-subgraph-stream",
+        "event": {
+          "id": "yield-stream-1",
+          "timestamp": "2026-10-23T12:05:08Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": {
+            "type": "SYSTEM",
+            "text": "Awaiting delegation strategy selection..."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 0,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
+        "event": {
+          "id": "yield-stream-1",
+          "timestamp": "2026-10-23T12:05:08Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": {
+            "type": "SYSTEM",
+            "text": "Awaiting delegation strategy selection..."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 100,
     "payload": {
       "requestStrategy": {
         "active": true

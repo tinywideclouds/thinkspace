@@ -1,4 +1,4 @@
-{"id":"e9b8c110-1234-7000-8000-000000000001","branchId":"main","timestamp":"2026-10-20T10:00:00Z","message":{"type":"PROMPT","text":"Let's build a timeline component."}}
-{"id":"e9b8c110-1234-7000-8000-000000000002","branchId":"main","timestamp":"2026-10-20T10:00:05Z","message":{"type":"MODEL","text":"Sure, I can help with that. What framework are we using?"}}
-{"id":"e9b8c110-1234-7000-8000-000000000003","branchId":"main","timestamp":"2026-10-20T10:05:00Z","tags":["ui"],"message":{"type":"PROMPT","text":"Angular 22."}}
-{"id":"e9b8c110-1234-7000-8000-000000000004","branchId":"main","timestamp":"2026-10-20T10:05:10Z","tags":["ui"],"message":{"type":"MODEL","text":"Great, I will use modern Signals and the `@analogjs` plugin for Vite."}}
+{"id":"e9b8c110-1234-7000-8000-000000000001","timestamp":"2026-10-20T10:00:00Z","message":{"type":"PROMPT","text":"Let's build a timeline component."}}
+{"id":"e9b8c110-1234-7000-8000-000000000002","timestamp":"2026-10-20T10:00:05Z","message":{"type":"MODEL","text":"Sure, I can help with that. What framework are we using?"}}
+{"id":"e9b8c110-1234-7000-8000-000000000003","timestamp":"2026-10-20T10:05:00Z","tags":["ui"],"message":{"type":"PROMPT","text":"Angular 22."}}
+{"id":"e9b8c110-1234-7000-8000-000000000004","timestamp":"2026-10-20T10:05:10Z","tags":["ui"],"message":{"type":"MODEL","text":"Great, I will use modern Signals and the `@analogjs` plugin for Vite."}}

@@ -9,6 +9,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -18,8 +19,13 @@ func NewTerminalUI() *TerminalUI {
 	return &TerminalUI{}
 }
 
-func (ui *TerminalUI) OnTextChunk(text string) {
-	fmt.Print(text)
+func (ui *TerminalUI) OnTextChunk(chunk workspace.NodeChunk) {
+	fmt.Print(chunk.Text)
+}
+
+func (ui *TerminalUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {
+	// The standard CLI relies on raw text streams for output
+	// and does not explicitly render structural graph nodes.
 }
 
 func (ui *TerminalUI) ConfirmTransition(req signals.SignalTransition) bool {
@@ -76,7 +82,7 @@ func (ui *TerminalUI) ReviewCandidate(branch string) bool {
 	return input == "y" || input == "yes"
 }
 
-func (ui *TerminalUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
+func (ui *TerminalUI) GetChunkChannel() chan<- workspace.NodeChunk {
 	// The standard CLI does not currently multiplex concurrent agent text streams to the terminal.
 	// It relies on the post-execution diffs and flow summaries.
 	return nil

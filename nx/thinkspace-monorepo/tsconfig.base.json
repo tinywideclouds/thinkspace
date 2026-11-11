@@ -18,13 +18,6 @@
     "paths": {
       "@org/api/products": ["./packages/api/products/src/index.ts"],
       "@org/models": ["./packages/shared/models/src/index.ts"],
-      "@org/shop/data": ["./packages/shop/data/src/index.ts"],
-      "@org/shop/feature-product-detail": [
-        "./packages/shop/feature-product-detail/src/index.ts"
-      ],
-      "@org/shop/feature-products": [
-        "./packages/shop/feature-products/src/index.ts"
-      ],
       "@org/llm-core-protos": ["./libs/llm/core/protos/src/index.ts"],
       "@org/llm-core-transport": ["./libs/llm/core/transport/src/index.ts"],
       "@org/llm-core-facade": ["./libs/llm/core/facade/src/index.ts"],

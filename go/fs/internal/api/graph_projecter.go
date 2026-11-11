@@ -10,8 +10,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// mapFlowStatus exhaustively guarantees type safety across the architectural boundary,
-// preventing silent drift between the domain enums and transport protobufs.
 func mapFlowStatus(domainStatus flows.FlowStatus) pb.FlowStatus {
 	switch domainStatus {
 	case flows.FlowStatusRunning:
@@ -25,9 +23,9 @@ func mapFlowStatus(domainStatus flows.FlowStatus) pb.FlowStatus {
 	}
 }
 
-// ProjectTimeline iterates over raw generic graph nodes, extracts the strongly typed domain payloads,
-// and maps them natively into Protobuf envelopes to maintain strict transport type safety.
-func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
+// ProjectEvents iterates over raw generic graph nodes, extracts the strongly typed domain payloads,
+// and maps them natively into Protobuf envelopes. It applies to both Main Timelines and SubGraphs.
+func ProjectEvents(nodes []thinkgraph.Node) []*pb.GraphEvent {
 	var pbEvents []*pb.GraphEvent
 
 	for _, n := range nodes {
@@ -36,8 +34,8 @@ func ProjectTimeline(nodes []thinkgraph.Node) []*pb.GraphEvent {
 			Timestamp:  n.Timestamp.Format(time.RFC3339),
 			Tags:       n.Tags,
 			Tombstoned: n.Tombstoned,
-			BranchId:   n.GraphID.String(), // Mapped to the strict GraphID coordinate
 			Metadata:   n.Metadata,
+			Edges:      n.Edges,
 		}
 
 		switch n.Type {

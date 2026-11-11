@@ -1,0 +1,75 @@
+[
+  {
+    "offsetMs": 100,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "intake",
+        "chatId": "chat-1",
+        "projectionId": "main",
+        "event": {
+          "id": "mock-prompt-1",
+          "timestamp": "2026-10-23T12:05:59Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": { "type": "PROMPT", "text": "Please build a Go HTTP server." }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 100,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "intake",
+        "chatId": "chat-1",
+        "projectionId": "main",
+        "event": {
+          "id": "mock-model-shell-1",
+          "timestamp": "2026-10-23T12:06:00Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": { "type": "MODEL", "text": "" }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 1000,
+    "awaitAction": "transitionDecision",
+    "payload": {
+      "requestTransition": {
+        "targetThinkState": "golang",
+        "reasoning": "The user is requesting a Go HTTP server. I need to transition to the golang engineering domain to execute this."
+      }
+    }
+  },
+  {
+    "offsetMs": 500,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
+        "event": {
+          "id": "mock-system-whisper-1",
+          "timestamp": "2026-10-23T12:06:03Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": { "type": "SYSTEM", "text": "Workspace transitioned to golang" }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 1000,
+    "payload": {
+      "chatStream": {
+        "nodeId": "mock-model-shell-1",
+        "text": "I have transitioned to the Go environment. Here is the server code you requested:\n\n```go\npackage main\n\nimport \"net/http\"\n\nfunc main() {\n    http.ListenAndServe(\":8080\", nil)\n}\n```"
+      }
+    }
+  }
+]

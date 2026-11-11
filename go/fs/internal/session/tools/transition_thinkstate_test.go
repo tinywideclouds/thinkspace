@@ -48,6 +48,7 @@ func TestTransitionThinkStateTool_Execute_Approved(t *testing.T) {
 
 func TestTransitionThinkStateTool_Execute_Denied(t *testing.T) {
 	tool := tools.NewTransitionThinkStateTool([]string{"golang", "concept"})
+	emitter := &mockToolEmitter{}
 
 	rawArgs := map[string]any{
 		tools.TargetThinkState: "golang",
@@ -60,6 +61,7 @@ func TestTransitionThinkStateTool_Execute_Denied(t *testing.T) {
 		RawArguments: rawArgs,
 		UI:           &mockTransitionUI{confirmResult: false},
 		Bundle:       bundle,
+		Emitter:      emitter,
 	}
 
 	result, err := tool.Execute(context.Background(), ec)
@@ -81,6 +83,16 @@ func TestTransitionThinkStateTool_Execute_Denied(t *testing.T) {
 	}
 	if !strings.Contains(injected.Content, "denied by user") {
 		t.Errorf("expected denial message, got %q", injected.Content)
+	}
+
+	foundIntercept := false
+	for _, e := range emitter.events {
+		if e.Type == "system_intercept" {
+			foundIntercept = true
+		}
+	}
+	if !foundIntercept {
+		t.Errorf("expected system_intercept telemetry event to be fired")
 	}
 }
 

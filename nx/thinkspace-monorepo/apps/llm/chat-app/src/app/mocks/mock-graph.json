@@ -2,7 +2,6 @@
   "events": [
     {
       "id": "e9b8c110-1234-7000-8000-000000000001",
-      "branchId": "main",
       "timestamp": "2026-10-20T10:00:00Z",
       "message": {
         "type": "PROMPT",
@@ -11,7 +10,6 @@
     },
     {
       "id": "e9b8c110-1234-7000-8000-000000000002",
-      "branchId": "main",
       "timestamp": "2026-10-20T10:00:05Z",
       "message": {
         "type": "MODEL",
@@ -20,7 +18,6 @@
     },
     {
       "id": "e9b8c110-1234-7000-8000-000000000003",
-      "branchId": "main",
       "timestamp": "2026-10-20T10:05:00Z",
       "tags": [
         "ui"
@@ -32,7 +29,6 @@
     },
     {
       "id": "e9b8c110-1234-7000-8000-000000000004",
-      "branchId": "main",
       "timestamp": "2026-10-20T10:05:10Z",
       "tags": [
         "ui"
@@ -62,14 +58,35 @@
   "scenarios": {
     "delayed": [
       {
-        "offsetMs": 200,
+        "offsetMs": 100,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
+            "event": {
+              "id": "delay-node-1",
+              "timestamp": "2026-10-20T10:06:00Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "MODEL",
+                "text": ""
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 100,
         "payload": {
           "telemetryEvent": {
             "channel": "manager",
             "event": {
               "id": "scenario-delay-1",
               "type": "flow_start",
-              "timestamp": "2026-10-20T10:00:00Z",
+              "timestamp": "2026-10-20T10:06:01Z",
               "message": "",
               "summary": "Executing long-running background task...",
               "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"task_id\": \"task-del-1\", \"agent_count\": 1}"
@@ -81,19 +98,20 @@
         "offsetMs": 5000,
         "payload": {
           "chatStream": {
+            "nodeId": "delay-node-1",
             "text": "💥 BOOM! This is a massive delayed message block that arrived 5 seconds later. It should trigger the 'New Messages ↓' pill instead of forcing your scroll if you moved your view up."
           }
         }
       },
       {
-        "offsetMs": 5200,
+        "offsetMs": 200,
         "payload": {
           "telemetryEvent": {
             "channel": "manager",
             "event": {
               "id": "scenario-delay-end",
               "type": "flow_complete",
-              "timestamp": "2026-10-20T10:00:05Z",
+              "timestamp": "2026-10-20T10:06:10Z",
               "message": "",
               "summary": "",
               "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"agent_index\": 1, \"passed\": true}"
@@ -107,6 +125,9 @@
         "offsetMs": 200,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "mock-model-parent-1",
               "timestamp": "2026-10-23T12:00:00Z",
@@ -125,6 +146,9 @@
         "offsetMs": 1200,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "mock-file-event-1",
               "timestamp": "2026-10-23T12:00:01Z",
@@ -150,7 +174,6 @@
           "streamedGraphEvent": {
             "event": {
               "id": "anchor-completed-123",
-              "branchId": "main",
               "timestamp": "2026-10-23T12:00:00Z",
               "tags": [
                 "backend"
@@ -176,6 +199,9 @@
         "offsetMs": 200,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "durable-err-1",
               "timestamp": "2026-10-23T12:05:00Z",
@@ -279,6 +305,9 @@
         "offsetMs": 5000,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "durable-err-1",
               "timestamp": "2026-10-23T12:05:05Z",
@@ -335,6 +364,9 @@
         "offsetMs": 200,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "durable-success-1",
               "timestamp": "2026-10-23T12:00:00Z",
@@ -438,6 +470,9 @@
         "offsetMs": 5000,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "durable-success-1",
               "timestamp": "2026-10-23T12:00:05Z",
@@ -488,6 +523,56 @@
             }
           }
         }
+      },
+      {
+        "offsetMs": 100,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
+            "event": {
+              "id": "yield-succ-1",
+              "timestamp": "2026-10-23T12:00:06Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "SYSTEM",
+                "text": "Awaiting delegation strategy selection..."
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 0,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "flow-succ-1",
+            "event": {
+              "id": "yield-succ-1",
+              "timestamp": "2026-10-23T12:00:06Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "SYSTEM",
+                "text": "Awaiting delegation strategy selection..."
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 100,
+        "payload": {
+          "requestStrategy": {
+            "active": true
+          }
+        }
       }
     ],
     "paginate": [
@@ -505,10 +590,12 @@
         "offsetMs": 100,
         "payload": {
           "syncHistory": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "recentEvents": [
               {
                 "id": "hist-1",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:00:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -520,7 +607,6 @@
               },
               {
                 "id": "hist-2",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:05:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -532,7 +618,6 @@
               },
               {
                 "id": "hist-3",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:10:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -544,7 +629,6 @@
               },
               {
                 "id": "hist-4",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:15:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -556,7 +640,6 @@
               },
               {
                 "id": "hist-5",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:20:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -568,7 +651,6 @@
               },
               {
                 "id": "hist-6",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:25:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -580,7 +662,6 @@
               },
               {
                 "id": "hist-7",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:15:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -592,7 +673,6 @@
               },
               {
                 "id": "hist-8",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:20:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -604,7 +684,6 @@
               },
               {
                 "id": "hist-9",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:25:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -616,7 +695,6 @@
               },
               {
                 "id": "hist-10",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:30:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -628,7 +706,6 @@
               },
               {
                 "id": "hist-11",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:35:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -640,7 +717,6 @@
               },
               {
                 "id": "hist-12",
-                "branchId": "main",
                 "timestamp": "2026-10-20T09:40:00Z",
                 "tags": [],
                 "tombstoned": false,
@@ -659,14 +735,35 @@
     ],
     "slow": [
       {
-        "offsetMs": 200,
+        "offsetMs": 100,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
+            "event": {
+              "id": "slow-node-1",
+              "timestamp": "2026-10-20T10:06:00Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "MODEL",
+                "text": ""
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 100,
         "payload": {
           "telemetryEvent": {
             "channel": "manager",
             "event": {
               "id": "scenario-slow-1",
               "type": "flow_start",
-              "timestamp": "2026-10-20T10:00:00Z",
+              "timestamp": "2026-10-20T10:06:01Z",
               "message": "",
               "summary": "Simulating massive streaming response...",
               "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"task_id\": \"task-slow-1\", \"agent_count\": 1}"
@@ -675,78 +772,86 @@
         }
       },
       {
-        "offsetMs": 500,
+        "offsetMs": 300,
         "payload": {
           "chatStream": {
+            "nodeId": "slow-node-1",
             "text": "Here is a massive simulated response designed to test the scroll physics of the timeline component. When you scroll up, this text should continue generating below the fold without violently hijacking your viewport or pushing the content you are currently reading off the screen.\n\n"
           }
         }
       },
       {
-        "offsetMs": 1000,
+        "offsetMs": 500,
         "payload": {
           "chatStream": {
+            "nodeId": "slow-node-1",
             "text": "This is paragraph two. If the IntersectionObserver and CSS overflow anchoring are wired correctly, reading historical messages while I stream will feel perfectly stable. "
           }
         }
       },
       {
-        "offsetMs": 1500,
+        "offsetMs": 500,
         "payload": {
           "chatStream": {
+            "nodeId": "slow-node-1",
             "text": "Chunk 3. I will keep arriving in chunks "
           }
         }
       },
       {
-        "offsetMs": 2000,
+        "offsetMs": 500,
         "payload": {
           "chatStream": {
+            "nodeId": "slow-node-1",
             "text": "\nChunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
           }
         }
       },
       {
-        "offsetMs": 2500,
+        "offsetMs": 500,
         "payload": {
           "chatStream": {
+            "nodeId": "slow-node-1",
             "text": "\nChunk 5 repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
           }
         }
       },
       {
-        "offsetMs": 3000,
+        "offsetMs": 500,
         "payload": {
           "chatStream": {
+            "nodeId": "slow-node-1",
             "text": "\nChunk 6 repeated repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
           }
         }
       },
       {
-        "offsetMs": 3500,
+        "offsetMs": 500,
         "payload": {
           "chatStream": {
+            "nodeId": "slow-node-1",
             "text": "\nChunk 7 short again. <br> But delayed \n"
           }
         }
       },
       {
-        "offsetMs": 4000,
+        "offsetMs": 500,
         "payload": {
           "chatStream": {
+            "nodeId": "slow-node-1",
             "text": "\nChunk 8 finishing up the test. So if the text is long enough you'll have to scroll down to see the final output."
           }
         }
       },
       {
-        "offsetMs": 4500,
+        "offsetMs": 500,
         "payload": {
           "telemetryEvent": {
             "channel": "manager",
             "event": {
               "id": "scenario-slow-end",
               "type": "flow_complete",
-              "timestamp": "2026-10-20T10:00:03Z",
+              "timestamp": "2026-10-20T10:06:10Z",
               "message": "",
               "summary": "",
               "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"agent_index\": 1, \"passed\": true}"
@@ -760,9 +865,11 @@
         "offsetMs": 50,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "stream-prompt-1",
-              "branchId": "main",
               "timestamp": "2026-10-23T12:04:58Z",
               "tags": [],
               "tombstoned": false,
@@ -779,9 +886,11 @@
         "offsetMs": 450,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "stream-sys-1",
-              "branchId": "main",
               "timestamp": "2026-10-23T12:04:59Z",
               "tags": [],
               "tombstoned": false,
@@ -798,9 +907,11 @@
         "offsetMs": 500,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "anchor-stream-456",
-              "branchId": "main",
               "timestamp": "2026-10-23T12:05:00Z",
               "tags": [
                 "frontend"
@@ -840,10 +951,15 @@
         "offsetMs": 900,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "mock-subgraph-stream",
             "event": {
               "id": "live-root",
               "timestamp": "2026-10-23T12:05:01Z",
-              "branchId": "mock-subgraph-stream",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
               "message": {
                 "type": "SYSTEM",
                 "text": "Root Manager: Analyzing auth requirements and splitting tasks."
@@ -856,10 +972,15 @@
         "offsetMs": 1500,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "mock-subgraph-stream",
             "event": {
               "id": "live-backend-1",
               "timestamp": "2026-10-23T12:05:02Z",
-              "branchId": "mock-subgraph-stream",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
               "edges": {
                 "parent_id": "live-root"
               },
@@ -875,10 +996,15 @@
         "offsetMs": 500,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "mock-subgraph-stream",
             "event": {
               "id": "live-frontend-1",
               "timestamp": "2026-10-23T12:05:03Z",
-              "branchId": "mock-subgraph-stream",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
               "edges": {
                 "parent_id": "live-root"
               },
@@ -894,10 +1020,15 @@
         "offsetMs": 2000,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "mock-subgraph-stream",
             "event": {
               "id": "live-backend-2",
               "timestamp": "2026-10-23T12:05:04Z",
-              "branchId": "mock-subgraph-stream",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
               "edges": {
                 "parent_id": "live-backend-1"
               },
@@ -913,10 +1044,15 @@
         "offsetMs": 1500,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "mock-subgraph-stream",
             "event": {
               "id": "live-frontend-2",
               "timestamp": "2026-10-23T12:05:05Z",
-              "branchId": "mock-subgraph-stream",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
               "edges": {
                 "parent_id": "live-frontend-1"
               },
@@ -932,10 +1068,15 @@
         "offsetMs": 1000,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "mock-subgraph-stream",
             "event": {
               "id": "live-terminal",
               "timestamp": "2026-10-23T12:05:06Z",
-              "branchId": "mock-subgraph-stream",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
               "edges": {
                 "parent_1": "live-backend-2",
                 "parent_2": "live-frontend-2"
@@ -952,9 +1093,11 @@
         "offsetMs": 500,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "anchor-stream-456",
-              "branchId": "main",
               "timestamp": "2026-10-23T12:05:07Z",
               "tags": [
                 "frontend",
@@ -992,10 +1135,136 @@
         }
       },
       {
-        "offsetMs": 200,
+        "offsetMs": 100,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "mock-subgraph-stream",
+            "event": {
+              "id": "yield-stream-1",
+              "timestamp": "2026-10-23T12:05:08Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "SYSTEM",
+                "text": "Awaiting delegation strategy selection..."
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 0,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
+            "event": {
+              "id": "yield-stream-1",
+              "timestamp": "2026-10-23T12:05:08Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "SYSTEM",
+                "text": "Awaiting delegation strategy selection..."
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 100,
         "payload": {
           "requestStrategy": {
             "active": true
+          }
+        }
+      }
+    ],
+    "transition": [
+      {
+        "offsetMs": 100,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "intake",
+            "chatId": "chat-1",
+            "projectionId": "main",
+            "event": {
+              "id": "mock-prompt-1",
+              "timestamp": "2026-10-23T12:05:59Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "PROMPT",
+                "text": "Please build a Go HTTP server."
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 100,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "intake",
+            "chatId": "chat-1",
+            "projectionId": "main",
+            "event": {
+              "id": "mock-model-shell-1",
+              "timestamp": "2026-10-23T12:06:00Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "MODEL",
+                "text": ""
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 1000,
+        "awaitAction": "transitionDecision",
+        "payload": {
+          "requestTransition": {
+            "targetThinkState": "golang",
+            "reasoning": "The user is requesting a Go HTTP server. I need to transition to the golang engineering domain to execute this."
+          }
+        }
+      },
+      {
+        "offsetMs": 500,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
+            "event": {
+              "id": "mock-system-whisper-1",
+              "timestamp": "2026-10-23T12:06:03Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {},
+              "message": {
+                "type": "SYSTEM",
+                "text": "Workspace transitioned to golang"
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 1000,
+        "payload": {
+          "chatStream": {
+            "nodeId": "mock-model-shell-1",
+            "text": "I have transitioned to the Go environment. Here is the server code you requested:\n\n```go\npackage main\n\nimport \"net/http\"\n\nfunc main() {\n    http.ListenAndServe(\":8080\", nil)\n}\n```"
           }
         }
       }
@@ -1005,6 +1274,9 @@
         "offsetMs": 200,
         "payload": {
           "streamedGraphEvent": {
+            "spaceId": "golang",
+            "chatId": "chat-1",
+            "projectionId": "main",
             "event": {
               "id": "mock-file-event-1",
               "timestamp": "2026-10-23T12:00:00Z",
@@ -1032,7 +1304,6 @@
       {
         "id": "subnode-1",
         "timestamp": "2026-10-23T12:00:01Z",
-        "branchId": "mock-subgraph-completed",
         "message": {
           "type": "SYSTEM",
           "text": "Initializing architectural review..."
@@ -1041,7 +1312,6 @@
       {
         "id": "subnode-2",
         "timestamp": "2026-10-23T12:00:02Z",
-        "branchId": "mock-subgraph-completed",
         "edges": {
           "parent_id": "subnode-1"
         },
@@ -1053,7 +1323,6 @@
       {
         "id": "subnode-3",
         "timestamp": "2026-10-23T12:00:05Z",
-        "branchId": "mock-subgraph-completed",
         "edges": {
           "parent_id": "subnode-2"
         },

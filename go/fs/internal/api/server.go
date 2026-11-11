@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -53,12 +54,12 @@ func (server *Server) handleGetPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	service := server.manager.GetService(spaceID)
-	chatSession := &thinkgraph.ChatAddress{
+	chatAddress := &thinkgraph.ChatAddress{
 		ChatID:    chatID,
 		ProjectID: spaceID,
 	}
 
-	data, err := service.GetContextPreview(r.Context(), chatSession, previewID)
+	data, err := service.GetContextPreview(r.Context(), chatAddress, previewID)
 	if err != nil {
 		http.Error(w, "Preview not found", http.StatusNotFound)
 		return
@@ -83,8 +84,8 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	tokenChan := make(chan workspace.AgentToken, 100)
-	ui := NewWebSocketUI(ctx, connection, tokenChan, server.logger)
+	chunkChan := make(chan workspace.NodeChunk, 100)
+	connectionManager := NewConnectionManager(ctx, connection, chunkChan, server.logger)
 
 	spaceIDs, err := server.manager.ListSpaces(ctx)
 	if err != nil {
@@ -123,14 +124,14 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
-		for token := range tokenChan {
-			streamBytes, err := MarshalAgentStream(token.AgentID, token.Text)
+		for chunk := range chunkChan {
+			streamBytes, err := MarshalChatStream(chunk)
 			if err != nil {
-				server.logger.Error("Failed marshaling agent stream", "error", err)
+				server.logger.Error("Failed marshaling chat stream", "error", err)
 				continue
 			}
 			if writeErr := connection.Write(ctx, websocket.MessageText, streamBytes); writeErr != nil {
-				server.logger.Warn("Failed streaming agent token to client", "error", writeErr)
+				server.logger.Warn("Failed streaming chunk to client", "error", writeErr)
 			}
 		}
 	}()
@@ -151,11 +152,17 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		switch inbound.Type {
 		case "submit_prompt":
 			payload := inbound.SubmitPrompt
+			emitter := NewWebSocketEmitter(ctx, connection)
 
-			_, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
+			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
 				server.logger.Error("failed to get chat session", "space_id", payload.SpaceID, "chat_id", payload.ChatID, "error", err)
-				ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ Failed to open chat session: %v\n", err))
+				emitter.Emit("system", telemetry.Event{
+					ID:        uuid.NewV7(),
+					Type:      "error",
+					Timestamp: time.Now(),
+					Message:   fmt.Sprintf("Failed to open chat session: %v", err),
+				})
 				continue
 			}
 
@@ -163,12 +170,27 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			emitter := NewWebSocketEmitter(ctx, connection)
+			chatSession.Mu().RLock()
+			activeBranch := chatSession.Meta.ActiveBranch
+			chatSession.Mu().RUnlock()
+
+			coordinate := ProjectionCoordinate{
+				SpaceID:      payload.SpaceID,
+				ChatID:       payload.ChatID,
+				ProjectionID: activeBranch,
+			}
+			ui := NewTurnUI(connectionManager, coordinate)
+
 			go func(promptText string) {
 				server.logger.Info("Starting RunTurn goroutine", "space_id", payload.SpaceID, "chat_id", payload.ChatID, "prompt", promptText)
 				if err := server.turnManager.RunTurn(ctx, payload.SpaceID, payload.ChatID, promptText, ui, emitter); err != nil {
 					server.logger.Error("turn failed in execution", "space_id", payload.SpaceID, "chat_id", payload.ChatID, "error", err)
-					ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ System Error: %v\n", err))
+					emitter.Emit("system", telemetry.Event{
+						ID:        uuid.NewV7(),
+						Type:      "error",
+						Timestamp: time.Now(),
+						Message:   fmt.Sprintf("System Error: %v", err),
+					})
 				} else {
 					server.logger.Info("Finished RunTurn goroutine successfully", "space_id", payload.SpaceID, "chat_id", payload.ChatID)
 				}
@@ -177,34 +199,36 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		case "load_history":
 			payload := inbound.LoadHistory
 
-			chatSess, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
+			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
 				server.logger.Error("Failed retrieving session for history", "error", err)
 				continue
 			}
 
-			chatSess.Mu().RLock()
-			activeBranch := chatSess.Meta.ActiveBranch
-			topo := make(map[string]thinkgraph.BranchTopology)
-			for k, v := range chatSess.Meta.Branches {
-				topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
-			}
-			chatSess.Mu().RUnlock()
+			chatSession.Mu().RLock()
+			activeBranch := chatSession.Meta.ActiveBranch
+			chatSession.Mu().RUnlock()
 
-			chatObj := &thinkgraph.ChatAddress{
+			chatAddress := &thinkgraph.ChatAddress{
 				ChatID:    payload.ChatID,
 				ProjectID: payload.SpaceID,
 				SubGraph: thinkgraph.SubGraph{
 					Name: activeBranch,
 				},
 			}
+
+			service := server.manager.GetService(payload.SpaceID)
+			if err := service.SyncGraphContext(ctx, chatAddress); err != nil {
+				server.logger.Error("Failed JIT sync during load_history", "error", err)
+			}
+
 			limit := payload.Limit
 			if limit <= 0 {
 				limit = 50
 			}
 
 			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
-			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatObj, payload.Cursor, limit, topo)
+			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatAddress, payload.Cursor, limit)
 			if err != nil {
 				server.logger.Error("Failed to fetch timeline page", "error", err)
 				continue
@@ -214,7 +238,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			var focus thinkgraph.AttentionFocus
 
 			if payload.Cursor == "" {
-				if graphData, err := chatSess.GetGraphData(ctx); err == nil {
+				if graphData, err := chatSession.GetGraphData(ctx); err == nil {
 					digests = graphData.Digests
 					focus = graphData.Focus
 				} else {
@@ -222,100 +246,117 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			syncData, err := MarshalSyncHistory(events, digests, focus, nextCursor, hasMore)
+			coordinate := ProjectionCoordinate{SpaceID: payload.SpaceID, ChatID: payload.ChatID, ProjectionID: activeBranch}
+			syncData, err := MarshalSyncHistory(events, digests, focus, nextCursor, hasMore, coordinate)
 			if err != nil {
 				server.logger.Error("Failed to marshal history sync payload", "error", err)
 				continue
 			}
-			ui.SendSyncHistory(syncData)
+			connectionManager.SendBytes(syncData)
 
 		case "load_sub_graph":
 			payload := inbound.LoadSubGraph
 
-			chatObj := &thinkgraph.ChatAddress{
+			chatAddress := &thinkgraph.ChatAddress{
 				ChatID:    payload.ChatID,
 				ProjectID: payload.SpaceID,
 				SubGraph: thinkgraph.SubGraph{
-					Name: payload.GraphID, // In Badger GraphID correlates to the bounded SubGraph Name
+					Name: payload.GraphID,
 				},
 			}
 
+			service := server.manager.GetService(payload.SpaceID)
+			if err := service.SyncGraphContext(ctx, chatAddress); err != nil {
+				server.logger.Error("Failed JIT sync during load_sub_graph", "error", err)
+			}
+
 			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
-			events, err := engine.GetFullTimeline(ctx, chatObj, nil)
+			events, err := engine.GetFullTimeline(ctx, chatAddress)
 			if err != nil {
 				server.logger.Error("Failed to fetch subgraph timeline", "error", err)
 				continue
 			}
 
-			syncData, err := MarshalSyncSubGraph(events)
+			coordinate := ProjectionCoordinate{SpaceID: payload.SpaceID, ChatID: payload.ChatID, ProjectionID: payload.GraphID}
+			syncData, err := MarshalSyncSubGraph(events, coordinate)
 			if err != nil {
 				server.logger.Error("Failed to marshal sync subgraph payload", "error", err)
 				continue
 			}
-			ui.SendSyncSubGraph(syncData)
+			connectionManager.SendBytes(syncData)
 
 		case "fork_chat":
 			payload := inbound.ForkChat
 
-			chatSess, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
+			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
 				server.logger.Error("Failed retrieving session for fork", "error", err)
 				continue
 			}
 
-			chatSess.Mu().Lock()
+			targetID, err := uuid.Parse(payload.TargetEventID)
+			if err != nil {
+				server.logger.Error("Failed parsing target event ID for fork", "target_id", payload.TargetEventID, "error", err)
+				continue
+			}
+
+			chatSession.Mu().Lock()
+			parentBranch := chatSession.Meta.ActiveBranch
 			id := uuid.NewV7()
 			newBranchID := "branch-" + id.String()[:8]
-
-			chatSess.Meta.Branches[newBranchID] = workspace.BranchMeta{
-				ParentBranch: chatSess.Meta.ActiveBranch,
-				ForkPoint:    payload.TargetEventID,
-			}
-			chatSess.Meta.ActiveBranch = newBranchID
-
-			topo := make(map[string]thinkgraph.BranchTopology)
-			for k, v := range chatSess.Meta.Branches {
-				topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
-			}
-			chatSess.Mu().Unlock()
+			chatSession.Meta.ActiveBranch = newBranchID
+			chatSession.Mu().Unlock()
 
 			if err := server.manager.UpdateChatMeta(payload.SpaceID, payload.ChatID, func(m *workspace.ChatMeta) {
-				m.Branches[newBranchID] = workspace.BranchMeta{ParentBranch: m.ActiveBranch, ForkPoint: payload.TargetEventID}
 				m.ActiveBranch = newBranchID
 			}); err != nil {
 				server.logger.Error("Failed to update chat meta on fork", "error", err)
 			}
 
-			chatObj := &thinkgraph.ChatAddress{
+			chatAddress := &thinkgraph.ChatAddress{
 				ChatID:    payload.ChatID,
 				ProjectID: payload.SpaceID,
 				SubGraph: thinkgraph.SubGraph{
-					Name: newBranchID,
+					Name:    newBranchID,
+					GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
 				},
 			}
-			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
 
-			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatObj, "", 50, topo)
+			service := server.manager.GetService(payload.SpaceID)
+			if err := service.AppendBranchAnchor(ctx, chatAddress, parentBranch, targetID); err != nil {
+				server.logger.Error("Failed writing branch anchor", "error", err)
+			}
+
+			if err := service.SyncGraphContext(ctx, chatAddress); err != nil {
+				server.logger.Error("Failed JIT sync during fork_chat", "error", err)
+			}
+
+			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
+			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatAddress, "", 50)
 			if err != nil {
 				server.logger.Error("Failed to get timeline after fork", "error", err)
-			} else if syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore); err == nil {
-				ui.SendSyncHistory(syncData)
+			} else {
+				coordinate := ProjectionCoordinate{SpaceID: payload.SpaceID, ChatID: payload.ChatID, ProjectionID: newBranchID}
+				syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore, coordinate)
+				if err == nil {
+					connectionManager.SendBytes(syncData)
+				}
 			}
 
 		case "inline_edit":
 			payload := inbound.InlineEdit
 
-			chatSess, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
+			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
 				server.logger.Error("Failed retrieving session for inline edit", "error", err)
 				continue
 			}
 
-			chatSess.Mu().RLock()
-			activeBranch := chatSess.Meta.ActiveBranch
-			chatSess.Mu().RUnlock()
+			chatSession.Mu().RLock()
+			activeBranch := chatSession.Meta.ActiveBranch
+			chatSession.Mu().RUnlock()
 
-			chatObj := &thinkgraph.ChatAddress{
+			chatAddress := &thinkgraph.ChatAddress{
 				ChatID:    payload.ChatID,
 				ProjectID: payload.SpaceID,
 				SubGraph: thinkgraph.SubGraph{
@@ -323,20 +364,20 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				},
 			}
 
-			if err := server.manager.GetService(payload.SpaceID).LogUserPrompt(ctx, chatObj, payload.NewText); err != nil {
+			if err := server.manager.GetService(payload.SpaceID).AppendUserPrompt(ctx, chatAddress, payload.NewText); err != nil {
 				server.logger.Error("Failed logging amended prompt", "error", err)
 			}
 
-			if targetUUID, err := uuid.Parse(payload.TargetEventID); err != nil {
+			if targetID, err := uuid.Parse(payload.TargetEventID); err != nil {
 				server.logger.Error("Failed parsing target event ID for inline edit", "target_id", payload.TargetEventID, "error", err)
 			} else {
 				mut := thinkgraph.MutationEvent{
-					TargetID:  targetUUID,
+					TargetID:  targetID,
 					Type:      thinkgraph.MutationUpdate,
 					Timestamp: time.Now().UTC(),
 					Payload:   payload.NewText,
 				}
-				if err := server.manager.GetService(payload.SpaceID).SaveMutation(ctx, chatObj, mut); err != nil {
+				if err := server.manager.GetService(payload.SpaceID).SaveMutation(ctx, chatAddress, mut); err != nil {
 					server.logger.Error("Failed saving mutation for inline edit", "error", err)
 				}
 			}
@@ -344,19 +385,15 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		case "switch_branch":
 			payload := inbound.SwitchBranch
 
-			chatSess, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
+			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
 				server.logger.Error("Failed retrieving session for switch branch", "error", err)
 				continue
 			}
 
-			chatSess.Mu().Lock()
-			chatSess.Meta.ActiveBranch = payload.TargetBranch
-			topo := make(map[string]thinkgraph.BranchTopology)
-			for k, v := range chatSess.Meta.Branches {
-				topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
-			}
-			chatSess.Mu().Unlock()
+			chatSession.Mu().Lock()
+			chatSession.Meta.ActiveBranch = payload.TargetBranch
+			chatSession.Mu().Unlock()
 
 			if err := server.manager.UpdateChatMeta(payload.SpaceID, payload.ChatID, func(m *workspace.ChatMeta) {
 				m.ActiveBranch = payload.TargetBranch
@@ -364,27 +401,37 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed updating meta on switch branch", "error", err)
 			}
 
-			chatObj := &thinkgraph.ChatAddress{
+			chatAddress := &thinkgraph.ChatAddress{
 				ChatID:    payload.ChatID,
 				ProjectID: payload.SpaceID,
 				SubGraph: thinkgraph.SubGraph{
 					Name: payload.TargetBranch,
 				},
 			}
+
+			service := server.manager.GetService(payload.SpaceID)
+			if err := service.SyncGraphContext(ctx, chatAddress); err != nil {
+				server.logger.Error("Failed JIT sync during switch_branch", "error", err)
+			}
+
 			engine := thinkgraph.NewTraversalEngine(server.manager.GraphRepository())
 
-			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatObj, "", 50, topo)
+			events, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chatAddress, "", 50)
 			if err != nil {
 				server.logger.Error("Failed getting timeline on switch branch", "error", err)
-			} else if syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore); err == nil {
-				ui.SendSyncHistory(syncData)
+			} else {
+				coordinate := ProjectionCoordinate{SpaceID: payload.SpaceID, ChatID: payload.ChatID, ProjectionID: payload.TargetBranch}
+				syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore, coordinate)
+				if err == nil {
+					connectionManager.SendBytes(syncData)
+				}
 			}
 
 		case "select_strategy":
-			ui.PushStrategy(inbound.SelectStrategy.StrategyID)
+			connectionManager.PushStrategy(inbound.SelectStrategy.StrategyID)
 
 		case "review_decision":
-			ui.PushReviewDecision(inbound.ReviewDecision.Accepted)
+			connectionManager.PushReviewDecision(inbound.ReviewDecision.Accepted)
 
 		case "approve_context":
 			decision := session.ContextApprovalDecision{
@@ -392,10 +439,10 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				RetainedFilePaths:      inbound.ApproveContext.RetainedFilePaths,
 				RetainedHistoryIndices: inbound.ApproveContext.RetainedHistoryIndices,
 			}
-			ui.PushContextApproval(decision)
+			connectionManager.PushContextApproval(decision)
 
 		case "transition_decision":
-			ui.PushTransitionDecision(inbound.TransitionDecision.Approved)
+			connectionManager.PushTransitionDecision(inbound.TransitionDecision.Approved)
 		}
 	}
 }

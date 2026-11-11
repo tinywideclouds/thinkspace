@@ -5,7 +5,9 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
 const (
@@ -20,7 +22,7 @@ func (n ToolName) String() string {
 }
 
 type UI interface {
-	OnTextChunk(text string)
+	OnTextChunk(chunk workspace.NodeChunk)
 	ConfirmTransition(req signals.SignalTransition) bool
 }
 
@@ -33,6 +35,7 @@ type ExecutionContext struct {
 	Address      *thinkgraph.ChatAddress
 	Bundle       *cognition.ThinkBundle
 	UI           UI
+	Emitter      telemetry.Emitter
 	RawArguments map[string]any
 }
 

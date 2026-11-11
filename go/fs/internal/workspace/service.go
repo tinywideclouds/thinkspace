@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,7 +24,7 @@ var ErrGraphMismatch = errors.New("physical ledger mismatch detected (Git histor
 type Service struct {
 	logger        *slog.Logger
 	engine        ChatVersioner
-	workspaceRoot string // Represents the system's base root directory
+	workspaceRoot string
 	dispatcher    *thinkgraph.Dispatcher
 	emitter       telemetry.Emitter
 }
@@ -48,7 +49,6 @@ func (s *Service) WorkspaceRoot() string {
 	return s.workspaceRoot
 }
 
-// ProjectWorkspaceDir returns the physical git workspace directory for a specific project.
 func (s *Service) ProjectWorkspaceDir(projectID string) string {
 	return filepath.Join(s.workspaceRoot, projectID, "workspace")
 }
@@ -57,6 +57,100 @@ func (s *Service) Graph() thinkgraph.GraphRepository {
 	if s.dispatcher != nil && s.dispatcher.GraphStore() != nil {
 		return s.dispatcher.GraphStore().Repository()
 	}
+	return nil
+}
+
+// peekParentBranch natively reads the graph branch anchor from physical disk.
+func (s *Service) peekParentBranch(projectID, chatID, branchName string) string {
+	logsDir := filepath.Join(s.workspaceRoot, projectID, "chats", chatID, "ledger", "logs", branchName)
+	entries, err := os.ReadDir(logsDir)
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+
+	var shards []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			shards = append(shards, e.Name())
+		}
+	}
+	if len(shards) == 0 {
+		return ""
+	}
+	sort.Strings(shards)
+
+	firstShardPath := filepath.Join(logsDir, shards[0])
+	file, err := os.Open(firstShardPath)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if scanner.Scan() {
+		var ev thinkgraph.Event
+		if err := json.Unmarshal(scanner.Bytes(), &ev); err == nil && ev.Type == thinkgraph.EventBranchAnchor {
+			var anchor thinkgraph.BranchAnchor
+			if json.Unmarshal(ev.Data, &anchor) == nil {
+				return anchor.ParentBranch
+			}
+		}
+	}
+	return ""
+}
+
+// SyncGraphContext is completely decoupled from the API layer's topology maps.
+func (s *Service) SyncGraphContext(ctx context.Context, chat *thinkgraph.ChatAddress) error {
+	if s.Graph() == nil {
+		ledgerPath := filepath.Join(s.workspaceRoot, chat.ProjectID, "chats", chat.ChatID, "ledger")
+		_, _ = thinkgraph.LoadOrRebuildManifest(ledgerPath, chat.SubGraph.Name)
+		return nil
+	}
+
+	var branchesToSync []string
+	current := chat.SubGraph.Name
+
+	if strings.HasPrefix(current, "flow-") {
+		// DETACHABLE SUB-GRAPH: No topology walk required. Lazy-load isolated file.
+		branchesToSync = append(branchesToSync, current)
+	} else {
+		// Graph-Native Ancestry Walk
+		visited := make(map[string]bool)
+		for current != "" {
+			if visited[current] {
+				break
+			}
+			visited[current] = true
+			branchesToSync = append([]string{current}, branchesToSync...)
+
+			current = s.peekParentBranch(chat.ProjectID, chat.ChatID, current)
+		}
+	}
+
+	rehydrator := thinkgraph.NewRehydrator(s.dispatcher.GraphStore(), s.workspaceRoot)
+
+	for _, branchName := range branchesToSync {
+		branchAddr := *chat
+		branchAddr.SubGraph.Name = branchName
+
+		status, diskManifest, graphManifest, err := rehydrator.CheckSync(ctx, &branchAddr)
+		if err != nil {
+			return fmt.Errorf("sync check failed for %s: %w", branchName, err)
+		}
+
+		if status == thinkgraph.SyncStatusBehind {
+			s.logger.InfoContext(ctx, "Fast-forwarding graph index (JIT)", "subgraph", branchName)
+			if err := rehydrator.FastForward(ctx, &branchAddr, graphManifest, diskManifest); err != nil {
+				return fmt.Errorf("fast-forward failed for %s: %w", branchName, err)
+			}
+		} else if status == thinkgraph.SyncStatusMismatch {
+			s.logger.WarnContext(ctx, "History divergence detected; rebuilding graph index (JIT)", "subgraph", branchName)
+			if err := rehydrator.Rebuild(ctx, &branchAddr); err != nil {
+				return fmt.Errorf("rebuilding graph index for %s: %w", branchName, err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -86,28 +180,9 @@ func (s *Service) InitializeChat(ctx context.Context, chat *thinkgraph.ChatAddre
 		return fmt.Errorf("creating ledger contexts dir: %w", err)
 	}
 
-	if s.Graph() != nil {
-		rehydrator := thinkgraph.NewRehydrator(s.dispatcher.GraphStore(), s.workspaceRoot)
-		status, diskManifest, graphManifest, err := rehydrator.CheckSync(ctx, chat)
-		if err != nil {
-			return fmt.Errorf("sync check failed: %w", err)
-		}
-
-		if status == thinkgraph.SyncStatusBehind {
-			s.logger.InfoContext(ctx, "Fast-forwarding graph index", "target_events", diskManifest.TotalEvents)
-			if err := rehydrator.FastForward(ctx, chat, graphManifest, diskManifest); err != nil {
-				return fmt.Errorf("fast-forward failed: %w", err)
-			}
-		} else if status == thinkgraph.SyncStatusMismatch {
-			s.logger.WarnContext(ctx, "History divergence detected between BadgerDB and disk; rebuilding graph index from ledger", "chat_id", chat.ChatID)
-			if err := rehydrator.Rebuild(ctx, chat); err != nil {
-				s.logger.ErrorContext(ctx, "failed rebuilding graph index from ledger", "chat_id", chat.ChatID, "error", err)
-				return fmt.Errorf("rebuilding graph index: %w", err)
-			}
-			s.logger.InfoContext(ctx, "successfully rebuilt graph index from ledger", "chat_id", chat.ChatID)
-		}
-	} else {
-		_, _ = thinkgraph.LoadOrRebuildManifest(ledgerPath, chat.Name)
+	// At boot, sync the active moving head (no topology walk needed just for boot)
+	if err := s.SyncGraphContext(ctx, chat); err != nil {
+		return fmt.Errorf("failed to sync main timeline graph at boot: %w", err)
 	}
 
 	return nil
@@ -128,8 +203,8 @@ func (s *Service) ResolveCandidate(ctx context.Context, c *thinkgraph.ChatAddres
 		}
 	}
 
-	if err := s.LogResolution(ctx, c, candidateID, accept, reason); err != nil {
-		s.logger.ErrorContext(ctx, "failed to log resolution to ledger", "error", err)
+	if err := s.AppendResolution(ctx, c, candidateID, accept, reason); err != nil {
+		s.logger.ErrorContext(ctx, "failed to append resolution to ledger", "error", err)
 	}
 
 	return nil
@@ -147,13 +222,14 @@ func (s *Service) Checkpoint(ctx context.Context, c *thinkgraph.ChatAddress, rea
 	return sha, nil
 }
 
-func (s *Service) LogUserPrompt(ctx context.Context, c *thinkgraph.ChatAddress, content string) error {
+func (s *Service) AppendUserPrompt(ctx context.Context, c *thinkgraph.ChatAddress, content string) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventPrompt, content)
 	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
-func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.ChatAddress, content string, usage *telemetry.TokenUsage) error {
+func (s *Service) AppendModelResponse(ctx context.Context, c *thinkgraph.ChatAddress, eventID uuid.UUID, content string, usage *telemetry.TokenUsage) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventModel, content)
+	event.ID = eventID
 
 	if usage != nil && usage.TotalTokens > 0 {
 		event.Metadata = map[string]string{
@@ -166,7 +242,7 @@ func (s *Service) LogModelResponse(ctx context.Context, c *thinkgraph.ChatAddres
 	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
-func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string, accepted bool, reason string) error {
+func (s *Service) AppendResolution(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string, accepted bool, reason string) error {
 	status := "REJECTED"
 	if accepted {
 		status = "ACCEPTED"
@@ -182,6 +258,23 @@ func (s *Service) LogResolution(ctx context.Context, c *thinkgraph.ChatAddress, 
 	event.Data, _ = json.Marshal(payload)
 
 	return s.dispatcher.AppendEvent(ctx, c, event)
+}
+
+func (s *Service) AppendBranchAnchor(ctx context.Context, address *thinkgraph.ChatAddress, parentBranch string, forkPoint uuid.UUID) error {
+	anchorEvent := thinkgraph.NewEvent(thinkgraph.EventBranchAnchor, fmt.Sprintf("Branched from %s", parentBranch))
+
+	anchorData := thinkgraph.BranchAnchor{
+		ParentBranch: parentBranch,
+		ForkPoint:    forkPoint,
+	}
+
+	dataBytes, err := json.Marshal(anchorData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal branch anchor data: %w", err)
+	}
+	anchorEvent.Data = dataBytes
+
+	return s.dispatcher.AppendEvent(ctx, address, anchorEvent)
 }
 
 func (s *Service) ReadCandidate(ctx context.Context, c *thinkgraph.ChatAddress, candidateID string) (string, error) {
@@ -236,7 +329,7 @@ func (s *Service) GetContextPreview(ctx context.Context, c *thinkgraph.ChatAddre
 	return os.ReadFile(path)
 }
 
-func (s *Service) LogDigest(ctx context.Context, c *thinkgraph.ChatAddress, summary string, tags []string, isSticky bool, summarized []uuid.UUID) error {
+func (s *Service) AppendDigest(ctx context.Context, c *thinkgraph.ChatAddress, summary string, tags []string, isSticky bool, summarized []uuid.UUID) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventDigest, summary)
 	event.Tags = tags
 

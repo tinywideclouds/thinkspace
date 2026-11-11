@@ -13,7 +13,8 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type WebSocketUI struct {
+// ConnectionManager maintains the long-lived WebSocket connection and routes bytes.
+type ConnectionManager struct {
 	ctx            context.Context
 	conn           *websocket.Conn
 	writeMu        sync.Mutex
@@ -22,14 +23,14 @@ type WebSocketUI struct {
 	reviewChan     chan bool
 	approveChan    chan session.ContextApprovalDecision
 	transitionChan chan bool
-	tokenChan      chan<- workspace.AgentToken
+	chunkChan      chan<- workspace.NodeChunk
 }
 
-func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- workspace.AgentToken, logger *slog.Logger) *WebSocketUI {
+func NewConnectionManager(ctx context.Context, conn *websocket.Conn, chunkChan chan<- workspace.NodeChunk, logger *slog.Logger) *ConnectionManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &WebSocketUI{
+	return &ConnectionManager{
 		ctx:            ctx,
 		conn:           conn,
 		logger:         logger,
@@ -37,91 +38,80 @@ func NewWebSocketUI(ctx context.Context, conn *websocket.Conn, tokenChan chan<- 
 		reviewChan:     make(chan bool),
 		approveChan:    make(chan session.ContextApprovalDecision),
 		transitionChan: make(chan bool),
-		tokenChan:      tokenChan,
+		chunkChan:      chunkChan,
 	}
 }
 
-func (ui *WebSocketUI) ConfirmTransition(req signals.SignalTransition) bool {
+func (cm *ConnectionManager) SendBytes(data []byte) {
+	cm.writeMu.Lock()
+	defer cm.writeMu.Unlock()
+	if err := cm.conn.Write(cm.ctx, websocket.MessageText, data); err != nil {
+		cm.logger.WarnContext(cm.ctx, "failed writing bytes to websocket connection", "error", err)
+	}
+}
+
+func (cm *ConnectionManager) OnTextChunk(chunk workspace.NodeChunk) {
+	if cm.chunkChan != nil {
+		cm.chunkChan <- chunk
+	}
+}
+
+func (cm *ConnectionManager) GetChunkChannel() chan<- workspace.NodeChunk {
+	return cm.chunkChan
+}
+
+func (cm *ConnectionManager) ConfirmTransition(req signals.SignalTransition) bool {
 	data, err := MarshalRequestTransition(req.TargetThinkState, req.Reasoning)
 	if err != nil {
-		ui.logger.ErrorContext(ui.ctx, "failed marshaling request transition", "error", err)
+		cm.logger.ErrorContext(cm.ctx, "failed marshaling request transition", "error", err)
 	} else {
-		ui.sendBytes(data)
+		cm.SendBytes(data)
 	}
-	return <-ui.transitionChan
+	return <-cm.transitionChan
 }
 
-func (ui *WebSocketUI) sendBytes(data []byte) {
-	ui.writeMu.Lock()
-	defer ui.writeMu.Unlock()
-	if err := ui.conn.Write(ui.ctx, websocket.MessageText, data); err != nil {
-		ui.logger.WarnContext(ui.ctx, "failed writing bytes to websocket connection", "error", err)
-	}
-}
-
-func (ui *WebSocketUI) SendSyncHistory(data []byte) {
-	ui.sendBytes(data)
-}
-
-func (ui *WebSocketUI) SendSyncSubGraph(data []byte) {
-	ui.sendBytes(data)
-}
-
-func (ui *WebSocketUI) OnTextChunk(text string) {
-	data, err := MarshalChatStream(text)
-	if err != nil {
-		ui.logger.ErrorContext(ui.ctx, "failed marshaling chat stream text chunk", "error", err)
-		return
-	}
-	ui.sendBytes(data)
-}
-
-func (ui *WebSocketUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
+func (cm *ConnectionManager) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	data, err := MarshalPreviewContext(ctxData)
 	if err != nil {
-		ui.logger.ErrorContext(ui.ctx, "failed marshaling preview context for review", "error", err)
+		cm.logger.ErrorContext(cm.ctx, "failed marshaling preview context for review", "error", err)
 	} else {
-		ui.sendBytes(data)
+		cm.SendBytes(data)
 	}
-	return <-ui.approveChan
+	return <-cm.approveChan
 }
 
-func (ui *WebSocketUI) ChooseNextStep() flows.FlowStrategy {
+func (cm *ConnectionManager) ChooseNextStep() flows.FlowStrategy {
 	data, err := MarshalRequestStrategy()
 	if err != nil {
-		ui.logger.ErrorContext(ui.ctx, "failed marshaling request strategy", "error", err)
+		cm.logger.ErrorContext(cm.ctx, "failed marshaling request strategy", "error", err)
 	} else {
-		ui.sendBytes(data)
+		cm.SendBytes(data)
 	}
-	return <-ui.strategyChan
+	return <-cm.strategyChan
 }
 
-func (ui *WebSocketUI) ReviewCandidate(branch string) bool {
+func (cm *ConnectionManager) ReviewCandidate(branch string) bool {
 	data, err := MarshalRequestReview(branch)
 	if err != nil {
-		ui.logger.ErrorContext(ui.ctx, "failed marshaling request review", "error", err)
+		cm.logger.ErrorContext(cm.ctx, "failed marshaling request review", "error", err)
 	} else {
-		ui.sendBytes(data)
+		cm.SendBytes(data)
 	}
-	return <-ui.reviewChan
+	return <-cm.reviewChan
 }
 
-func (ui *WebSocketUI) GetAgentTokenChannel() chan<- workspace.AgentToken {
-	return ui.tokenChan
+func (cm *ConnectionManager) PushStrategy(strategy flows.FlowStrategy) {
+	cm.strategyChan <- strategy
 }
 
-func (ui *WebSocketUI) PushStrategy(strategy flows.FlowStrategy) {
-	ui.strategyChan <- strategy
+func (cm *ConnectionManager) PushReviewDecision(accepted bool) {
+	cm.reviewChan <- accepted
 }
 
-func (ui *WebSocketUI) PushReviewDecision(accepted bool) {
-	ui.reviewChan <- accepted
+func (cm *ConnectionManager) PushContextApproval(decision session.ContextApprovalDecision) {
+	cm.approveChan <- decision
 }
 
-func (ui *WebSocketUI) PushContextApproval(decision session.ContextApprovalDecision) {
-	ui.approveChan <- decision
-}
-
-func (ui *WebSocketUI) PushTransitionDecision(approved bool) {
-	ui.transitionChan <- approved
+func (cm *ConnectionManager) PushTransitionDecision(approved bool) {
+	cm.transitionChan <- approved
 }

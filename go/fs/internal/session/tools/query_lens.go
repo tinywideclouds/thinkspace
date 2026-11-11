@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
 const QueryLens ToolName = "query_lens"
@@ -44,7 +48,14 @@ func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionC
 		return nil, fmt.Errorf("invalid query_lens schema: %w", err)
 	}
 
-	executionContext.UI.OnTextChunk(fmt.Sprintf("\n\n🔍 **Searching memory for #%s...**\n", request.Tag))
+	if executionContext.Emitter != nil {
+		executionContext.Emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "tool_status",
+			Timestamp: time.Now(),
+			Message:   fmt.Sprintf("Searching memory for #%s...", request.Tag),
+		})
+	}
 
 	var toolResponse strings.Builder
 	fmt.Fprintf(&toolResponse, "[System Tool Response: query_lens(%s)]\n", request.Tag)
@@ -71,5 +82,5 @@ func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionC
 		Content: toolResponse.String(),
 	})
 
-	return nil, nil // Nil signal allows the LLM generation loop to continue natively
+	return nil, nil
 }

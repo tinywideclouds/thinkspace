@@ -34,14 +34,8 @@ func ApplyDevSkeleton(logger *slog.Logger, manager *workspace.ServiceManager) {
 			ID:               skeleton.Chat,
 			Name:             skeleton.Chat,
 			CreatedAt:        time.Now().UTC(),
-			ActiveThinkState: skeleton.ThinkState, // Explicitly seed think state
+			ActiveThinkState: skeleton.ThinkState,
 			ActiveBranch:     "main",
-			Branches: map[string]workspace.BranchMeta{
-				"main": {
-					ParentBranch: "",
-					ForkPoint:    "",
-				},
-			},
 		}
 
 		if metaBytes, err := json.MarshalIndent(meta, "", "  "); err == nil {

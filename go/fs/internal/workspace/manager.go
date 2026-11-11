@@ -62,7 +62,6 @@ func (manager *ServiceManager) GetService(spaceID string) *Service {
 		return service
 	}
 
-	// Route the Git engine explicitly into the isolated 'workspace' subdirectory
 	spaceRoot := filepath.Join(manager.baseRoot, spaceID)
 	workspaceDir := filepath.Join(spaceRoot, "workspace")
 	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
@@ -266,13 +265,6 @@ func (manager *ServiceManager) CreateChat(ctx context.Context, spaceID string, r
 		Name:         name,
 		CreatedAt:    time.Now().UTC(),
 		ActiveBranch: "main",
-		Branches: map[string]BranchMeta{
-			"main": {
-				ParentBranch: "",
-				ForkPoint:    "",
-				GraphID:      thinkgraph.NewGraphID(thinkgraph.PrefixChat).String(),
-			},
-		},
 	}
 
 	chatDir := filepath.Join(manager.baseRoot, spaceID, "chats", idStr)

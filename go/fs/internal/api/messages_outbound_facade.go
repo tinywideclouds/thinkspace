@@ -2,16 +2,18 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-func MarshalSyncHistory(recentEvents []thinkgraph.Node, digests []thinkgraph.DigestMeta, focus thinkgraph.AttentionFocus, nextCursor string, hasMore bool) ([]byte, error) {
-	pbEvents := ProjectTimeline(recentEvents)
+func MarshalSyncHistory(recentEvents []thinkgraph.Node, digests []thinkgraph.DigestMeta, focus thinkgraph.AttentionFocus, nextCursor string, hasMore bool, address ProjectionCoordinate) ([]byte, error) {
+	pbEvents := ProjectEvents(recentEvents)
 
 	pbDigests := make(map[string]*pb.DigestMeta)
 	for _, d := range digests {
@@ -36,19 +38,25 @@ func MarshalSyncHistory(recentEvents []thinkgraph.Node, digests []thinkgraph.Dig
 				Focus:        pbFocus,
 				NextCursor:   nextCursor,
 				HasMore:      hasMore,
+				SpaceId:      address.SpaceID,
+				ChatId:       address.ChatID,
+				ProjectionId: address.ProjectionID,
 			},
 		},
 	}
 	return protoMarshaler.Marshal(event)
 }
 
-func MarshalSyncSubGraph(events []thinkgraph.Node) ([]byte, error) {
-	pbEvents := ProjectTimeline(events)
+func MarshalSyncSubGraph(events []thinkgraph.Node, address ProjectionCoordinate) ([]byte, error) {
+	pbEvents := ProjectEvents(events)
 
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_SyncSubGraph{
 			SyncSubGraph: &pb.SyncSubGraph{
-				Events: pbEvents,
+				Events:       pbEvents,
+				SpaceId:      address.SpaceID,
+				ChatId:       address.ChatID,
+				ProjectionId: address.ProjectionID,
 			},
 		},
 	}
@@ -106,10 +114,32 @@ func MarshalAvailableSpaces(spaces []SpaceState) ([]byte, error) {
 	return protoMarshaler.Marshal(event)
 }
 
-func MarshalChatStream(text string) ([]byte, error) {
+func MarshalChatStream(chunk workspace.NodeChunk) ([]byte, error) {
 	event := &pb.WSEvent{
 		Payload: &pb.WSEvent_ChatStream{
-			ChatStream: &pb.ChatStream{Text: text},
+			ChatStream: &pb.ChatStream{
+				NodeId: chunk.NodeID.String(),
+				Text:   chunk.Text,
+			},
+		},
+	}
+	return protoMarshaler.Marshal(event)
+}
+
+func MarshalStreamedGraphEvent(node thinkgraph.Node, address ProjectionCoordinate) ([]byte, error) {
+	pbEvents := ProjectEvents([]thinkgraph.Node{node})
+	if len(pbEvents) == 0 {
+		return nil, fmt.Errorf("failed to project node into GraphEvent")
+	}
+
+	event := &pb.WSEvent{
+		Payload: &pb.WSEvent_StreamedGraphEvent{
+			StreamedGraphEvent: &pb.StreamedGraphEvent{
+				Event:        pbEvents[0],
+				SpaceId:      address.SpaceID,
+				ChatId:       address.ChatID,
+				ProjectionId: address.ProjectionID,
+			},
 		},
 	}
 	return protoMarshaler.Marshal(event)
@@ -140,15 +170,6 @@ func MarshalRequestTransition(targetThinkState string, reasoning string) ([]byte
 				TargetThinkState: targetThinkState,
 				Reasoning:        reasoning,
 			},
-		},
-	}
-	return protoMarshaler.Marshal(event)
-}
-
-func MarshalAgentStream(agentID int, text string) ([]byte, error) {
-	event := &pb.WSEvent{
-		Payload: &pb.WSEvent_AgentStream{
-			AgentStream: &pb.AgentStream{AgentId: int32(agentID), Text: text},
 		},
 	}
 	return protoMarshaler.Marshal(event)

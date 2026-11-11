@@ -54,7 +54,6 @@ func TestContextProjecter_Build(t *testing.T) {
 		},
 	}
 
-	// Updated constructor name
 	projecter := thinkgraph.NewContextProjecter()
 	trajectory, err := projecter.Build(context.Background(), assemblyRequest)
 	if err != nil {
@@ -82,5 +81,66 @@ func TestContextProjecter_Build(t *testing.T) {
 
 	if trajectory.Catalyst.Content != "Recent question" {
 		t.Errorf("Missing recent catalyst context")
+	}
+}
+
+func TestContextProjecter_RoleCollapsingAndFiltering(t *testing.T) {
+	req := thinkgraph.ContextRequest{
+		Manifest: thinkgraph.NewChatManifest(),
+		RecentEvents: []thinkgraph.Node{
+			{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "First user prompt")},
+			{Event: thinkgraph.NewEvent(thinkgraph.EventSystem, "System noise")},       // Should be ignored
+			{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "Second user prompt")}, // Should collapse
+			{Event: thinkgraph.NewEvent(thinkgraph.EventModel, "")},                    // Empty shell, should be ignored
+			{Event: thinkgraph.NewEvent(thinkgraph.EventModel, "Model reply 1")},
+			{Event: thinkgraph.NewEvent(thinkgraph.EventModel, "Model reply 2")}, // Should collapse
+		},
+		Catalyst: &thinkgraph.Node{
+			Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "Final catalyst prompt"),
+		},
+	}
+
+	projecter := thinkgraph.NewContextProjecter()
+	trajectory, err := projecter.Build(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(trajectory.WorkingMemory) != 2 {
+		t.Fatalf("Expected exactly 2 working memory items due to collapsing and filtering, got %d", len(trajectory.WorkingMemory))
+	}
+
+	if trajectory.WorkingMemory[0].Role != "user" {
+		t.Errorf("Expected first role to be user")
+	}
+	if !strings.Contains(trajectory.WorkingMemory[0].Content, "First user prompt") || !strings.Contains(trajectory.WorkingMemory[0].Content, "Second user prompt") {
+		t.Errorf("User prompts were not collapsed correctly")
+	}
+
+	if trajectory.WorkingMemory[1].Role != "model" {
+		t.Errorf("Expected second role to be model")
+	}
+	if !strings.Contains(trajectory.WorkingMemory[1].Content, "Model reply 1") || !strings.Contains(trajectory.WorkingMemory[1].Content, "Model reply 2") {
+		t.Errorf("Model replies were not collapsed correctly")
+	}
+}
+
+func TestContextProjecter_DefensiveIntegrityError(t *testing.T) {
+	req := thinkgraph.ContextRequest{
+		Manifest: thinkgraph.NewChatManifest(),
+		RecentEvents: []thinkgraph.Node{
+			{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "User prompt")},
+			{Event: thinkgraph.NewEvent(thinkgraph.EventModel, "Model reply")},
+		},
+		Catalyst: nil, // Missing catalyst implies the turn is handing off, but the history ends in Model
+	}
+
+	projecter := thinkgraph.NewContextProjecter()
+	_, err := projecter.Build(context.Background(), req)
+	if err == nil {
+		t.Fatalf("Expected defensive error regarding invalid trajectory state, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid trajectory state") {
+		t.Errorf("Expected specific invalid trajectory error, got: %v", err)
 	}
 }

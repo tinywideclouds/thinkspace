@@ -1,13 +1,31 @@
 [
   {
-    "offsetMs": 200,
+    "offsetMs": 100,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
+        "event": {
+          "id": "slow-node-1",
+          "timestamp": "2026-10-20T10:06:00Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": { "type": "MODEL", "text": "" }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 100,
     "payload": {
       "telemetryEvent": {
         "channel": "manager",
         "event": {
           "id": "scenario-slow-1",
           "type": "flow_start",
-          "timestamp": "2026-10-20T10:00:00Z",
+          "timestamp": "2026-10-20T10:06:01Z",
           "message": "",
           "summary": "Simulating massive streaming response...",
           "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"task_id\": \"task-slow-1\", \"agent_count\": 1}"
@@ -16,64 +34,86 @@
     }
   },
   {
-    "offsetMs": 500,
+    "offsetMs": 300,
     "payload": {
       "chatStream": {
+        "nodeId": "slow-node-1",
         "text": "Here is a massive simulated response designed to test the scroll physics of the timeline component. When you scroll up, this text should continue generating below the fold without violently hijacking your viewport or pushing the content you are currently reading off the screen.\n\n"
       }
     }
   },
   {
-    "offsetMs": 1000,
+    "offsetMs": 500,
     "payload": {
-      "chatStream": { "text": "This is paragraph two. If the IntersectionObserver and CSS overflow anchoring are wired correctly, reading historical messages while I stream will feel perfectly stable. " }
+      "chatStream": {
+        "nodeId": "slow-node-1",
+        "text": "This is paragraph two. If the IntersectionObserver and CSS overflow anchoring are wired correctly, reading historical messages while I stream will feel perfectly stable. "
+      }
     }
   },
   {
-    "offsetMs": 1500,
+    "offsetMs": 500,
     "payload": {
-      "chatStream": { "text": "Chunk 3. I will keep arriving in chunks " }
+      "chatStream": {
+        "nodeId": "slow-node-1",
+        "text": "Chunk 3. I will keep arriving in chunks "
+      }
     }
   },
   {
-    "offsetMs": 2000,
+    "offsetMs": 500,
     "payload": {
-      "chatStream": { "text": "\nChunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with." }
+      "chatStream": {
+        "nodeId": "slow-node-1",
+        "text": "\nChunk 4 arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+      }
     }
   },
   {
-    "offsetMs": 2500,
+    "offsetMs": 500,
     "payload": {
-      "chatStream": { "text": "\nChunk 5 repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with." }
+      "chatStream": {
+        "nodeId": "slow-node-1",
+        "text": "\nChunk 5 repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+      }
     }
   },
   {
-    "offsetMs": 3000,
+    "offsetMs": 500,
     "payload": {
-      "chatStream": { "text": "\nChunk 6 repeated repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with." }
+      "chatStream": {
+        "nodeId": "slow-node-1",
+        "text": "\nChunk 6 repeated repeated arriving now. \n This is a longer chunk of text to test the scrolling behavior. \n \n We'll keep streaming for a while and ensure the ui remains stable! \nSo I'm going to keep talking and you keep reading as the whole point of this is to have a big block for the user to read and for the interface to deal with."
+      }
     }
   },
   {
-    "offsetMs": 3500,
+    "offsetMs": 500,
     "payload": {
-      "chatStream": { "text": "\nChunk 7 short again. <br> But delayed \n" }
+      "chatStream": {
+        "nodeId": "slow-node-1",
+        "text": "\nChunk 7 short again. <br> But delayed \n"
+      }
     }
   },
   {
-    "offsetMs": 4000,
+    "offsetMs": 500,
     "payload": {
-      "chatStream": { "text": "\nChunk 8 finishing up the test. So if the text is long enough you'll have to scroll down to see the final output." }
+      "chatStream": {
+        "nodeId": "slow-node-1",
+        "text": "\nChunk 8 finishing up the test. So if the text is long enough you'll have to scroll down to see the final output."
+      }
     }
   },
   {
-    "offsetMs": 4500,
+    "offsetMs": 500,
     "payload": {
       "telemetryEvent": {
         "channel": "manager",
         "event": {
           "id": "scenario-slow-end",
           "type": "flow_complete",
-          "timestamp": "2026-10-20T10:00:03Z",
+          "timestamp": "2026-10-20T10:06:10Z",
           "message": "",
           "summary": "",
           "payloadJson": "{\"flow_id\": \"mock-flow-slow\", \"agent_index\": 1, \"passed\": true}"

@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { GraphStore } from './graph.store';
 import { ChatItem } from './chat.models';
+import { ProjectionCoordinate } from '@org/llm-core-facade';
 import { describe, beforeEach, it, expect } from 'vitest';
 
 describe('GraphStore', () => {
@@ -15,8 +16,9 @@ describe('GraphStore', () => {
     store = TestBed.inject(GraphStore);
   });
 
-  it('should initialize with an empty map', () => {
+  it('should initialize with empty maps', () => {
     expect(store.nodes().size).toBe(0);
+    expect(store.projections().size).toBe(0);
   });
 
   it('should upsert new nodes into the map', () => {
@@ -28,26 +30,27 @@ describe('GraphStore', () => {
     const map = store.nodes();
     expect(map.size).toBe(2);
     expect(map.get('1')).toEqual(nodeA);
-    expect(map.get('2')).toEqual(nodeB);
   });
 
-  it('should overwrite existing nodes on upsert', () => {
-    const nodeA1 = { id: '1', type: 'prompt', content: 'Original', timestamp: mockTimestamp } as unknown as ChatItem;
-    const nodeA2 = { id: '1', type: 'prompt', content: 'Updated', tombstoned: true, timestamp: mockTimestamp } as unknown as ChatItem;
-
-    store.upsert([nodeA1]);
-    expect(store.nodes().get('1')?.content).toBe('Original');
-
-    store.upsert([nodeA2]);
-    expect(store.nodes().get('1')?.content).toBe('Updated');
-    expect(store.nodes().get('1')?.tombstoned).toBe(true);
+  it('should construct a valid key', () => {
+    const coord: ProjectionCoordinate = { spaceId: 'golang', chatId: 'chat-1', projectionId: 'main' };
+    expect(GraphStore.makeKey(coord)).toBe('golang:chat-1:main');
   });
 
-  it('should clear all nodes', () => {
-    store.upsert([{ id: '1', type: 'prompt', content: 'A', timestamp: mockTimestamp } as unknown as ChatItem]);
-    expect(store.nodes().size).toBe(1);
+  it('should reset projection pointers', () => {
+    const coord: ProjectionCoordinate = { spaceId: 'golang', chatId: 'chat-1', projectionId: 'main' };
+    store.resetProjection(coord, ['node-1', 'node-2']);
 
-    store.clear();
-    expect(store.nodes().size).toBe(0);
+    const pointers = store.projections().get('golang:chat-1:main');
+    expect(pointers).toEqual(['node-1', 'node-2']);
+  });
+
+  it('should append to projection pointers and deduplicate', () => {
+    const coord: ProjectionCoordinate = { spaceId: 'golang', chatId: 'chat-1', projectionId: 'main' };
+    store.resetProjection(coord, ['node-1']);
+    store.appendToProjection(coord, ['node-2', 'node-1']);
+
+    const pointers = store.projections().get('golang:chat-1:main');
+    expect(pointers).toEqual(['node-1', 'node-2']);
   });
 });

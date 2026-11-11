@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
@@ -55,8 +59,13 @@ func (t *CreateDigestTool) Execute(ctx context.Context, executionContext Executi
 	}
 
 	if request.TopicName == "" || request.Instruction == "" {
-		if executionContext.UI != nil {
-			executionContext.UI.OnTextChunk("\n\n⚠️ **System Intercept:** Manager provided incomplete digest parameters. Aborting.\n")
+		if executionContext.Emitter != nil {
+			executionContext.Emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "system_intercept",
+				Timestamp: time.Now(),
+				Message:   "Manager provided incomplete digest parameters. Aborting.",
+			})
 		}
 		return nil, fmt.Errorf("manager provided empty topic or instruction")
 	}

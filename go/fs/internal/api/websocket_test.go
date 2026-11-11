@@ -11,9 +11,12 @@ import (
 
 	"github.com/coder/websocket"
 
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -21,8 +24,10 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var ui *api.WebSocketUI
+	var ui *api.TurnUI
+	var connectionManager *api.ConnectionManager
 	uiReady := make(chan struct{})
+	chunkChan := make(chan workspace.NodeChunk, 10)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
@@ -30,8 +35,11 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 			t.Fatalf("failed to accept ws: %v", err)
 		}
 
-		tokenChan := make(chan workspace.AgentToken, 10)
-		ui = api.NewWebSocketUI(r.Context(), conn, tokenChan, nil)
+		connectionManager = api.NewConnectionManager(r.Context(), conn, chunkChan, nil)
+
+		coordinate := api.ProjectionCoordinate{SpaceID: "space-1", ChatID: "chat-1", ProjectionID: "main"}
+		ui = api.NewTurnUI(connectionManager, coordinate)
+
 		close(uiReady)
 
 		<-r.Context().Done()
@@ -50,30 +58,65 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 
 	<-uiReady
 
-	// Test 1: OnTextChunk routing
+	// Test 1: OnTextChunk routing pushes to chunkChan via embedded struct
+	nodeID := uuid.NewV7()
 	go func() {
-		ui.OnTextChunk("hello world")
+		ui.OnTextChunk(workspace.NodeChunk{NodeID: nodeID, Text: "hello world"})
+	}()
+
+	select {
+	case chunk := <-chunkChan:
+		if chunk.Text != "hello world" {
+			t.Errorf("expected text 'hello world', got '%s'", chunk.Text)
+		}
+		if chunk.NodeID != nodeID {
+			t.Errorf("expected nodeId %s, got '%s'", nodeID.String(), chunk.NodeID.String())
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for chunkChan push")
+	}
+
+	// Test 2: StreamGraphEvent routing via TurnUI with projection coordinates
+	graphNodeID := uuid.NewV7()
+	node := thinkgraph.Node{
+		Event: thinkgraph.Event{
+			ID:      graphNodeID,
+			Type:    thinkgraph.EventModel,
+			Content: "Durable node test",
+		},
+	}
+	go func() {
+		ui.StreamGraphEvent(node)
 	}()
 
 	_, data, err := conn.Read(ctx)
 	if err != nil {
-		t.Fatalf("failed to read event: %v", err)
+		t.Fatalf("failed to read streamed graph event: %v", err)
 	}
 
-	var chatPayload struct {
-		ChatStream struct {
-			Text string `json:"text"`
-		} `json:"chatStream"`
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
 	}
 
-	if err := json.Unmarshal(data, &chatPayload); err != nil {
-		t.Fatalf("failed to unmarshal payload: %v (data: %s)", err, string(data))
-	}
-	if chatPayload.ChatStream.Text != "hello world" {
-		t.Errorf("expected text 'hello world', got '%s'", chatPayload.ChatStream.Text)
+	streamedEvent, ok := result["streamedGraphEvent"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected streamedGraphEvent wrapper")
 	}
 
-	// Test 2: ChooseNextStep Blocking and Channel Push
+	if streamedEvent["projectionId"] != "main" {
+		t.Errorf("expected scoped ProjectionID 'main' to be attached to envelope, got: %v", streamedEvent["projectionId"])
+	}
+
+	graphEvent, ok := streamedEvent["event"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested 'event' object")
+	}
+	if graphEvent["id"] != graphNodeID.String() {
+		t.Errorf("expected node ID %s, got: %v", graphNodeID.String(), graphEvent["id"])
+	}
+
+	// Test 3: ChooseNextStep Blocking and Channel Push via embedded struct
 	strategyChosen := make(chan flows.FlowStrategy)
 	go func() {
 		strategyChosen <- ui.ChooseNextStep()
@@ -91,13 +134,13 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	}
 
 	if err := json.Unmarshal(data, &reqPayload); err != nil {
-		t.Fatalf("failed to unmarshal strategy request: %v (data: %s)", err, string(data))
+		t.Fatalf("failed to unmarshal strategy request: %v", err)
 	}
 	if !reqPayload.RequestStrategy.Active {
 		t.Errorf("expected active true, got false")
 	}
 
-	ui.PushStrategy(flows.StrategyRefine)
+	connectionManager.PushStrategy(flows.StrategyRefine)
 
 	select {
 	case strategy := <-strategyChosen:
@@ -108,21 +151,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Fatal("timed out waiting for strategy channel to unblock")
 	}
 
-	// Test 3: SendSyncHistory Direct Payload Routing
-	go func() {
-		ui.SendSyncHistory([]byte(`{"syncHistory":{}}`))
-	}()
-
-	_, data, err = conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("failed to read sync history: %v", err)
-	}
-
-	if string(data) != `{"syncHistory":{}}` {
-		t.Errorf("expected sync history payload, got '%s'", string(data))
-	}
-
-	// Test 4: ConfirmTransition Blocking and Channel Push
+	// Test 4: ConfirmTransition Blocking and Channel Push via embedded struct
 	transitionChosen := make(chan bool)
 	go func() {
 		transitionChosen <- ui.ConfirmTransition(signals.SignalTransition{
@@ -144,13 +173,13 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	}
 
 	if err := json.Unmarshal(data, &transPayload); err != nil {
-		t.Fatalf("failed to unmarshal transition request: %v (data: %s)", err, string(data))
+		t.Fatalf("failed to unmarshal transition request: %v", err)
 	}
 	if transPayload.RequestTransition.TargetThinkState != "golang" {
 		t.Errorf("expected golang, got %s", transPayload.RequestTransition.TargetThinkState)
 	}
 
-	ui.PushTransitionDecision(true)
+	connectionManager.PushTransitionDecision(true)
 
 	select {
 	case decision := <-transitionChosen:
@@ -159,19 +188,5 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for transition channel to unblock")
-	}
-
-	// Test 5: SendSyncSubGraph Direct Payload Routing
-	go func() {
-		ui.SendSyncSubGraph([]byte(`{"syncSubGraph":{}}`))
-	}()
-
-	_, data, err = conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("failed to read sync subgraph: %v", err)
-	}
-
-	if string(data) != `{"syncSubGraph":{}}` {
-		t.Errorf("expected sync subgraph payload, got '%s'", string(data))
 	}
 }

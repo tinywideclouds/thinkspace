@@ -44,9 +44,17 @@ import { ChatItem, FileDeltaChatItem } from '@org/llm-state-chat';
           }
         </div>
         
-        <div class="text-gray-800 text-sm leading-relaxed">
-          <llm-markdown [content]="content()"></llm-markdown>
-        </div>
+        @if (content()) {
+          <div class="text-gray-800 text-sm leading-relaxed">
+            <llm-markdown [content]="content()"></llm-markdown>
+          </div>
+        } @else {
+          <!-- Empty Model Node indicates an in-flight tool call or pending response -->
+          <div class="flex items-center gap-2 text-blue-600 font-mono text-[10px] font-bold uppercase tracking-widest animate-pulse my-2">
+            <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+            <span>Thinking...</span>
+          </div>
+        }
 
         <!-- Render Nested Workspace Attachments -->
         @if (attachments().length > 0) {

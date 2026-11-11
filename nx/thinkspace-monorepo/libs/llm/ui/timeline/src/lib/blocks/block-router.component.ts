@@ -9,6 +9,7 @@ import {
 import { TimelineFacade, EnrichedChatItem } from '../timeline.facade';
 import { UserMessageBlockComponent } from './user-message-block.component';
 import { ModelMessageBlockComponent } from './model-message-block.component';
+import { SystemWhisperBlockComponent } from './system-whisper-block.component';
 import { FileDeltaBlockComponent } from './file-delta-block/file-delta-block.component';
 import { ChatFlowCardComponent } from '@org/llm-ui-core';
 
@@ -19,6 +20,7 @@ import { ChatFlowCardComponent } from '@org/llm-ui-core';
     CommonModule, 
     UserMessageBlockComponent, 
     ModelMessageBlockComponent, 
+    SystemWhisperBlockComponent,
     FileDeltaBlockComponent,
     ChatFlowCardComponent
   ],
@@ -57,17 +59,13 @@ import { ChatFlowCardComponent } from '@org/llm-ui-core';
 
         @case ('system') {
           @let item = asEnrichedModel(chatItem());
-          <llm-model-message-block 
-            [source]="item.type" 
-            [content]="item.content"
-            [tags]="item.tags || []"
-            [attachments]="item.attachments || []"
-            [isDimmed]="facade.isItemDimmed(item)"
-            [isCollapsed]="facade.isItemCollapsed(item)"
-            [activeTag]="facade.hoveredTag() || facade.selectedTag()"
-            (tagHover)="facade.setHoveredTag($event)"
-            (tagClick)="facade.toggleSelectedTag($event)">
-          </llm-model-message-block>
+          <div [class.opacity-30]="facade.isItemDimmed(item)" [class.h-2]="facade.isItemCollapsed(item)" class="transition-all duration-300 overflow-hidden">
+            @if (!facade.isItemCollapsed(item)) {
+              <llm-system-whisper-block 
+                [content]="item.content">
+              </llm-system-whisper-block>
+            }
+          </div>
         }
 
         @case ('file_delta') {

@@ -69,9 +69,15 @@ func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, p
 
 	if promptText != "" {
 		e.logger.InfoContext(ctx, "processing user prompt", "chat_id", e.session.ChatID, "prompt", promptText)
-		if err := e.workspaceService.LogUserPrompt(ctx, address, promptText); err != nil {
-			e.logger.ErrorContext(ctx, "failed logging user prompt to ledger", "chat_id", e.session.ChatID, "error", err)
-			return nil, fmt.Errorf("logging user prompt: %w", err)
+		if err := e.workspaceService.AppendUserPrompt(ctx, address, promptText); err != nil {
+			e.logger.ErrorContext(ctx, "failed appending user prompt to ledger", "chat_id", e.session.ChatID, "error", err)
+			return nil, fmt.Errorf("appending user prompt: %w", err)
+		}
+
+		traversalEngine := thinkgraph.NewTraversalEngine(e.workspaceManager.GraphRepository())
+		timeline, _, _, err := traversalEngine.GetTimelinePage(ctx, address, "", 1)
+		if err == nil && len(timeline) > 0 {
+			ui.StreamGraphEvent(timeline[0])
 		}
 	}
 
@@ -94,7 +100,7 @@ func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, p
 	}
 
 	e.logger.InfoContext(ctx, "assembling context bundle", "think_state", activeThinkState, "branch", activeBranch)
-	bundle, graphData, err := e.bundleAssembler.Assemble(ctx, address, e.session.buildTopology(), digestionHorizon, activeThinkState, thinkState)
+	bundle, graphData, err := e.bundleAssembler.Assemble(ctx, address, digestionHorizon, activeThinkState, thinkState)
 	if err != nil {
 		e.logger.ErrorContext(ctx, "failed assembling bundle", "error", err)
 		return nil, fmt.Errorf("assembling bundle: %w", err)
@@ -119,14 +125,12 @@ func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, p
 
 	registry := tools.NewRegistry()
 
-	// Transition tool is a global routing mechanism, so it is always available
 	var validStates []string
 	for k := range e.registry.GetAllConfigs() {
 		validStates = append(validStates, k)
 	}
 	registry.Register(tools.NewTransitionThinkStateTool(validStates))
 
-	// Domain tools are only allocated if they are explicitly configured in the YAML (determined by Description presence)
 	if thinkState.Config().Roles.Manager.Tools.QueryLens.Description != "" {
 		registry.Register(tools.NewQueryLensTool(e.workspaceService))
 	}
@@ -200,7 +204,6 @@ func (e *ChatEngine) RunSynthesis(ctx context.Context, address *thinkgraph.ChatA
 		},
 	}
 
-	// FIX: Provide the Mapbook to the Manager so it knows the file paths for the synthesis tool payload
 	projectWorkspaceDir := e.workspaceService.ProjectWorkspaceDir(address.ProjectID)
 	rawMapbook, _ := thinkState.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
 	stringMaps := make(map[string]string)
@@ -220,39 +223,70 @@ func (e *ChatEngine) RunSynthesis(ctx context.Context, address *thinkgraph.ChatA
 		Workbench: []cognition.WorkbenchItem{},
 	}
 
-	registry := tools.NewRegistry()
-
-	// FIX: Register the full suite of domain tools for synthesis so the Manager can actually delegate the final work.
-	var validStates []string
-	for k := range e.registry.GetAllConfigs() {
-		validStates = append(validStates, k)
+	// 1. Spawn a dedicated Sandbox to apply the synthesized result
+	synthCandidateID := fmt.Sprintf("%s-synthesis-%s", address.ChatID, uuid.NewV7().String()[:8])
+	sandbox, err := e.workspaceService.SpawnSandbox(ctx, address.ChatID, synthCandidateID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to spawn synthesis sandbox: %w", err)
 	}
-	registry.Register(tools.NewTransitionThinkStateTool(validStates))
+	defer sandbox.TearDown(ctx)
 
-	if thinkState.Config().Roles.Manager.Tools.QueryLens.Description != "" {
-		registry.Register(tools.NewQueryLensTool(e.workspaceService))
+	// 2. Multiplex the stream so we can intercept the text output
+	mux := &streamMultiplexer{ui: ui}
+
+	_, err = e.turnExecutor.Execute(ctx, synthAddress, thinkState, bundle, tools.NewRegistry(), mux)
+	if err != nil {
+		return nil, fmt.Errorf("synthesis execution failed: %w", err)
 	}
 
-	if thinkState.Config().Roles.Manager.Tools.ProposeChange.Description != "" {
-		registry.Register(tools.NewProposeChangeTool())
-	}
+	lastPayload := mux.buffer.String()
 
-	if thinkState.Config().Roles.Manager.Tools.CreateDigest.Description != "" {
-		committer := &inlineDigestCommitter{
-			dm:           e.digestManager,
-			ws:           e.workspaceService,
-			workerModel:  thinkState.Config().Roles.Worker.Model,
-			workerPrompt: thinkState.Config().WorkerSystemPrompt(),
+	// 3. Apply Patch and Verify
+	if patcher := thinkState.Patcher(); patcher != nil {
+		if applyErr := patcher.Apply(ctx, sandbox, lastPayload); applyErr != nil {
+			e.logger.WarnContext(ctx, "failed to apply synthesis patch", "error", applyErr)
 		}
-		registry.Register(tools.NewCreateDigestTool(committer))
 	}
 
-	resultSignal, err := e.turnExecutor.Execute(ctx, synthAddress, thinkState, bundle, registry, ui)
-	if err == nil {
-		e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
+	_ = sandbox.ApplyDraft(ctx, "synthesis")
+
+	passed := true
+	var finalTrace string
+	if verifier := thinkState.Verifier(); verifier != nil {
+		if vErr := verifier.Verify(ctx, sandbox); vErr != nil {
+			passed = false
+			finalTrace = vErr.Error()
+		}
 	}
 
-	return resultSignal, err
+	// 4. Deliver and Request Manual Review
+	if err := sandbox.DeliverForReview(ctx); err != nil {
+		return nil, fmt.Errorf("failed to deliver synthesis sandbox for review: %w", err)
+	}
+
+	diff, _ := e.workspaceService.ReadCandidate(ctx, address, synthCandidateID)
+
+	emitter.Emit("manager", telemetry.Event{
+		ID:        uuid.NewV7(),
+		Type:      "flow_complete",
+		Timestamp: time.Now(),
+		Message:   "Synthesis pipeline completed",
+		Payload:   map[string]any{"candidate_id": synthCandidateID, "passed": passed, "trace": finalTrace, "diff": diff},
+	})
+
+	uiBranchName := fmt.Sprintf("candidate/%s", synthCandidateID)
+	accepted := ui.ReviewCandidate(uiBranchName)
+
+	reason := "Accepted by user"
+	if !accepted {
+		reason = "Rejected by user"
+	}
+
+	_ = e.workspaceService.ResolveCandidate(ctx, address, synthCandidateID, accepted, reason)
+
+	e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
+
+	return &signals.SignalTerminal{}, err
 }
 
 func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
@@ -315,7 +349,7 @@ func (e *ChatEngine) evaluateAndTriggerDigestion(ctx context.Context, address *t
 	}
 
 	traversalEngine := thinkgraph.NewTraversalEngine(graphRepository)
-	timeline, err := traversalEngine.GetFullTimeline(ctx, address, e.session.buildTopology())
+	timeline, err := traversalEngine.GetFullTimeline(ctx, address)
 	if err != nil || len(timeline) == 0 {
 		return
 	}

@@ -39,6 +39,7 @@ func (m *mockGraphRepo) GetLenses(ctx context.Context, c *thinkgraph.ChatAddress
 func TestQueryLensTool_Execute(t *testing.T) {
 	ws := &mockWorkspace{graph: &mockGraphRepo{}}
 	tool := tools.NewQueryLensTool(ws)
+	emitter := &mockToolEmitter{}
 
 	rawArgs := map[string]any{
 		tools.Tag:       "security",
@@ -51,6 +52,7 @@ func TestQueryLensTool_Execute(t *testing.T) {
 		RawArguments: rawArgs,
 		Bundle:       bundle,
 		UI:           &mockUI{},
+		Emitter:      emitter,
 	}
 
 	result, err := tool.Execute(context.Background(), ec)
@@ -71,5 +73,15 @@ func TestQueryLensTool_Execute(t *testing.T) {
 	}
 	if !strings.Contains(injected.Content, "Historical context about security") {
 		t.Errorf("expected tool response to contain queried history, got: %s", injected.Content)
+	}
+
+	foundStatus := false
+	for _, e := range emitter.events {
+		if e.Type == "tool_status" {
+			foundStatus = true
+		}
+	}
+	if !foundStatus {
+		t.Errorf("expected tool_status telemetry event to be fired")
 	}
 }

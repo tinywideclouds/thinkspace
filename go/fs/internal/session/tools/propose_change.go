@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
+
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
 const ProposeChange ToolName = "propose_change"
@@ -50,8 +54,13 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (s
 	}
 
 	if request.Instruction == "" {
-		if ec.UI != nil {
-			ec.UI.OnTextChunk("\n\n⚠️ **System Intercept:** Manager provided an empty instruction. Aborting proposal.\n")
+		if ec.Emitter != nil {
+			ec.Emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "system_intercept",
+				Timestamp: time.Now(),
+				Message:   "Manager provided an empty instruction. Aborting proposal.",
+			})
 		}
 		return nil, fmt.Errorf("manager provided empty instruction")
 	}
@@ -75,8 +84,13 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (s
 		summary = summary[:77] + "..."
 	}
 
-	if ec.UI != nil {
-		ec.UI.OnTextChunk(fmt.Sprintf("\n\n🚀 **Dispatching Flow:** %s\n", summary))
+	if ec.Emitter != nil {
+		ec.Emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "flow_dispatch",
+			Timestamp: time.Now(),
+			Message:   fmt.Sprintf("Dispatching Flow: %s", summary),
+		})
 	}
 
 	return &signals.SignalDispatchFlow{

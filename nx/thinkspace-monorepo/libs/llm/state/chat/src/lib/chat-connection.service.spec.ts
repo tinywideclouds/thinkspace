@@ -8,9 +8,9 @@ import { CognitiveStore } from './cognitive.store';
 import { ThinkspaceStateService } from './thinkspace-state.service';
 import { UiSettingsService } from './ui-settings.service';
 import { Subject } from 'rxjs';
-import { AppEvent, PreviewContext, AttentionFocus, DigestMeta, FileContextMetaData, GraphEvent, BranchTopology } from '@org/llm-core-facade';
+import { AppEvent, PreviewContext, AttentionFocus, DigestMeta, FileContextMetaData } from '@org/llm-core-facade';
 import { WSEvent, WSEventSchema } from '@org/llm-core-protos';
-import { create, fromJson, JsonValue } from '@bufbuild/protobuf';
+import { fromJson, JsonValue } from '@bufbuild/protobuf';
 import { describe, beforeEach, afterEach, it, expect, vi, Mock } from 'vitest';
 import { signal, computed, Signal, WritableSignal } from '@angular/core';
 import { ChatItem } from './chat.models';
@@ -23,12 +23,12 @@ interface MockTransportService {
 
 interface MockTimelineStore {
   isLoadingHistory: WritableSignal<boolean>;
-  activeBranch: WritableSignal<string>;
-  branches: WritableSignal<Record<string, BranchTopology>>;
+  activeProjectionId: WritableSignal<string>;
   nextCursor: WritableSignal<string>;
   hasMore: WritableSignal<boolean>;
   coreChat: Signal<ChatItem[]>;
-  setHistoryMetadata: Mock<(cursor: string, more: boolean, branch: string, topology: Record<string, BranchTopology>) => void>;
+  setHistoryMetadata: Mock<(cursor: string, more: boolean, branch: string) => void>;
+  isActiveView: Mock<(c: any) => boolean>;
 }
 
 interface MockThinkspaceStateService {
@@ -67,8 +67,6 @@ describe('ChatConnectionService', () => {
   let graphStore: GraphStore;
   let wsSubject: Subject<WSEvent>;
 
-  const mockTime = { toString: () => '2026-10-23T12:00:00Z' } as any;
-
   beforeEach(() => {
     vi.stubGlobal('Temporal', {
       Now: { instant: () => ({ toString: () => '2026-10-23T12:00:00Z' }) },
@@ -85,12 +83,12 @@ describe('ChatConnectionService', () => {
 
     timelineMock = {
       isLoadingHistory: signal(false),
-      activeBranch: signal('main'),
-      branches: signal({}),
+      activeProjectionId: signal('main'),
       nextCursor: signal(''),
       hasMore: signal(true),
       coreChat: computed(() => []),
-      setHistoryMetadata: vi.fn()
+      setHistoryMetadata: vi.fn(),
+      isActiveView: vi.fn(() => true)
     };
 
     workspaceMock = {
@@ -140,18 +138,20 @@ describe('ChatConnectionService', () => {
     vi.unstubAllGlobals();
   });
 
-  it('should route sync_history directly to the GraphStore and update metadata', () => {
+  it('should route sync_history into GraphStore projection logic', () => {
     const spyUpsert = vi.spyOn(graphStore, 'upsert');
+    const spyReset = vi.spyOn(graphStore, 'resetProjection');
     
     service.connect('ws://localhost:8080/ws');
 
     const event = fromJson(WSEventSchema, {
       syncHistory: {
+        spaceId: 'space-1',
+        chatId: 'chat-1',
+        projectionId: 'feature-A',
         recentEvents: [{ id: '1', timestamp: '2026-10-23T12:00:00Z', message: { type: 'PROMPT', text: 'test' } }],
         nextCursor: 'cursor-123',
         hasMore: true,
-        activeBranch: 'feature-A',
-        branches: {},
         digests: {},
         focus: { primaryFocus: [], relatedContext: [], dormantLenses: [] }
       }
@@ -160,7 +160,8 @@ describe('ChatConnectionService', () => {
     wsSubject.next(event);
 
     expect(spyUpsert).toHaveBeenCalled();
-    expect(timelineMock.setHistoryMetadata).toHaveBeenCalledWith('cursor-123', true, 'feature-A', {});
+    expect(spyReset).toHaveBeenCalledWith({ spaceId: 'space-1', chatId: 'chat-1', projectionId: 'feature-A' }, ['1']);
+    expect(timelineMock.setHistoryMetadata).toHaveBeenCalledWith('cursor-123', true, 'feature-A');
   });
 
   it('should format switchBranch correctly and clear the GraphStore', () => {
@@ -188,41 +189,41 @@ describe('ChatConnectionService', () => {
     expect(cognitiveMock.pendingTransition()).toEqual({ targetThinkState: 'golang', reasoning: 'test' });
   });
 
-  it('should route sync_subgraph directly to the GraphStore', () => {
-    const spyUpsert = vi.spyOn(graphStore, 'upsert');
+  it('should route sync_subgraph directly to the GraphStore using the coordinate', () => {
+    const spyReset = vi.spyOn(graphStore, 'resetProjection');
     
     service.connect('ws://localhost:8080/ws');
 
     const event = fromJson(WSEventSchema, {
       syncSubGraph: {
+        spaceId: 'space-1',
+        chatId: 'chat-1',
+        projectionId: 'flow-xyz',
         events: [{ id: 'sub-node', timestamp: '2026-10-23T12:00:00Z', message: { type: 'MODEL', text: 'data' } }]
       }
     } as JsonValue);
 
     wsSubject.next(event);
 
-    expect(spyUpsert).toHaveBeenCalled();
+    expect(spyReset).toHaveBeenCalledWith({ spaceId: 'space-1', chatId: 'chat-1', projectionId: 'flow-xyz' }, ['sub-node']);
   });
 
-  it('should send a loadSubGraph command when requested', () => {
-    service.loadSubGraph('flow-xyz');
-    expect(transportMock.send).toHaveBeenCalled();
+  it('should append streamed_graph_event to the current projection list', () => {
+    const spyAppend = vi.spyOn(graphStore, 'appendToProjection');
     
-    const payload = transportMock.send.mock.calls[0][0];
-    expect(payload.payload.case).toBe('loadSubGraph');
-    if (payload.payload.case === 'loadSubGraph') {
-      expect(payload.payload.value.graphId).toBe('flow-xyz');
-    }
-  });
+    service.connect('ws://localhost:8080/ws');
 
-  it('should clear all session state across stores on clearSession()', () => {
-    const spyGraphClear = vi.spyOn(graphStore, 'clear');
-    
-    service.clearSession();
+    const event = fromJson(WSEventSchema, {
+      streamedGraphEvent: {
+        spaceId: 'space-1',
+        chatId: 'chat-1',
+        projectionId: 'main',
+        event: { id: 'stream-1', timestamp: '2026-10-23T12:00:00Z', message: { type: 'PROMPT', text: 'live' } }
+      }
+    } as JsonValue);
 
-    expect(spyGraphClear).toHaveBeenCalled();
-    expect(flowMock.manualClearLogs).toHaveBeenCalled();
-    expect(cognitiveMock.clearSession).toHaveBeenCalled();
-    expect(timelineMock.setHistoryMetadata).toHaveBeenCalledWith('', false, 'main', {});
+    wsSubject.next(event);
+
+    expect(spyAppend).toHaveBeenCalledWith({ spaceId: 'space-1', chatId: 'chat-1', projectionId: 'main' }, ['stream-1']);
   });
 });

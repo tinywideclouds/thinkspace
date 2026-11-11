@@ -10,8 +10,8 @@ import (
 )
 
 func TestProposeChangeTool_Execute(t *testing.T) {
-	// The tool is now completely pure, no dispatcher needed
 	tool := tools.NewProposeChangeTool()
+	emitter := &mockToolEmitter{}
 
 	rawArgs := map[string]any{
 		tools.AgentCount:    float64(2),
@@ -25,6 +25,7 @@ func TestProposeChangeTool_Execute(t *testing.T) {
 		RawArguments: rawArgs,
 		Bundle:       &cognition.ThinkBundle{},
 		UI:           &mockUI{},
+		Emitter:      emitter,
 	}
 
 	result, err := tool.Execute(context.Background(), ec)
@@ -48,10 +49,21 @@ func TestProposeChangeTool_Execute(t *testing.T) {
 	if len(signal.Tasks[0].TargetFiles) != 1 || signal.Tasks[0].TargetFiles[0] != "src/main.go" {
 		t.Errorf("expected target_files to map correctly, got %v", signal.Tasks[0].TargetFiles)
 	}
+
+	foundDispatch := false
+	for _, e := range emitter.events {
+		if e.Type == "flow_dispatch" {
+			foundDispatch = true
+		}
+	}
+	if !foundDispatch {
+		t.Errorf("expected flow_dispatch telemetry event to be fired")
+	}
 }
 
 func TestProposeChangeTool_EmptyInstruction(t *testing.T) {
 	tool := tools.NewProposeChangeTool()
+	emitter := &mockToolEmitter{}
 
 	rawArgs := map[string]any{
 		tools.Instruction: "",
@@ -60,6 +72,7 @@ func TestProposeChangeTool_EmptyInstruction(t *testing.T) {
 	ec := tools.ExecutionContext{
 		RawArguments: rawArgs,
 		UI:           &mockUI{},
+		Emitter:      emitter,
 	}
 
 	result, err := tool.Execute(context.Background(), ec)
@@ -68,5 +81,15 @@ func TestProposeChangeTool_EmptyInstruction(t *testing.T) {
 	}
 	if result != nil {
 		t.Errorf("expected nil signal on error")
+	}
+
+	foundIntercept := false
+	for _, e := range emitter.events {
+		if e.Type == "system_intercept" {
+			foundIntercept = true
+		}
+	}
+	if !foundIntercept {
+		t.Errorf("expected system_intercept telemetry event to be fired")
 	}
 }

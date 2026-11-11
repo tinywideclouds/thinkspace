@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
+
+	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
 const TransitionThinkState ToolName = "transition_workspace"
 
-// TransitionThinkStateRequest acts as the local JSON schema for parsing LLM arguments
 type TransitionThinkStateRequest struct {
 	TargetThinkState string `json:"target_think_state"`
 	Reasoning        string `json:"reasoning"`
@@ -60,7 +63,15 @@ func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext
 		return &sig, nil
 	}
 
-	executionContext.UI.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Intercept:** Transition to '%s' denied.\n", request.TargetThinkState))
+	if executionContext.Emitter != nil {
+		executionContext.Emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "system_intercept",
+			Timestamp: time.Now(),
+			Message:   fmt.Sprintf("Transition to '%s' denied.", request.TargetThinkState),
+		})
+	}
+
 	executionContext.Bundle.Trajectory.WorkingMemory = append(executionContext.Bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 		Role:    "user",
 		Content: fmt.Sprintf("[System: Transition to '%s' was denied by user. Continue in current state.]", request.TargetThinkState),

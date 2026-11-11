@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { LinearFeedComponent } from './linear-feed.component';
 import { TimelineFacade, Turn } from '../timeline.facade';
-import { ChatConnectionService, ChatItem, FlowState } from '@org/llm-state-chat';
+import { ChatConnectionService, ChatItem, FlowState, FlowExecutionChatItem } from '@org/llm-state-chat';
 import { signal, WritableSignal } from '@angular/core';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
 
@@ -21,6 +21,13 @@ interface MockTimelineFacade {
     tagFilterMode: WritableSignal<'visual' | 'context'>;
     bulkActionBarPosition: WritableSignal<'top' | 'bottom'>;
   };
+  
+  // Missing signals that caused the template crashes
+  pendingStrategy: WritableSignal<boolean>;
+  pendingReviewBranch: WritableSignal<string | null>;
+  pendingTransition: WritableSignal<{ targetThinkState: string; reasoning: string } | null>;
+  inspectedFlow: WritableSignal<FlowExecutionChatItem | null>;
+
   isItemDimmed: Mock<(item: ChatItem) => boolean>;
   isItemCollapsed: Mock<(item: ChatItem) => boolean>;
   setHoveredTag: Mock<(tag: string | null) => void>;
@@ -71,6 +78,13 @@ describe('LinearFeedComponent', () => {
         tagFilterMode: signal('visual'),
         bulkActionBarPosition: signal('top')
       },
+      
+      // Initialize the missing signals
+      pendingStrategy: signal(false),
+      pendingReviewBranch: signal(null),
+      pendingTransition: signal(null),
+      inspectedFlow: signal(null),
+
       isItemDimmed: vi.fn(() => false),
       isItemCollapsed: vi.fn(() => false),
       setHoveredTag: vi.fn(),

@@ -13,7 +13,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-func TestProjectTimeline(t *testing.T) {
+func TestProjectGraph(t *testing.T) {
 	ev1 := uuid.NewV7()
 	ev2 := uuid.NewV7()
 	ev3 := uuid.NewV7()
@@ -46,7 +46,7 @@ func TestProjectTimeline(t *testing.T) {
 		},
 	}
 
-	pbEvents := api.ProjectTimeline(nodes)
+	pbEvents := api.ProjectEvents(nodes)
 
 	if len(pbEvents) != 3 {
 		t.Fatalf("expected 3 projected events, got %d", len(pbEvents))
@@ -83,7 +83,7 @@ func TestProjectTimeline(t *testing.T) {
 	}
 }
 
-func TestProjectTimeline_FlowStatusMapping(t *testing.T) {
+func TestProjectGraph_FlowStatusMapping(t *testing.T) {
 	testCases := []struct {
 		domainStatus   flows.FlowStatus
 		expectedStatus pb.FlowStatus
@@ -110,7 +110,7 @@ func TestProjectTimeline_FlowStatusMapping(t *testing.T) {
 			},
 		}
 
-		pbEvents := api.ProjectTimeline(nodes)
+		pbEvents := api.ProjectEvents(nodes)
 		if len(pbEvents) != 1 {
 			t.Fatalf("failed to project node for status %v", tc.domainStatus)
 		}

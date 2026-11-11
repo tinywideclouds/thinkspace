@@ -51,10 +51,9 @@ func TestManager_GetSessionCaching(t *testing.T) {
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &mMockChatEngine{} }, graphDB, nil)
 	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
 
-	// Scaffold required directories
 	metaPath := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
 	os.MkdirAll(metaPath, 0755)
-	os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
+	os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main"}`), 0644)
 
 	registry := config.NewRegistry()
 	manager := session.NewManager(logger, registry, svcManager, nil, nil, nil)
@@ -76,7 +75,7 @@ func TestManager_GetSessionCaching(t *testing.T) {
 	diffChat := "chat-different"
 	diffMetaPath := filepath.Join(workspaceRoot, spaceID, "chats", diffChat)
 	os.MkdirAll(diffMetaPath, 0755)
-	os.WriteFile(filepath.Join(diffMetaPath, "meta.json"), []byte(`{"id":"`+diffChat+`", "name":"`+diffChat+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
+	os.WriteFile(filepath.Join(diffMetaPath, "meta.json"), []byte(`{"id":"`+diffChat+`", "name":"`+diffChat+`", "active_branch": "main"}`), 0644)
 
 	session3, err := manager.GetSession(ctx, spaceID, diffChat)
 	if err != nil {

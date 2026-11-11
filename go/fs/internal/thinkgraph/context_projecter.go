@@ -75,12 +75,23 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 	}
 
 	for _, node := range req.RecentEvents {
+		// Strict LLM context isolation: Omit internal system noise entirely
+		if node.Type == EventSystem {
+			continue
+		}
+
 		role := "user"
 		if node.Type == EventModel {
 			role = "model"
 		}
 
 		content := a.extractContent(node)
+
+		// If the node represents an empty placeholder (like an interrupted tool call shell), skip appending it
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+
 		if amendingID, ok := node.Metadata["amended_by"]; ok && req.Amendments != nil {
 			if correctionNode, exists := req.Amendments[amendingID]; exists {
 				correctionContent := a.extractContent(correctionNode)
@@ -88,29 +99,51 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 			}
 		}
 
-		trajectory.WorkingMemory = append(trajectory.WorkingMemory, cognition.TrajectoryEvent{
-			Role:    role,
-			Content: content,
-		})
+		// Role Collapsing: merge contiguous roles to prevent LLM API turn-taking violations
+		if len(trajectory.WorkingMemory) > 0 && trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Role == role {
+			trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Content += "\n\n" + content
+		} else {
+			trajectory.WorkingMemory = append(trajectory.WorkingMemory, cognition.TrajectoryEvent{
+				Role:    role,
+				Content: content,
+			})
+		}
 	}
 
-	if req.Catalyst != nil {
+	if req.Catalyst != nil && req.Catalyst.Type != EventSystem {
 		role := "user"
 		if req.Catalyst.Type == EventModel {
 			role = "model"
 		}
 
 		content := a.extractContent(*req.Catalyst)
-		if amendingID, ok := req.Catalyst.Metadata["amended_by"]; ok && req.Amendments != nil {
-			if correctionNode, exists := req.Amendments[amendingID]; exists {
-				correctionContent := a.extractContent(correctionNode)
-				content = fmt.Sprintf("%s\n\n[System Note: This prompt was later amended to: %s]", content, correctionContent)
+		if strings.TrimSpace(content) != "" {
+			if amendingID, ok := req.Catalyst.Metadata["amended_by"]; ok && req.Amendments != nil {
+				if correctionNode, exists := req.Amendments[amendingID]; exists {
+					correctionContent := a.extractContent(correctionNode)
+					content = fmt.Sprintf("%s\n\n[System Note: This prompt was later amended to: %s]", content, correctionContent)
+				}
+			}
+
+			// If Catalyst is the same role as the last item in memory, collapse it into WorkingMemory instead
+			if len(trajectory.WorkingMemory) > 0 && trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Role == role {
+				trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Content += "\n\n" + content
+			} else {
+				trajectory.Catalyst = cognition.TrajectoryEvent{
+					Role:    role,
+					Content: content,
+				}
 			}
 		}
+	}
 
-		trajectory.Catalyst = cognition.TrajectoryEvent{
-			Role:    role,
-			Content: content,
+	// Defensive Integrity Check: Ensure we don't send a trajectory ending on a model turn,
+	// which will crash the Gemini API. If the final working memory node is a model,
+	// it should only happen if the Catalyst was empty (e.g. recovering state).
+	if trajectory.Catalyst.Content == "" && len(trajectory.WorkingMemory) > 0 {
+		lastIdx := len(trajectory.WorkingMemory) - 1
+		if trajectory.WorkingMemory[lastIdx].Role == "model" {
+			return cognition.Trajectory{}, fmt.Errorf("invalid trajectory state: working memory ends on a model turn and lacks a catalyst")
 		}
 	}
 

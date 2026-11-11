@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal, effect } from '@angular/core';
 import { TimelineStore, FlowStore, CognitiveStore, ChatItem, WorkspaceStateService, UiSettingsService, FlowExecutionChatItem } from '@org/llm-state-chat';
 
 export type TimelineViewMode = 'linear' | 'cognitive';
@@ -45,6 +45,23 @@ export class TimelineFacade {
   public pendingReviewBranch = this.cognitive.pendingReviewBranch;
   public pendingTransition = this.cognitive.pendingTransition;
 
+  constructor() {
+    // ---> ADDED LOGGING HERE <---
+    effect(() => {
+      const raw = this.rawFeed();
+      const visible = this.visibleFeed();
+      
+      console.log(`[TimelineFacade DEBUG] Projection Updated:`);
+      console.log(`  -> Raw Graph Nodes (main branch): ${raw.length}`);
+      console.log(`  -> Visible Turns Grouped: ${visible.length}`);
+      
+      if (raw.length > 0) {
+        const lastNode = raw[raw.length - 1];
+        console.log(`  -> Last Node ID: ${lastNode.id}, Type: ${lastNode.type}, Content Length: ${lastNode.content?.length || 0}`);
+      }
+    });
+  }
+
   public enhancedFeed = computed<EnrichedChatItem[]>(() => {
     const feed = this.rawFeed();
     const bundledFeed: EnrichedChatItem[] = [];
@@ -58,7 +75,7 @@ export class TimelineFacade {
       const parentId = getParentId(item);
       if (parentId) {
         if (!attachmentMap.has(parentId)) attachmentMap.set(parentId, []);
-        attachmentMap.get(parentId)!.push(item);
+        attachmentMap.get(parentId)?.push(item);
       }
     }
 

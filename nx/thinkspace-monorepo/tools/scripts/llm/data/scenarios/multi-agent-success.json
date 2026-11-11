@@ -3,6 +3,9 @@
     "offsetMs": 200,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
         "event": {
           "id": "durable-success-1",
           "timestamp": "2026-10-23T12:00:00Z",
@@ -106,6 +109,9 @@
     "offsetMs": 5000,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
         "event": {
           "id": "durable-success-1",
           "timestamp": "2026-10-23T12:00:05Z",
@@ -141,6 +147,56 @@
           "summary": "",
           "payloadJson": "{\"flow_id\": \"flow-succ-1\", \"passed\": true}"
         }
+      }
+    }
+  },
+  {
+    "offsetMs": 100,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
+        "event": {
+          "id": "yield-succ-1",
+          "timestamp": "2026-10-23T12:00:06Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": {
+            "type": "SYSTEM",
+            "text": "Awaiting delegation strategy selection..."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 0,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "flow-succ-1",
+        "event": {
+          "id": "yield-succ-1",
+          "timestamp": "2026-10-23T12:00:06Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": {
+            "type": "SYSTEM",
+            "text": "Awaiting delegation strategy selection..."
+          }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 100,
+    "payload": {
+      "requestStrategy": {
+        "active": true
       }
     }
   }

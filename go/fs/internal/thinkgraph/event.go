@@ -11,9 +11,11 @@ import (
 type EventType string
 
 const (
-	EventPrompt EventType = "prompt"
-	EventModel  EventType = "model"
-	EventDigest EventType = "digest"
+	EventPrompt       EventType = "prompt"
+	EventModel        EventType = "model"
+	EventDigest       EventType = "digest"
+	EventBranchAnchor EventType = "branch_anchor"
+	EventSystem       EventType = "system"
 )
 
 // Event is the storage envelope for the append-only ledger.
@@ -24,6 +26,7 @@ type Event struct {
 	Content   string            `json:"content"`
 	Tags      []string          `json:"tags,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+	Edges     map[string]string `json:"edges,omitempty"`
 	GraphID   GraphID           `json:"graph_id,omitempty"`
 	Data      json.RawMessage   `json:"data,omitempty"` // Strictly typed domain structs live here
 }

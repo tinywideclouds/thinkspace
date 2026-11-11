@@ -90,7 +90,7 @@ func (m *DigestManager) CreateManualDigest(
 		return fmt.Errorf("manual digest generation returned empty string")
 	}
 
-	return svc.LogDigest(ctx, chatSession, summary, tags, true, nil)
+	return svc.AppendDigest(ctx, chatSession, summary, tags, true, nil)
 }
 
 type generatedDigest struct {
@@ -189,8 +189,8 @@ func (m *DigestManager) CreateBackgroundDigest(
 		if d.Summary == "" {
 			continue
 		}
-		if err := svc.LogDigest(ctx, chatSession, d.Summary, d.Tags, false, targetIDs); err != nil {
-			return count, fmt.Errorf("failed to log background digest: %w", err)
+		if err := svc.AppendDigest(ctx, chatSession, d.Summary, d.Tags, false, targetIDs); err != nil {
+			return count, fmt.Errorf("failed to append background digest: %w", err)
 		}
 		count++
 	}

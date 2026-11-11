@@ -46,7 +46,6 @@ func NewBundleAssembler(
 func (a *BundleAssembler) Assemble(
 	ctx context.Context,
 	chatObj *thinkgraph.ChatAddress,
-	topology map[string]thinkgraph.BranchTopology,
 	digestionHorizon uuid.UUID,
 	activeThinkState string,
 	thinkState spaces.ThinkState,
@@ -61,7 +60,7 @@ func (a *BundleAssembler) Assemble(
 		focusDepth = thinkState.Config().Memory.FocusDepth
 	}
 
-	volatileEvents, primaryTags, relatedTags, err := a.gatherTimeline(ctx, chatObj, topology, digestionHorizon, focusDepth)
+	volatileEvents, primaryTags, relatedTags, err := a.gatherTimeline(ctx, chatObj, digestionHorizon, focusDepth)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("gathering timeline: %w", err)
 	}
@@ -155,7 +154,6 @@ func (a *BundleAssembler) Assemble(
 func (a *BundleAssembler) gatherTimeline(
 	ctx context.Context,
 	chatObj *thinkgraph.ChatAddress,
-	topology map[string]thinkgraph.BranchTopology,
 	digestionHorizon uuid.UUID,
 	focusDepth int,
 ) ([]thinkgraph.Node, map[string]bool, map[string]bool, error) {
@@ -164,7 +162,7 @@ func (a *BundleAssembler) gatherTimeline(
 	primaryTags := make(map[string]bool)
 	relatedTags := make(map[string]bool)
 
-	err := traversalEngine.WalkTimelineReverse(ctx, chatObj, topology, func(node thinkgraph.Node) bool {
+	err := traversalEngine.WalkTimelineReverse(ctx, chatObj, func(node thinkgraph.Node) bool {
 		if node.ID == digestionHorizon {
 			return false
 		}
@@ -199,7 +197,6 @@ func (a *BundleAssembler) gatherTimeline(
 	return volatileEvents, primaryTags, relatedTags, nil
 }
 
-// filterActiveDigests isolates sticky digests that match the active context tags or have no tags (global).
 func filterActiveDigests(allDigests []thinkgraph.DigestMeta, primaryTags, relatedTags map[string]bool) []thinkgraph.DigestMeta {
 	var active []thinkgraph.DigestMeta
 	for _, d := range allDigests {
@@ -221,7 +218,6 @@ func filterActiveDigests(allDigests []thinkgraph.DigestMeta, primaryTags, relate
 	return active
 }
 
-// filterActiveContexts isolates space contexts that match the active tags or have no tags (global).
 func filterActiveContexts(allContexts []thinkgraph.SpaceContext, primaryTags, relatedTags map[string]bool) []thinkgraph.SpaceContext {
 	var active []thinkgraph.SpaceContext
 	for _, sc := range allContexts {
@@ -243,7 +239,6 @@ func filterActiveContexts(allContexts []thinkgraph.SpaceContext, primaryTags, re
 	return active
 }
 
-// formatPersona executes template replacement and appends global taxonomy rules.
 func formatPersona(logger *slog.Logger, rawPrompt string, availableSummary string, activeThinkState string) string {
 	tmpl, err := template.New("persona").Parse(rawPrompt)
 	if err != nil {

@@ -1,13 +1,31 @@
 [
   {
-    "offsetMs": 200,
+    "offsetMs": 100,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
+        "event": {
+          "id": "delay-node-1",
+          "timestamp": "2026-10-20T10:06:00Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": { "type": "MODEL", "text": "" }
+        }
+      }
+    }
+  },
+  {
+    "offsetMs": 100,
     "payload": {
       "telemetryEvent": {
         "channel": "manager",
         "event": {
           "id": "scenario-delay-1",
           "type": "flow_start",
-          "timestamp": "2026-10-20T10:00:00Z",
+          "timestamp": "2026-10-20T10:06:01Z",
           "message": "",
           "summary": "Executing long-running background task...",
           "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"task_id\": \"task-del-1\", \"agent_count\": 1}"
@@ -19,19 +37,20 @@
     "offsetMs": 5000,
     "payload": {
       "chatStream": {
+        "nodeId": "delay-node-1",
         "text": "💥 BOOM! This is a massive delayed message block that arrived 5 seconds later. It should trigger the 'New Messages ↓' pill instead of forcing your scroll if you moved your view up."
       }
     }
   },
   {
-    "offsetMs": 5200,
+    "offsetMs": 200,
     "payload": {
       "telemetryEvent": {
         "channel": "manager",
         "event": {
           "id": "scenario-delay-end",
           "type": "flow_complete",
-          "timestamp": "2026-10-20T10:00:05Z",
+          "timestamp": "2026-10-20T10:06:10Z",
           "message": "",
           "summary": "",
           "payloadJson": "{\"flow_id\": \"mock-flow-delayed\", \"agent_index\": 1, \"passed\": true}"

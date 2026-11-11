@@ -6,12 +6,86 @@ import (
 	"testing"
 	"time"
 
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
-	"uuid"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
+
+func TestMarshalChatStream(t *testing.T) {
+	chunk := workspace.NodeChunk{
+		NodeID: uuid.NewV7(),
+		Text:   "chunk test",
+	}
+
+	data, err := api.MarshalChatStream(chunk)
+	if err != nil {
+		t.Fatalf("failed to marshal chat stream: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+
+	chatStream, ok := result["chatStream"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected wrapper 'chatStream'")
+	}
+
+	if chatStream["nodeId"] != chunk.NodeID.String() {
+		t.Errorf("expected node_id %s, got %v", chunk.NodeID.String(), chatStream["nodeId"])
+	}
+	if chatStream["text"] != "chunk test" {
+		t.Errorf("expected text 'chunk test', got %v", chatStream["text"])
+	}
+}
+
+func TestMarshalStreamedGraphEvent(t *testing.T) {
+	eventID := uuid.NewV7()
+	node := thinkgraph.Node{
+		Event: thinkgraph.Event{
+			ID:        eventID,
+			Timestamp: time.Now().UTC(),
+			Type:      thinkgraph.EventModel,
+			Content:   "Durable payload",
+		},
+	}
+
+	coordinate := api.ProjectionCoordinate{SpaceID: "space-1", ChatID: "chat-1", ProjectionID: "main"}
+	data, err := api.MarshalStreamedGraphEvent(node, coordinate)
+	if err != nil {
+		t.Fatalf("failed to marshal streamed graph event: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+
+	streamedEvent, ok := result["streamedGraphEvent"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected wrapper 'streamedGraphEvent'")
+	}
+
+	graphEvent, ok := streamedEvent["event"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested 'event' object")
+	}
+
+	if graphEvent["id"] != eventID.String() {
+		t.Errorf("expected node ID %s, got %v", eventID.String(), graphEvent["id"])
+	}
+	if streamedEvent["spaceId"] != "space-1" {
+		t.Errorf("expected spaceId 'space-1', got %v", streamedEvent["spaceId"])
+	}
+	if streamedEvent["projectionId"] != "main" {
+		t.Errorf("expected projectionId 'main', got %v", streamedEvent["projectionId"])
+	}
+}
 
 func TestMarshalPreviewContext(t *testing.T) {
 	ctxData := session.TurnContext{
@@ -31,24 +105,24 @@ func TestMarshalPreviewContext(t *testing.T) {
 		t.Fatalf("failed to marshal preview context: %v", err)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("failed to parse protojson output: %v", err)
+		t.Fatalf("failed to unmarshal JSON: %v", err)
 	}
 
-	previewCtxRaw, ok := result["previewContext"].(map[string]interface{})
+	previewContext, ok := result["previewContext"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected 'previewContext' wrapper in JSON output, got: %s", string(data))
+		t.Fatalf("expected 'previewContext' wrapper")
 	}
 
-	if previewCtxRaw["spaceId"] != "golang" {
-		t.Errorf("expected spaceId 'golang', got %v", previewCtxRaw["spaceId"])
+	if previewContext["spaceId"] != "golang" {
+		t.Errorf("expected spaceId 'golang', got %v", previewContext["spaceId"])
 	}
-	if previewCtxRaw["previewId"] != "uuid-v7" {
-		t.Errorf("expected previewId 'uuid-v7', got %v", previewCtxRaw["previewId"])
+	if previewContext["previewId"] != "uuid-v7" {
+		t.Errorf("expected previewId 'uuid-v7', got %v", previewContext["previewId"])
 	}
-	if previewCtxRaw["managerSystemPrompt"] != "Test rules" {
-		t.Errorf("expected prompt 'Test rules', got %v", previewCtxRaw["managerSystemPrompt"])
+	if previewContext["managerSystemPrompt"] != "Test rules" {
+		t.Errorf("expected prompt 'Test rules', got %v", previewContext["managerSystemPrompt"])
 	}
 }
 
@@ -73,23 +147,23 @@ func TestMarshalTelemetryEvent(t *testing.T) {
 		t.Fatalf("failed to marshal telemetry event: %v", err)
 	}
 
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("failed to parse protojson output: %v", err)
+		t.Fatalf("failed to unmarshal JSON: %v", err)
 	}
 
-	payloadRaw, ok := result["telemetryEvent"].(map[string]interface{})
+	payloadRaw, ok := result["telemetryEvent"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected 'telemetryEvent' wrapper in JSON output, got: %s", string(data))
+		t.Fatalf("expected 'telemetryEvent' wrapper")
 	}
 
 	if payloadRaw["channel"] != "agent-1" {
 		t.Errorf("expected channel 'agent-1', got %v", payloadRaw["channel"])
 	}
 
-	eventRaw, ok := payloadRaw["event"].(map[string]interface{})
+	eventRaw, ok := payloadRaw["event"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected nested 'event' struct in JSON output")
+		t.Fatalf("expected nested 'event' struct")
 	}
 
 	if eventRaw["id"] != eventID.String() {
@@ -117,13 +191,13 @@ func TestMarshalTelemetryEvent(t *testing.T) {
 }
 
 func TestMarshalSyncHistory(t *testing.T) {
-	evID := uuid.NewV7()
+	eventID := uuid.NewV7()
 	digestID := uuid.NewV7()
 
 	nodes := []thinkgraph.Node{
 		{
 			Event: thinkgraph.Event{
-				ID:        evID,
+				ID:        eventID,
 				Timestamp: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
 				Type:      thinkgraph.EventPrompt,
 				Content:   "Standard message",
@@ -144,42 +218,63 @@ func TestMarshalSyncHistory(t *testing.T) {
 		PrimaryFocus: []string{"test-focus"},
 	}
 
-	data, err := api.MarshalSyncHistory(nodes, digests, focus, "cursor-123", true)
+	coordinate := api.ProjectionCoordinate{SpaceID: "space-1", ChatID: "chat-1", ProjectionID: "main"}
+	data, err := api.MarshalSyncHistory(nodes, digests, focus, "cursor-123", true, coordinate)
 	if err != nil {
 		t.Fatalf("failed to marshal sync history: %v", err)
 	}
 
-	jsonStr := string(data)
-	if !strings.Contains(jsonStr, "syncHistory") {
-		t.Errorf("expected wrapper 'syncHistory', got: %s", jsonStr)
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
 	}
-	if !strings.Contains(jsonStr, evID.String()) {
-		t.Errorf("expected event ID %s to be present", evID.String())
+
+	syncHistory, ok := result["syncHistory"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected wrapper 'syncHistory'")
 	}
-	if !strings.Contains(jsonStr, `"message"`) {
-		t.Errorf("expected oneof payload 'message' to be present, got: %s", jsonStr)
+
+	recentEvents, ok := syncHistory["recentEvents"].([]any)
+	if !ok || len(recentEvents) == 0 {
+		t.Fatalf("expected recentEvents array")
 	}
-	if !strings.Contains(jsonStr, "Sticky context") {
-		t.Errorf("expected digest summary to be present")
+
+	firstEvent := recentEvents[0].(map[string]any)
+	if firstEvent["id"] != eventID.String() {
+		t.Errorf("expected event ID %s, got %v", eventID.String(), firstEvent["id"])
 	}
-	if !strings.Contains(jsonStr, "test-focus") {
-		t.Errorf("expected focus to be present")
+	if _, hasMessage := firstEvent["message"]; !hasMessage {
+		t.Errorf("expected oneof payload 'message' to be present")
 	}
-	if !strings.Contains(jsonStr, `"nextCursor":"cursor-123"`) {
-		t.Errorf("expected nextCursor to be present")
+
+	focusData, ok := syncHistory["focus"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected focus object")
 	}
-	if !strings.Contains(jsonStr, `"hasMore":true`) {
+
+	primaryFocus := focusData["primaryFocus"].([]any)
+	if len(primaryFocus) == 0 || primaryFocus[0] != "test-focus" {
+		t.Errorf("expected primaryFocus 'test-focus'")
+	}
+
+	if syncHistory["nextCursor"] != "cursor-123" {
+		t.Errorf("expected nextCursor 'cursor-123', got %v", syncHistory["nextCursor"])
+	}
+	if syncHistory["hasMore"] != true {
 		t.Errorf("expected hasMore to be true")
+	}
+	if syncHistory["projectionId"] != "main" {
+		t.Errorf("expected projectionId 'main', got %v", syncHistory["projectionId"])
 	}
 }
 
 func TestMarshalSyncSubGraph(t *testing.T) {
-	evID := uuid.NewV7()
+	eventID := uuid.NewV7()
 
 	nodes := []thinkgraph.Node{
 		{
 			Event: thinkgraph.Event{
-				ID:        evID,
+				ID:        eventID,
 				Timestamp: time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC),
 				Type:      thinkgraph.EventModel,
 				Content:   "SubGraph message",
@@ -187,43 +282,36 @@ func TestMarshalSyncSubGraph(t *testing.T) {
 		},
 	}
 
-	data, err := api.MarshalSyncSubGraph(nodes)
+	coordinate := api.ProjectionCoordinate{SpaceID: "space-1", ChatID: "chat-1", ProjectionID: "flow-123"}
+	data, err := api.MarshalSyncSubGraph(nodes, coordinate)
 	if err != nil {
 		t.Fatalf("failed to marshal sync subgraph: %v", err)
 	}
 
-	jsonStr := string(data)
-	if !strings.Contains(jsonStr, "syncSubGraph") {
-		t.Errorf("expected wrapper 'syncSubGraph', got: %s", jsonStr)
-	}
-	if !strings.Contains(jsonStr, evID.String()) {
-		t.Errorf("expected event ID %s to be present", evID.String())
-	}
-	if !strings.Contains(jsonStr, `"message"`) {
-		t.Errorf("expected oneof payload 'message' to be present, got: %s", jsonStr)
-	}
-}
-
-func TestMarshalRequestTransition(t *testing.T) {
-	data, err := api.MarshalRequestTransition("golang", "need to compile")
-	if err != nil {
-		t.Fatalf("failed to marshal request transition: %v", err)
-	}
-
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("failed to parse protojson output: %v", err)
+		t.Fatalf("failed to unmarshal JSON: %v", err)
 	}
 
-	reqRaw, ok := result["requestTransition"].(map[string]interface{})
+	syncSubGraph, ok := result["syncSubGraph"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected 'requestTransition' wrapper in JSON output, got: %s", string(data))
+		t.Fatalf("expected wrapper 'syncSubGraph'")
 	}
 
-	if reqRaw["targetThinkState"] != "golang" {
-		t.Errorf("expected targetThinkState 'golang', got %v", reqRaw["targetThinkState"])
+	events, ok := syncSubGraph["events"].([]any)
+	if !ok || len(events) == 0 {
+		t.Fatalf("expected events array")
 	}
-	if reqRaw["reasoning"] != "need to compile" {
-		t.Errorf("expected reasoning 'need to compile', got %v", reqRaw["reasoning"])
+
+	firstEvent := events[0].(map[string]any)
+	if firstEvent["id"] != eventID.String() {
+		t.Errorf("expected event ID %s, got %v", eventID.String(), firstEvent["id"])
+	}
+	if _, hasMessage := firstEvent["message"]; !hasMessage {
+		t.Errorf("expected oneof payload 'message' to be present")
+	}
+
+	if syncSubGraph["projectionId"] != "flow-123" {
+		t.Errorf("expected projectionId 'flow-123', got %v", syncSubGraph["projectionId"])
 	}
 }

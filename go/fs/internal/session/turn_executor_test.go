@@ -38,10 +38,12 @@ func (client *teTestModelClient) GenerateContentStream(
 ) iter.Seq2[llm.StreamChunk, error] {
 	client.capturedBundle = bundle
 	return func(yield func(llm.StreamChunk, error) bool) {
-		if client.callIndex < len(client.responses) {
+		for client.callIndex < len(client.responses) {
 			resp := client.responses[client.callIndex]
 			client.callIndex++
-			yield(resp, nil)
+			if !yield(resp, nil) {
+				return
+			}
 		}
 	}
 }
@@ -91,16 +93,24 @@ func (space *teTestThinkSpace) EnrichBundle(ctx context.Context, bundle *cogniti
 	return nil
 }
 
-type teTestUI struct{}
+type teTestUI struct {
+	streamedNodes []thinkgraph.Node
+	chunks        []workspace.NodeChunk
+}
 
-func (ui *teTestUI) OnTextChunk(text string)                             {}
+func (ui *teTestUI) OnTextChunk(chunk workspace.NodeChunk) {
+	ui.chunks = append(ui.chunks, chunk)
+}
+func (ui *teTestUI) StreamGraphEvent(node thinkgraph.Node) {
+	ui.streamedNodes = append(ui.streamedNodes, node)
+}
 func (ui *teTestUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
 func (ui *teTestUI) ChooseNextStep() flows.FlowStrategy                  { return flows.StrategyManual }
 func (ui *teTestUI) ReviewCandidate(branch string) bool                  { return true }
 func (ui *teTestUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{}
 }
-func (ui *teTestUI) GetAgentTokenChannel() chan<- workspace.AgentToken { return nil }
+func (ui *teTestUI) GetChunkChannel() chan<- workspace.NodeChunk { return nil }
 
 type teTestEmitter struct{}
 
@@ -134,13 +144,12 @@ func setupExecutorTest(t *testing.T, spaceID, chatID string) (*session.TurnExecu
 	return executor, workspaceService, client
 }
 
-func TestTurnExecutor_Execute_StandardResponse(t *testing.T) {
+func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	executor, wsService, client := setupExecutorTest(t, "golang", "test-thread")
 
-	// Ensure GraphID is strictly assigned so standard response gets successfully indexed
 	address := &thinkgraph.ChatAddress{
 		ChatID:    "test-thread",
 		ProjectID: "golang",
@@ -150,11 +159,15 @@ func TestTurnExecutor_Execute_StandardResponse(t *testing.T) {
 		},
 	}
 
-	client.responses = []llm.StreamChunk{{Text: "Hello world"}}
+	client.responses = []llm.StreamChunk{
+		{Text: "Hello "},
+		{Text: "world"},
+	}
 
 	registry := tools.NewRegistry()
-	signal, err := executor.Execute(ctx, address, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
+	ui := &teTestUI{}
 
+	signal, err := executor.Execute(ctx, address, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -163,9 +176,35 @@ func TestTurnExecutor_Execute_StandardResponse(t *testing.T) {
 		t.Errorf("Expected SignalTerminal for standard response, got %T", signal)
 	}
 
+	if len(ui.streamedNodes) != 2 {
+		t.Fatalf("Expected exactly 2 node streams (Shell Open, Final Lock), got %d", len(ui.streamedNodes))
+	}
+
+	shellNode := ui.streamedNodes[0]
+	if shellNode.Content != "" {
+		t.Errorf("Expected first streamed node to be an empty shell, got content: %s", shellNode.Content)
+	}
+
+	finalNode := ui.streamedNodes[1]
+	if finalNode.ID != shellNode.ID {
+		t.Errorf("Expected final node ID to match shell node ID for UI locking")
+	}
+	if finalNode.Content != "Hello world" {
+		t.Errorf("Expected final node to contain complete content, got %s", finalNode.Content)
+	}
+
+	if len(ui.chunks) != 2 {
+		t.Fatalf("Expected exactly 2 text chunks streamed, got %d", len(ui.chunks))
+	}
+	if ui.chunks[0].NodeID != shellNode.ID || ui.chunks[1].NodeID != shellNode.ID {
+		t.Errorf("Expected text chunks to be attached to the pre-allocated node ID")
+	}
+
 	timeline, _ := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
 	if len(timeline) == 0 {
 		t.Errorf("Expected standard generation to be appended to graph timeline")
+	} else if timeline[len(timeline)-1].ID != shellNode.ID {
+		t.Errorf("Expected persisted node ID to match the pre-allocated ID")
 	}
 }
 
@@ -173,7 +212,7 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	executor, _, client := setupExecutorTest(t, "golang", "test-thread")
+	executor, wsService, client := setupExecutorTest(t, "golang", "test-thread")
 	address := &thinkgraph.ChatAddress{
 		ChatID:    "test-thread",
 		ProjectID: "golang",
@@ -209,6 +248,20 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	}
 	if tr.TargetThinkState != "concept" {
 		t.Errorf("Expected transition to concept, got %s", tr.TargetThinkState)
+	}
+
+	// Verify that the empty model shell node was written
+	timeline, _ := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
+	if len(timeline) == 0 {
+		t.Errorf("Expected graph timeline to have been appended")
+	} else {
+		lastNode := timeline[len(timeline)-1]
+		if lastNode.Type != thinkgraph.EventModel {
+			t.Errorf("Expected saved shell node to be EventModel, got %s", lastNode.Type)
+		}
+		if lastNode.Content != "" {
+			t.Errorf("Expected model node content to remain empty on tool route, got %s", lastNode.Content)
+		}
 	}
 }
 

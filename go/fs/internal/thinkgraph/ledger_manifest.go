@@ -17,10 +17,8 @@ type LedgerManifest struct {
 }
 
 func LoadOrRebuildManifest(ledgerDirectory string, subGraphName string) (*LedgerManifest, error) {
-	if subGraphName == "" {
-		subGraphName = "main"
-	}
-	branchDir := filepath.Join(ledgerDirectory, "logs", subGraphName)
+	dirName := ResolveLogDirName(subGraphName)
+	branchDir := filepath.Join(ledgerDirectory, "logs", dirName)
 	_ = os.MkdirAll(branchDir, 0755)
 
 	manifestPath := filepath.Join(branchDir, "manifest.json")
@@ -31,14 +29,12 @@ func LoadOrRebuildManifest(ledgerDirectory string, subGraphName string) (*Ledger
 			return &m, nil
 		}
 	}
-	return RebuildManifest(ledgerDirectory, subGraphName)
+	return RebuildManifest(ledgerDirectory, dirName)
 }
 
 func RebuildManifest(ledgerDirectory string, subGraphName string) (*LedgerManifest, error) {
-	if subGraphName == "" {
-		subGraphName = "main"
-	}
-	branchDir := filepath.Join(ledgerDirectory, "logs", subGraphName)
+	dirName := ResolveLogDirName(subGraphName)
+	branchDir := filepath.Join(ledgerDirectory, "logs", dirName)
 	entries, err := os.ReadDir(branchDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -84,15 +80,13 @@ func RebuildManifest(ledgerDirectory string, subGraphName string) (*LedgerManife
 	}
 
 	m := &LedgerManifest{ActiveShard: activeShard, EventCount: eventCount, TotalEvents: totalCount}
-	_ = m.Save(ledgerDirectory, subGraphName)
+	_ = m.Save(ledgerDirectory, dirName)
 	return m, nil
 }
 
 func (m *LedgerManifest) Save(ledgerDirectory string, subGraphName string) error {
-	if subGraphName == "" {
-		subGraphName = "main"
-	}
-	branchDir := filepath.Join(ledgerDirectory, "logs", subGraphName)
+	dirName := ResolveLogDirName(subGraphName)
+	branchDir := filepath.Join(ledgerDirectory, "logs", dirName)
 	_ = os.MkdirAll(branchDir, 0755)
 
 	data, err := json.MarshalIndent(m, "", "  ")

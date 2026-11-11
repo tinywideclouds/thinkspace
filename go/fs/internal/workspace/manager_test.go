@@ -86,9 +86,6 @@ func TestServiceManager_ChatManagement(t *testing.T) {
 	if explicitMeta.ActiveBranch != "main" {
 		t.Errorf("Expected ActiveBranch 'main', got %s", explicitMeta.ActiveBranch)
 	}
-	if _, ok := explicitMeta.Branches["main"]; !ok {
-		t.Errorf("Expected 'main' branch in branches map")
-	}
 
 	autoMeta1, err := manager.CreateChat(ctx, spaceID, "")
 	if err != nil {
@@ -129,7 +126,6 @@ func TestServiceManager_SpaceSettingsManagement(t *testing.T) {
 	manager := workspace.NewServiceManager(logger, baseRoot, func(r string) workspace.ChatVersioner { return nil }, nil, nil)
 	spaceID := "golang"
 
-	// 1. Test Default / Missing Settings
 	settings, err := manager.GetSpaceSettings(spaceID)
 	if err != nil {
 		t.Fatalf("Expected safe defaults for missing settings, got error: %v", err)
@@ -144,7 +140,6 @@ func TestServiceManager_SpaceSettingsManagement(t *testing.T) {
 		t.Errorf("Expected default ReviewPolicy.IncludePersona to be false")
 	}
 
-	// 2. Test Updating Settings
 	err = manager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = false
 		s.ReviewPolicy.MinTokens = 500
@@ -154,7 +149,6 @@ func TestServiceManager_SpaceSettingsManagement(t *testing.T) {
 		t.Fatalf("UpdateSpaceSettings failed: %v", err)
 	}
 
-	// 3. Test Reading Updated Settings
 	updated, err := manager.GetSpaceSettings(spaceID)
 	if err != nil {
 		t.Fatalf("GetSpaceSettings failed after update: %v", err)

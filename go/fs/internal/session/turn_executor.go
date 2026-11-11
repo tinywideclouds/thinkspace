@@ -46,7 +46,7 @@ func (e *TurnExecutor) Execute(
 	thinkState spaces.ThinkState,
 	bundle cognition.ThinkBundle,
 	registry *tools.Registry,
-	ui tools.UI, // Narrowed from UserInterface to tools.UI
+	ui tools.UI,
 ) (signals.EngineSignal, error) {
 	turnContext, cancel := context.WithTimeout(ctx, thinkState.Config().TurnTimeout())
 	defer cancel()
@@ -61,6 +61,20 @@ func (e *TurnExecutor) Execute(
 			Timestamp: time.Now(),
 			Message:   "Analyzing context and formulating a plan...",
 		})
+
+		responseID := uuid.NewV7()
+
+		shellEvent := thinkgraph.NewEvent(thinkgraph.EventModel, "")
+		shellEvent.ID = responseID
+		if address != nil && !address.GraphID.IsZero() {
+			shellEvent.GraphID = address.GraphID
+		}
+
+		if sessionUI, ok := ui.(UserInterface); ok {
+			sessionUI.StreamGraphEvent(thinkgraph.Node{Event: shellEvent})
+		} else if castUI, ok := ui.(interface{ StreamGraphEvent(node thinkgraph.Node) }); ok {
+			castUI.StreamGraphEvent(thinkgraph.Node{Event: shellEvent})
+		}
 
 		stream := e.modelClient.GenerateContentStream(
 			turnContext,
@@ -79,7 +93,7 @@ func (e *TurnExecutor) Execute(
 				return nil, fmt.Errorf("generation stream failed: %w", err)
 			}
 			if chunk.Text != "" {
-				ui.OnTextChunk(chunk.Text)
+				ui.OnTextChunk(workspace.NodeChunk{NodeID: responseID, Text: chunk.Text})
 				fullModelResponse.WriteString(chunk.Text)
 			}
 			if len(chunk.ToolCalls) > 0 {
@@ -102,11 +116,23 @@ func (e *TurnExecutor) Execute(
 				}
 			}
 
-			_ = e.workspaceService.LogModelResponse(turnContext, address, fullModelResponse.String(), usage)
+			_ = e.workspaceService.AppendModelResponse(turnContext, address, responseID, fullModelResponse.String(), usage)
+
 			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 				Role:    "model",
 				Content: fullModelResponse.String(),
 			})
+
+			if graph := e.workspaceService.Graph(); graph != nil {
+				timeline, _ := graph.GetNodes(ctx, address, []string{responseID.String()})
+				if len(timeline) > 0 {
+					if sessionUI, ok := ui.(UserInterface); ok {
+						sessionUI.StreamGraphEvent(timeline[0])
+					} else if castUI, ok := ui.(interface{ StreamGraphEvent(node thinkgraph.Node) }); ok {
+						castUI.StreamGraphEvent(timeline[0])
+					}
+				}
+			}
 		}
 
 		if len(interceptedTools) == 0 {
@@ -115,6 +141,22 @@ func (e *TurnExecutor) Execute(
 
 		call := interceptedTools[0]
 		e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name)
+
+		if fullModelResponse.Len() == 0 {
+			// Save the empty model node to persist the 'thinking' placeholder state
+			_ = e.workspaceService.AppendModelResponse(turnContext, address, responseID, "", nil)
+
+			if graph := e.workspaceService.Graph(); graph != nil {
+				timeline, _ := graph.GetNodes(ctx, address, []string{responseID.String()})
+				if len(timeline) > 0 {
+					if sessionUI, ok := ui.(UserInterface); ok {
+						sessionUI.StreamGraphEvent(timeline[0])
+					} else if castUI, ok := ui.(interface{ StreamGraphEvent(node thinkgraph.Node) }); ok {
+						castUI.StreamGraphEvent(timeline[0])
+					}
+				}
+			}
+		}
 
 		tool, exists := registry.Get(call.Name)
 		if !exists {
@@ -126,6 +168,7 @@ func (e *TurnExecutor) Execute(
 			Address:      address,
 			Bundle:       &bundle,
 			UI:           ui,
+			Emitter:      e.emitter,
 			RawArguments: call.Args,
 		}
 

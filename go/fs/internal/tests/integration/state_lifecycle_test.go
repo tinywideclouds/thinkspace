@@ -103,14 +103,15 @@ func (m *mockThinkState) EnrichBundle(ctx context.Context, bundle *cognition.Thi
 
 type mockUI struct{}
 
-func (ui *mockUI) OnTextChunk(text string) {}
+func (ui *mockUI) OnTextChunk(chunk workspace.NodeChunk) {}
+func (ui *mockUI) StreamGraphEvent(node thinkgraph.Node) {}
 func (ui *mockUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: true}
 }
 func (ui *mockUI) ChooseNextStep() flows.FlowStrategy                  { return flows.StrategyManual }
 func (ui *mockUI) ReviewCandidate(branch string) bool                  { return true }
 func (ui *mockUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
-func (ui *mockUI) GetAgentTokenChannel() chan<- workspace.AgentToken   { return nil }
+func (ui *mockUI) GetChunkChannel() chan<- workspace.NodeChunk         { return nil }
 
 type mockFlow struct{ step int }
 
@@ -130,8 +131,6 @@ func (f *mockFlow) Next(state flows.FlowState) flows.FlowDirective {
 type mockEmitter struct{}
 
 func (m *mockEmitter) Emit(channel string, event telemetry.Event) {}
-
-// --- Tests ---
 
 func TestEndToEndStateLifecycle(t *testing.T) {
 	ctx := context.Background()
@@ -157,7 +156,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" })
 
 	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
-	metaJSON := fmt.Sprintf(`{"id":"%s", "name":"Lifecycle Chat", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": "", "graph_id": "%s"}}}`, chatID, graphID.String())
+	metaJSON := fmt.Sprintf(`{"id":"%s", "name":"Lifecycle Chat", "active_branch": "main"}`, chatID)
 
 	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
 	_ = os.MkdirAll(chatDir, 0755)
@@ -174,11 +173,11 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 	var targetEvents []thinkgraph.Event
 
 	t.Run("Act I: The Conversation", func(t *testing.T) {
-		if err := svc.LogUserPrompt(ctx, chatAddress, "How do I build a server?"); err != nil {
+		if err := svc.AppendUserPrompt(ctx, chatAddress, "How do I build a server?"); err != nil {
 			t.Fatalf("LogUserPrompt failed: %v", err)
 		}
 		time.Sleep(1 * time.Millisecond)
-		if err := svc.LogModelResponse(ctx, chatAddress, "Use net/http.", nil); err != nil {
+		if err := svc.AppendModelResponse(ctx, chatAddress, thinkgraph.NewGraphID(thinkgraph.PrefixChat).UUID, "Use net/http.", nil); err != nil {
 			t.Fatalf("LogModelResponse failed: %v", err)
 		}
 
@@ -196,7 +195,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 	})
 
 	t.Run("Act II: The Compression", func(t *testing.T) {
-		mockJSON := fmt.Sprintf(`{
+		mockJSON := `{
 			"thought": "Summarizing the server setup",
 			"digests": [
 				{
@@ -205,7 +204,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 					"summary": "User asked how to build a server. Model suggested net/http."
 				}
 			]
-		}`)
+		}`
 
 		mockLLM := &mockDeterministicLLM{Responses: []llm.StreamChunk{{Text: mockJSON}}}
 		digestManager := session.NewDigestManager(logger, mockLLM, session.DigestConfig{})
@@ -276,7 +275,6 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		turnExecutor := session.NewTurnExecutor(logger, toolLLM, svc, emitter)
 		flowEngine := session.NewFlowEngine(logger, svc, turnExecutor, svc.Dispatcher())
 
-		// 1. Manually drive the TurnExecutor (simulating the supervisor loop detecting a tool call)
 		signal, err := turnExecutor.Execute(ctx, chatAddress, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui)
 		if err != nil {
 			t.Fatalf("TurnExecutor failed: %v", err)
@@ -287,7 +285,6 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 			t.Fatalf("Expected TurnExecutor to yield a SignalDispatchFlow, got %T", signal)
 		}
 
-		// 2. Pass the signal payload into the FlowEngine exactly as the original test architecture intended
 		_, err = flowEngine.Run(ctx, chatAddress, mockSpace, &mockFlow{}, dispatchSig.Tasks, "Refactor the backend", ui, emitter)
 		if err != nil {
 			t.Fatalf("FlowEngine failed: %v", err)

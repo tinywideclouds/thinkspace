@@ -1,16 +1,16 @@
 import { Component, input, computed, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { GraphStore, ChatConnectionService } from '@org/llm-state-chat';
+import { GraphStore, ChatConnectionService, ThinkspaceStateService, ChatItem } from '@org/llm-state-chat';
 import { GraphCanvasComponent } from '@org/llm-ui-graph';
 
-interface LayoutNode {
+export interface LayoutNode {
   id: string;
   x: number;
   y: number;
   data: any;
 }
 
-interface LayoutEdge {
+export interface LayoutEdge {
   id: string;
   pathData: string;
 }
@@ -28,6 +28,7 @@ interface LayoutEdge {
 export class FlowGraphComponent {
   private graphStore = inject(GraphStore);
   private connection = inject(ChatConnectionService);
+  private workspace = inject(ThinkspaceStateService);
 
   public flowId = input.required<string>();
 
@@ -42,11 +43,21 @@ export class FlowGraphComponent {
 
   public layout = computed(() => {
     const targetFlowId = this.flowId();
-    const allNodes = Array.from(this.graphStore.nodes().values());
-    
-    const flowNodes = allNodes
-      .filter(n => n.branchId === targetFlowId && !n.tombstoned)
-      .sort((a, b) => a.timestamp.toString().localeCompare(b.timestamp.toString()));
+    const spaceId = this.workspace.activeSpaceId();
+    const chatId = this.workspace.activeChatId();
+
+    if (!spaceId || !chatId || !targetFlowId) {
+      return { nodes: [], edges: [] };
+    }
+
+    const key = GraphStore.makeKey({ spaceId, chatId, projectionId: targetFlowId });
+    const pointers = this.graphStore.projections().get(key) || [];
+    const cache = this.graphStore.nodes();
+
+    // O(1) Cache Join: Instantly maps the subgraph's pointers to pure nodes
+    const flowNodes = pointers
+      .map(id => cache.get(id))
+      .filter((n): n is ChatItem => n !== undefined && !n.tombstoned);
 
     if (flowNodes.length === 0) {
       return { nodes: [], edges: [] };
@@ -55,6 +66,7 @@ export class FlowGraphComponent {
     const childrenMap = new Map<string, string[]>();
     const isChild = new Set<string>();
 
+    // Build the DAG dependency mappings by checking explicit cryptographic edges
     for (const node of flowNodes) {
       const edges = node.edges || {};
       const parentIds = Object.keys(edges)
@@ -63,11 +75,12 @@ export class FlowGraphComponent {
 
       for (const parentId of parentIds) {
         if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
-        childrenMap.get(parentId)!.push(node.id);
+        childrenMap.get(parentId)?.push(node.id);
         isChild.add(node.id);
       }
     }
 
+    // Roots are nodes with no parents
     const roots = flowNodes.filter(n => !isChild.has(n.id));
     
     const NODE_WIDTH = 280;
@@ -79,6 +92,7 @@ export class FlowGraphComponent {
     const visited = new Set<string>();
     let currentX = 0;
 
+    // Traverse DAG to assign spatial coordinates
     const traverse = (nodeId: string, depthY: number) => {
       if (visited.has(nodeId)) return;
       visited.add(nodeId);
@@ -97,6 +111,7 @@ export class FlowGraphComponent {
           traverse(childId, depthY + 1);
         }
       } else {
+        // Only advance X-coordinate for leaf nodes (ensuring horizontal spread)
         currentX += NODE_WIDTH + GAP_X;
       }
     };
@@ -105,6 +120,7 @@ export class FlowGraphComponent {
       traverse(root.id, 0);
     }
 
+    // Second pass to generate SVG edge paths using Bezier curves
     const layoutEdges: LayoutEdge[] = [];
     for (const node of layoutNodes) {
       const edges = node.data.edges || {};

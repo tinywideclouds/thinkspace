@@ -83,7 +83,7 @@ message GraphEvent {
   string timestamp = 2;
   repeated string tags = 3;
   bool tombstoned = 4;
-  string branch_id = 5;
+  // Field 5 (branch_id) removed to ensure pure, context-agnostic nodes
   map<string, string> edges = 6; 
   map<string, string> metadata = 7;
 
@@ -108,24 +108,18 @@ message AttentionFocus {
   repeated string dormant_lenses = 3;
 }
 
-message BranchTopology {
-  string parent_branch = 1;
-  string fork_point = 2;
-}
-
 // --- Outbound Data (Server -> Client) ---
 
 message ChatStream {
-  string text = 1;
-}
-
-message AgentStream {
-  int32 agent_id = 1;
+  string node_id = 1;
   string text = 2;
 }
 
 message StreamedGraphEvent {
   GraphEvent event = 1;
+  string space_id = 2;
+  string chat_id = 3;
+  string projection_id = 4;
 }
 
 message SyncHistory {
@@ -135,14 +129,18 @@ message SyncHistory {
   
   string next_cursor = 4;
   bool has_more = 5;
-
-  string active_branch = 6;
-  map<string, BranchTopology> branches = 7;
+  
+  string space_id = 6;
+  string chat_id = 7;
+  string projection_id = 8;
 }
 
-// NEW: Raw SubGraph synchronization for the DAG visualizer
 message SyncSubGraph {
   repeated GraphEvent events = 1;
+  
+  string space_id = 2;
+  string chat_id = 3;
+  string projection_id = 4;
 }
 
 message LoadHistory {
@@ -152,7 +150,6 @@ message LoadHistory {
   int32 limit = 4;    
 }
 
-// NEW: Command to fetch an entire bounded SubGraph
 message LoadSubGraph {
   string space_id = 1;
   string chat_id = 2;
@@ -311,8 +308,7 @@ message ThinkBundle {
 message WSEvent {
   oneof payload {
     ChatStream chat_stream = 1;
-    TelemetryEvent telemetry_event = 2; 
-    AgentStream agent_stream = 6;
+    TelemetryEvent telemetry_event = 2;
     StreamedGraphEvent streamed_graph_event = 23;
 
     RequestStrategy request_strategy = 8;
@@ -321,7 +317,7 @@ message WSEvent {
 
     AvailableSpaces available_spaces = 10;
     SyncHistory sync_history = 15;
-    SyncSubGraph sync_sub_graph = 27; // NEW
+    SyncSubGraph sync_sub_graph = 27;
     PreviewContext preview_context = 18; 
     
     ThinkBundle think_bundle = 16;
@@ -332,7 +328,7 @@ message WSEvent {
     ApproveContext approve_context = 17;
     TransitionDecision transition_decision = 21;
     LoadHistory load_history = 22;
-    LoadSubGraph load_sub_graph = 28; // NEW
+    LoadSubGraph load_sub_graph = 28; 
 
     ForkChat fork_chat = 24;
     InlineEdit inline_edit = 25;

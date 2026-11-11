@@ -135,4 +135,5 @@ files:
   - libs/llm/ui/graph/src/lib/graph-canvas/graph-canvas.component.scss
   - libs/llm/ui/graph/src/lib/graph-canvas/graph-canvas.component.spec.ts
   - libs/llm/ui/graph/src/lib/graph-canvas/graph-canvas.component.ts
+  - libs/llm/ui/flow-graph/src/lib/flow-graph/flow-graph.component.spec.ts
 last_context: llm_ui_04.md

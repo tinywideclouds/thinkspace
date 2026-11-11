@@ -3,6 +3,9 @@
     "offsetMs": 200,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
         "event": {
           "id": "mock-model-parent-1",
           "timestamp": "2026-10-23T12:00:00Z",
@@ -18,6 +21,9 @@
     "offsetMs": 1200,
     "payload": {
       "streamedGraphEvent": {
+        "spaceId": "golang",
+        "chatId": "chat-1",
+        "projectionId": "main",
         "event": {
           "id": "mock-file-event-1",
           "timestamp": "2026-10-23T12:00:01Z",

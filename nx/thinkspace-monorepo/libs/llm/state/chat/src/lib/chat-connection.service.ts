@@ -52,7 +52,7 @@ export class ChatConnectionService {
     this.graphStore.clear();
     this.flow.manualClearLogs();
     this.cognitive.clearSession();
-    this.timeline.setHistoryMetadata('', false, 'main', {});
+    this.timeline.setHistoryMetadata('', false, 'main');
   }
 
   public submitPrompt(text: string): void {
@@ -148,30 +148,86 @@ export class ChatConnectionService {
   }
 
   private mapGraphEventToChatItem(ev: GraphEvent): ChatItem {
-    return ev as ChatItem;
+    const base = {
+      id: ev.id,
+      timestamp: ev.timestamp,
+      tombstoned: ev.tombstoned,
+      tags: ev.tags,
+      metadata: ev.metadata,
+      edges: ev.edges,
+    };
+
+    switch (ev.type) {
+      case 'prompt':
+      case 'model':
+      case 'system':
+        return {
+          ...base,
+          type: ev.type,
+          content: ev.content,
+        };
+
+      case 'file_delta':
+        return {
+          ...base,
+          type: 'file_delta',
+          content: ev.content,
+          path: ev.path,
+          previewSnippet: ev.previewSnippet,
+          fileRef: ev.fileRef,
+          parentId: ev.parentId,
+        };
+
+      case 'flow_execution':
+        return {
+          ...base,
+          type: 'flow_execution',
+          content: ev.content,
+          flowId: ev.flowId,
+          taskId: ev.taskId,
+          task: ev.task,
+          status: ev.status,
+          error: ev.error,
+          agents: ev.agents,
+        };
+    }
   }
 
   private routeIncomingEvent(event: AppEvent): void {
     switch (event.type) {
       case 'sync_history':
         this.graphStore.upsert(event.recentEvents.map(e => this.mapGraphEventToChatItem(e)));
-        this.timeline.setHistoryMetadata(
-          event.nextCursor,
-          event.hasMore,
-          event.activeBranch,
-          event.branches
-        );
-        this.cognitive.activeFocus.set(event.focus);
-        if (Object.keys(event.digests).length > 0) this.cognitive.activeDigests.set(event.digests);
+        
+        if (event.coordinate) {
+          const historyIds = event.recentEvents.map(e => e.id);
+          this.graphStore.resetProjection(event.coordinate, historyIds);
+          
+          if (this.timeline.isActiveView(event.coordinate)) {
+            this.timeline.setHistoryMetadata(event.nextCursor, event.hasMore, event.coordinate.projectionId);
+            this.cognitive.activeFocus.set(event.focus);
+            if (Object.keys(event.digests).length > 0) {
+              this.cognitive.activeDigests.set(event.digests);
+            }
+          }
+        }
         this.timeline.isLoadingHistory.set(false);
         break;
 
       case 'sync_subgraph':
         this.graphStore.upsert(event.events.map(e => this.mapGraphEventToChatItem(e)));
+        
+        if (event.coordinate) {
+          const subGraphIds = event.events.map(e => e.id);
+          this.graphStore.resetProjection(event.coordinate, subGraphIds);
+        }
         break;
 
       case 'streamed_graph_event':
         this.graphStore.upsert([this.mapGraphEventToChatItem(event.event)]);
+        
+        if (event.coordinate) {
+          this.graphStore.appendToProjection(event.coordinate, [event.event.id]);
+        }
         break;
 
       case 'preview_context':
@@ -187,7 +243,18 @@ export class ChatConnectionService {
         break;
 
       case 'chat_stream':
-        // Not implemented in the new GraphStore model as streaming text directly mutates existing models in the UI layer now
+        this.graphStore.nodes.update(map => {
+          const next = new Map(map);
+          const node = next.get(event.nodeId);
+          
+          if (node) {
+            next.set(event.nodeId, { 
+              ...node, 
+              content: (node.content || '') + event.text 
+            });
+          }
+          return next;
+        });
         break;
 
       case 'telemetry_event':

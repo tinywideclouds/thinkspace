@@ -17,26 +17,17 @@ describe('LlmFacade', () => {
       expect(domainEvent).toEqual({ type: 'chat_stream', text: 'Hello from model' });
     });
 
-    it('should map an agent stream event correctly', () => {
-      const protocolBufferEvent = create(WSEventSchema, {
-        payload: {
-          case: 'agentStream',
-          value: { agentId: 1, text: 'thinking' }
-        }
-      });
-      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
-      expect(domainEvent).toEqual({ type: 'agent_stream', agentId: 1, text: 'thinking' });
-    });
-
     it('should map a streamed graph event (File Delta) correctly using the strict payload', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'streamedGraphEvent',
           value: {
+            spaceId: 'golang',
+            chatId: 'chat-1',
+            projectionId: 'main',
             event: {
               id: 'event-1',
               timestamp: '2026-10-23T12:00:00Z',
-              branchId: 'feature-branch',
               edges: { amended_by: 'event-2' },
               tags: ['ui'],
               metadata: { custom_info: 'test' },
@@ -58,10 +49,11 @@ describe('LlmFacade', () => {
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'streamed_graph_event',
+        coordinate: { spaceId: 'golang', chatId: 'chat-1', projectionId: 'main' },
         event: {
           id: 'event-1',
           type: 'file_delta',
-          timestamp: expect.anything(), // Temporal.Instant mapped
+          timestamp: expect.anything(), 
           tags: ['ui'],
           content: 'test content',
           path: 'src/main.ts',
@@ -70,7 +62,6 @@ describe('LlmFacade', () => {
           parentId: 'model-1',
           tombstoned: false,
           metadata: { custom_info: 'test' },
-          branchId: 'feature-branch',
           edges: { amended_by: 'event-2' }
         }
       });
@@ -81,6 +72,9 @@ describe('LlmFacade', () => {
         payload: {
           case: 'streamedGraphEvent',
           value: {
+            spaceId: 'golang',
+            chatId: 'chat-1',
+            projectionId: 'main',
             event: {
               id: 'event-3',
               timestamp: '2026-10-23T12:00:00Z',
@@ -113,6 +107,7 @@ describe('LlmFacade', () => {
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'streamed_graph_event',
+        coordinate: { spaceId: 'golang', chatId: 'chat-1', projectionId: 'main' },
         event: {
           id: 'event-3',
           type: 'flow_execution',
@@ -137,7 +132,6 @@ describe('LlmFacade', () => {
           tombstoned: false,
           metadata: {},
           edges: {},
-          branchId: undefined
         }
       });
     });
@@ -147,6 +141,9 @@ describe('LlmFacade', () => {
         payload: {
           case: 'streamedGraphEvent',
           value: {
+            spaceId: 'golang',
+            chatId: 'chat-1',
+            projectionId: 'main',
             event: {
               id: 'event-2',
               timestamp: '2026-10-23T12:05:00Z',
@@ -165,16 +162,16 @@ describe('LlmFacade', () => {
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'streamed_graph_event',
+        coordinate: { spaceId: 'golang', chatId: 'chat-1', projectionId: 'main' },
         event: {
           id: 'event-2',
           type: 'model',
-          timestamp: expect.anything(), // Temporal.Instant mapped
+          timestamp: expect.anything(), 
           tags: [],
           content: 'Here is the response',
           tombstoned: false,
           metadata: {},
           edges: {},
-          branchId: undefined
         }
       });
     });
@@ -202,16 +199,18 @@ describe('LlmFacade', () => {
       });
     });
 
-    it('should map a sync history event correctly and filter broken payloads', () => {
+    it('should map a sync history event correctly and map the envelope coordinate', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'syncHistory',
           value: {
+            spaceId: 'golang',
+            chatId: 'chat-2',
+            projectionId: 'branch-x',
             recentEvents: [
               {
                 id: 'event-broken',
                 timestamp: '2026-10-23T12:05:00Z',
-                // Missing payload
               },
               {
                 id: 'event-valid',
@@ -232,12 +231,7 @@ describe('LlmFacade', () => {
               dormantLenses: ['database']
             },
             nextCursor: 'cursor-123',
-            hasMore: true,
-            activeBranch: 'main',
-            branches: {
-              'main': { parentBranch: '', forkPoint: '' },
-              'feature-1': { parentBranch: 'main', forkPoint: 'event-5' }
-            }
+            hasMore: true
           }
         }
       });
@@ -245,17 +239,17 @@ describe('LlmFacade', () => {
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'sync_history',
+        coordinate: { spaceId: 'golang', chatId: 'chat-2', projectionId: 'branch-x' },
         recentEvents: [
           {
             id: 'event-valid',
             type: 'prompt',
-            timestamp: expect.anything(), // Temporal.Instant mapped
+            timestamp: expect.anything(), 
             tags: [],
             content: 'Valid prompt',
             tombstoned: false,
             metadata: {},
             edges: {},
-            branchId: undefined
           }
         ],
         digests: {},
@@ -265,12 +259,28 @@ describe('LlmFacade', () => {
           dormantLenses: ['database']
         },
         nextCursor: 'cursor-123',
-        hasMore: true,
-        activeBranch: 'main',
-        branches: {
-          'main': { parentBranch: '', forkPoint: '' },
-          'feature-1': { parentBranch: 'main', forkPoint: 'event-5' }
+        hasMore: true
+      });
+    });
+
+    it('should map a sync subgraph event correctly and map the envelope coordinate', () => {
+      const protocolBufferEvent = create(WSEventSchema, {
+        payload: {
+          case: 'syncSubGraph',
+          value: {
+            spaceId: 'golang',
+            chatId: 'chat-3',
+            projectionId: 'flow-y',
+            events: []
+          }
         }
+      });
+
+      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
+      expect(domainEvent).toEqual({
+        type: 'sync_subgraph',
+        coordinate: { spaceId: 'golang', chatId: 'chat-3', projectionId: 'flow-y' },
+        events: []
       });
     });
 
@@ -359,7 +369,7 @@ describe('LlmFacade', () => {
         channel: 'agent-1',
         id: 'uuid-123',
         eventType: 'flow_status',
-        timestamp: expect.anything(), // Temporal.Instant mapped
+        timestamp: expect.anything(), 
         message: 'Compiling Go AST...',
         summary: 'Testing AST',
         payload: {
@@ -426,6 +436,17 @@ describe('LlmFacade', () => {
       if (protocolBufferEvent.payload.case === 'reviewDecision') {
         expect(protocolBufferEvent.payload.value.branch).toBe('candidate/123');
         expect(protocolBufferEvent.payload.value.accepted).toBe(true);
+      }
+    });
+
+    it('should create a valid LoadSubGraph WSEvent', () => {
+      const protocolBufferEvent = LlmFacade.createLoadSubGraph('golang', 'chat-1', 'flow-123');
+      
+      expect(protocolBufferEvent.payload.case).toBe('loadSubGraph');
+      if (protocolBufferEvent.payload.case === 'loadSubGraph') {
+        expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
+        expect(protocolBufferEvent.payload.value.chatId).toBe('chat-1');
+        expect(protocolBufferEvent.payload.value.graphId).toBe('flow-123');
       }
     });
 

@@ -2,6 +2,14 @@ package api
 
 import "github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 
+// ProjectionCoordinate is the strict 3-tier routing address required by
+// the frontend's async WebSocket cache. It maps directly to ProjectionKey.
+type ProjectionCoordinate struct {
+	SpaceID      string
+	ChatID       string
+	ProjectionID string
+}
+
 type SpaceState struct {
 	ID           string
 	Name         string

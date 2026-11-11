@@ -21,6 +21,19 @@ func NewFileLedger(maxEvents int, workspaceRoot string) *FileLedger {
 	return &FileLedger{MaxEventsPerShard: maxEvents, workspaceRoot: workspaceRoot}
 }
 
+// ResolveLogDirName maps logical subgraphs to physical directories.
+// Detachable flows multiplex into a single directory based on their root prefix.
+func ResolveLogDirName(subgraphName string) string {
+	if subgraphName == "" {
+		return "main"
+	}
+	if strings.HasPrefix(subgraphName, "flow-") {
+		parts := strings.Split(subgraphName, "/")
+		return parts[0]
+	}
+	return strings.ReplaceAll(subgraphName, "/", "_")
+}
+
 func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Event) error {
 	name := c.Name
 	if name == "" {
@@ -28,7 +41,9 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Even
 	}
 
 	ledgerDir := filepath.Join(l.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger")
-	manifest, err := LoadOrRebuildManifest(ledgerDir, name)
+	dirName := ResolveLogDirName(name)
+
+	manifest, err := LoadOrRebuildManifest(ledgerDir, dirName)
 	if err != nil {
 		return fmt.Errorf("loading manifest: %w", err)
 	}
@@ -40,7 +55,6 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Even
 		manifest.EventCount = 0
 	}
 
-	// Lock in the mathematical DAG identity
 	event.GraphID = c.GraphID
 
 	b, err := json.Marshal(event)
@@ -48,8 +62,7 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Even
 		return fmt.Errorf("marshaling event: %w", err)
 	}
 
-	// Route to the semantic directory
-	logsDir := filepath.Join(ledgerDir, "logs", name)
+	logsDir := filepath.Join(ledgerDir, "logs", dirName)
 	_ = os.MkdirAll(logsDir, 0755)
 
 	shardPath := filepath.Join(logsDir, manifest.ActiveShard)
@@ -65,7 +78,7 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Even
 
 	manifest.EventCount++
 	manifest.TotalEvents++
-	return manifest.Save(ledgerDir, name)
+	return manifest.Save(ledgerDir, dirName)
 }
 
 func (l *FileLedger) SaveDigest(ctx context.Context, c *ChatAddress, digest DigestMeta) error {

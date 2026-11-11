@@ -22,6 +22,8 @@ if (fs.existsSync(logsDir)) {
     for (const line of lines) {
       if (line.trim()) {
         const ev = JSON.parse(line);
+        // Stripped branchId from the mock node structure entirely
+        if (ev.branchId) delete ev.branchId; 
         if (!ev.tombstoned) graph.events.push(ev);
       }
     }
@@ -59,6 +61,12 @@ if (fs.existsSync(scenariosDir)) {
     const scenarioName = file.replace('.json', '');
     try {
       const scenarioData = JSON.parse(fs.readFileSync(path.join(scenariosDir, file), 'utf8'));
+      // Remove branchId from hardcoded scenario objects
+      for (const step of scenarioData) {
+        if (step.payload?.streamedGraphEvent?.event?.branchId) {
+          delete step.payload.streamedGraphEvent.event.branchId;
+        }
+      }
       graph.scenarios[scenarioName] = scenarioData;
     } catch (e) {
       console.error(`Error parsing scenario ${file}:`, e);
@@ -88,6 +96,9 @@ if (fs.existsSync(subgraphsDir)) {
     const graphId = file.replace('.json', '');
     try {
       const nodes = JSON.parse(fs.readFileSync(path.join(subgraphsDir, file), 'utf8'));
+      for (const node of nodes) {
+        if (node.branchId) delete node.branchId;
+      }
       graph.subgraphs[graphId] = nodes;
     } catch (e) {
       console.error(`Error parsing subgraph ${file}:`, e);

@@ -25,6 +25,8 @@ type ChatSession struct {
 	ChatID  string
 	Meta    workspace.ChatMeta
 
+	graphIDs map[string]thinkgraph.GraphID
+
 	logger           *slog.Logger
 	registry         *config.Registry
 	workspaceManager *workspace.ServiceManager
@@ -72,6 +74,7 @@ func NewChatSession(
 		SpaceID:          spaceID,
 		ChatID:           chatID,
 		Meta:             meta,
+		graphIDs:         make(map[string]thinkgraph.GraphID),
 		logger:           logger,
 		registry:         registry,
 		workspaceManager: workspaceManager,
@@ -131,39 +134,19 @@ func (s *ChatSession) flushMetaLocked() error {
 	})
 }
 
-func (s *ChatSession) buildTopology() map[string]thinkgraph.BranchTopology {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	topo := make(map[string]thinkgraph.BranchTopology)
-	for k, v := range s.Meta.Branches {
-		topo[k] = thinkgraph.BranchTopology{ParentBranch: v.ParentBranch, ForkPoint: v.ForkPoint}
-	}
-	return topo
-}
-
 func (s *ChatSession) getActiveAddress() *thinkgraph.ChatAddress {
-	s.mu.RLock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	activeBranch := s.Meta.ActiveBranch
-	branchMeta := s.Meta.Branches[activeBranch]
-	s.mu.RUnlock()
+	if activeBranch == "" {
+		activeBranch = "main"
+	}
 
-	gID, _ := thinkgraph.ParseGraphID(branchMeta.GraphID)
-
-	// Backfill legacy chats that didn't have a GraphID saved to disk
-	if gID.IsZero() {
+	gID, exists := s.graphIDs[activeBranch]
+	if !exists {
 		gID = thinkgraph.NewGraphID(thinkgraph.PrefixChat)
-
-		s.mu.Lock()
-		branchMeta.GraphID = gID.String()
-		s.Meta.Branches[activeBranch] = branchMeta
-		_ = s.flushMetaLocked()
-		s.mu.Unlock()
-
-		s.workspaceManager.UpdateChatMeta(s.SpaceID, s.ChatID, func(m *workspace.ChatMeta) {
-			bm := m.Branches[activeBranch]
-			bm.GraphID = gID.String()
-			m.Branches[activeBranch] = bm
-		})
+		s.graphIDs[activeBranch] = gID
 	}
 
 	return &thinkgraph.ChatAddress{
@@ -189,7 +172,7 @@ func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, 
 		s.logger.WarnContext(ctx, "failed resolving think state for graph data", "thinkState", activeThinkState)
 	}
 
-	_, graphData, err := s.bundleAssembler.Assemble(ctx, address, s.buildTopology(), digestionHorizon, activeThinkState, thinkState)
+	_, graphData, err := s.bundleAssembler.Assemble(ctx, address, digestionHorizon, activeThinkState, thinkState)
 	return graphData, err
 }
 
@@ -248,7 +231,7 @@ func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInt
 func (s *ChatSession) handleTransition(ctx context.Context, address *thinkgraph.ChatAddress, targetThinkState string, ui UserInterface, emitter telemetry.Emitter) error {
 	targetSpace, exists := s.registry.GetThinkState(targetThinkState)
 	if !exists {
-		ui.OnTextChunk(fmt.Sprintf("\n\n⚠️ **System Error:** Think state '%s' does not exist in registry. Transition aborted.\n", targetThinkState))
+		ui.OnTextChunk(workspace.NodeChunk{NodeID: uuid.UUID{}, Text: fmt.Sprintf("\n\n⚠️ **System Error:** Think state '%s' does not exist in registry. Transition aborted.\n", targetThinkState)})
 		return fmt.Errorf("invalid transition target: %s", targetThinkState)
 	}
 
@@ -287,8 +270,17 @@ func (s *ChatSession) handleTransition(ctx context.Context, address *thinkgraph.
 		})
 	}
 
-	if err := s.workspaceService.LogDigest(ctx, address, fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState), []string{"system"}, false, nil); err != nil {
-		s.logger.WarnContext(ctx, "failed logging transition digest", "error", err)
+	if err := s.workspaceService.AppendDigest(ctx, address, fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState), []string{"system"}, false, nil); err != nil {
+		s.logger.WarnContext(ctx, "failed appending transition digest", "error", err)
 	}
+
+	sysEv := thinkgraph.NewEvent(thinkgraph.EventSystem, fmt.Sprintf("Workspace transitioned to %s", targetThinkState))
+	if err := s.workspaceService.Dispatcher().AppendEvent(ctx, address, sysEv); err != nil {
+		s.logger.WarnContext(ctx, "failed appending transition system event", "error", err)
+	}
+	if ui != nil {
+		ui.StreamGraphEvent(thinkgraph.Node{Event: sysEv})
+	}
+
 	return nil
 }

@@ -9,7 +9,7 @@ export interface BaseChatItem {
   tags?: string[];
   metadata?: Record<string, string>;
   edges?: Record<string, string>;
-  branchId?: string;
+  tombstoned: boolean;
 }
 
 export interface MessageChatItem extends BaseChatItem {

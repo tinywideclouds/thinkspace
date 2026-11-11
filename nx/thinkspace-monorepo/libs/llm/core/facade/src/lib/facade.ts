@@ -11,7 +11,6 @@ import {
   AppEvent, 
   DelegationStrategy, 
   DigestMeta, 
-  BranchTopology, 
   GraphEvent 
 } from './domain-models';
 
@@ -39,7 +38,6 @@ export class LlmFacade {
       tombstoned: protoEvent.tombstoned,
       metadata: protoEvent.metadata || {},
       edges: protoEvent.edges || {},
-      branchId: protoEvent.branchId || undefined
     };
 
     switch (protoEvent.payload.case) {
@@ -104,11 +102,12 @@ export class LlmFacade {
 
     switch (protocolBufferEvent.payload.case) {
       case 'chatStream':
-        return { type: 'chat_stream', text: protocolBufferEvent.payload.value.text };
-      
-      case 'agentStream':
-        return { type: 'agent_stream', agentId: protocolBufferEvent.payload.value.agentId, text: protocolBufferEvent.payload.value.text };
-      
+        return { 
+          type: 'chat_stream', 
+          nodeId: protocolBufferEvent.payload.value.nodeId, 
+          text: protocolBufferEvent.payload.value.text 
+        };
+        
       case 'requestStrategy':
         return { type: 'request_strategy', active: protocolBufferEvent.payload.value.active };
       
@@ -144,11 +143,11 @@ export class LlmFacade {
           },
           nextCursor: protocolBufferEvent.payload.value.nextCursor,
           hasMore: protocolBufferEvent.payload.value.hasMore,
-          activeBranch: protocolBufferEvent.payload.value.activeBranch || 'main',
-          branches: Object.entries(protocolBufferEvent.payload.value.branches).reduce((accumulator, [key, topology]) => {
-            accumulator[key] = { parentBranch: topology.parentBranch, forkPoint: topology.forkPoint };
-            return accumulator;
-          }, {} as Record<string, BranchTopology>)
+          coordinate: {
+            spaceId: protocolBufferEvent.payload.value.spaceId,
+            chatId: protocolBufferEvent.payload.value.chatId,
+            projectionId: protocolBufferEvent.payload.value.projectionId
+          }
         };
       }
 
@@ -159,7 +158,12 @@ export class LlmFacade {
 
         return {
           type: 'sync_subgraph',
-          events: validEvents
+          events: validEvents,
+          coordinate: {
+            spaceId: protocolBufferEvent.payload.value.spaceId,
+            chatId: protocolBufferEvent.payload.value.chatId,
+            projectionId: protocolBufferEvent.payload.value.projectionId
+          }
         };
       }
 
@@ -216,7 +220,12 @@ export class LlmFacade {
 
         return {
           type: 'streamed_graph_event',
-          event: mappedDomainEvent
+          event: mappedDomainEvent,
+          coordinate: {
+            spaceId: protocolBufferEvent.payload.value.spaceId,
+            chatId: protocolBufferEvent.payload.value.chatId,
+            projectionId: protocolBufferEvent.payload.value.projectionId
+          }
         };
       }
       
@@ -226,6 +235,7 @@ export class LlmFacade {
     }
   }
 
+  // ... (Outbound builders remain unchanged)
   static createSubmitPrompt(text: string, spaceId: string, chatId: string): WSEvent {
     return create(WSEventSchema, {
       payload: { case: 'submitPrompt', value: { text, spaceId, chatId } }

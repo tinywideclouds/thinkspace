@@ -8,13 +8,9 @@ import {
 } from '@org/llm-state-chat';
 import { 
   ChatInputComponent, 
-  ChatStrategyPromptComponent, 
-  ChatReviewPromptComponent,
-  ChatTransitionPromptComponent,
   FlowTrackerComponent,
   FlowInspectorComponent,
-  ChatHeaderComponent,
-  ContextInspectorComponent
+  ChatHeaderComponent
 } from '@org/llm-ui-core';
 import { TimelineFacade, LinearFeedComponent } from '@org/llm-ui-timeline';
 import { CognitiveGraphComponent } from '@org/llm-ui-cognitive-graph';
@@ -28,13 +24,9 @@ import { FlowGraphComponent } from '@org/llm-ui-flow-graph';
   imports: [
     CommonModule,
     ChatInputComponent,
-    ChatStrategyPromptComponent,
-    ChatReviewPromptComponent,
-    ChatTransitionPromptComponent,
     FlowTrackerComponent,
     FlowInspectorComponent,
     ChatHeaderComponent,
-    ContextInspectorComponent,
     LinearFeedComponent,
     CognitiveGraphComponent,
     FocusHudComponent,

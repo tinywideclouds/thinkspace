@@ -7,12 +7,11 @@ export type GraphEventType = 'prompt' | 'model' | 'system' | 'file_delta' | 'flo
 
 export interface BaseGraphEvent {
   id: string;
-  timestamp: Temporal.Instant; // Mapped to native Temporal API
+  timestamp: Temporal.Instant;
   tags: string[];
   tombstoned: boolean;
   metadata: Record<string, string>;
   edges: Record<string, string>;
-  branchId?: string;
 }
 
 export interface MessageGraphEvent extends BaseGraphEvent {
@@ -54,6 +53,12 @@ export type GraphEvent =
   | FileDeltaGraphEvent 
   | FlowExecutionGraphEvent;
 
+export interface ProjectionCoordinate {
+  spaceId: string;
+  chatId: string;
+  projectionId: string;
+}
+
 export interface DigestMeta {
   id: string;
   summary: string;
@@ -87,19 +92,14 @@ export interface TelemetryEvent {
   channel: string;
   id: string;
   eventType: string;
-  timestamp: Temporal.Instant; // Mapped to native Temporal API
+  timestamp: Temporal.Instant; 
   message: string;
   summary: string;
   payload: Record<string, unknown>;
 }
 
-export interface BranchTopology {
-  parentBranch: string;
-  forkPoint: string;
-}
-
 export type AppEvent =
-  | { type: 'chat_stream'; text: string }
+  | { type: 'chat_stream'; nodeId: string; text: string }
   | { type: 'request_strategy'; active: boolean }
   | { type: 'request_review'; branch: string }
   | { type: 'request_transition'; targetThinkState: string; reasoning: string }
@@ -111,13 +111,11 @@ export type AppEvent =
       focus: AttentionFocus; 
       nextCursor: string; 
       hasMore: boolean;
-      activeBranch: string;
-      branches: Record<string, BranchTopology>;
+      coordinate: ProjectionCoordinate;
     }
-  | { type: 'sync_subgraph'; events: GraphEvent[] }
+  | { type: 'sync_subgraph'; events: GraphEvent[]; coordinate: ProjectionCoordinate }
   | { type: 'preview_context'; context: PreviewContext }
-  | { type: 'agent_stream'; agentId: number; text: string }
-  | { type: 'streamed_graph_event'; event: GraphEvent }
+  | { type: 'streamed_graph_event'; event: GraphEvent; coordinate: ProjectionCoordinate }
   | TelemetryEvent;
 
 export enum DelegationStrategy {

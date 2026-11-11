@@ -6,17 +6,10 @@ import (
 	"uuid"
 )
 
-// AgentToken wraps a text chunk with its source agent ID for UI multiplexing.
-type AgentToken struct {
-	AgentID int
-	Text    string
-}
-
-// BranchMeta tracks the topology of a specific timeline fork.
-type BranchMeta struct {
-	ParentBranch string `json:"parent_branch"`
-	ForkPoint    string `json:"fork_point"` // Event ID where divergence occurred
-	GraphID      string `json:"graph_id"`   // The mathematical DAG identity
+// NodeChunk wraps a text chunk with its target graph node ID for UI multiplexing.
+type NodeChunk struct {
+	NodeID uuid.UUID
+	Text   string
 }
 
 // ChatMeta separates the stable directory ID from the mutable display name.
@@ -24,16 +17,15 @@ type ChatMeta struct {
 	ID                     string    `json:"id"`
 	Name                   string    `json:"name"`
 	CreatedAt              time.Time `json:"created_at"`
-	ActiveThinkState       string    `json:"active_think_state"`       // e.g., "concept" or "golang"
-	InitializedThinkStates []string  `json:"initialized_think_states"` // e.g., ["concept", "golang"]
+	ActiveThinkState       string    `json:"active_think_state"`
+	InitializedThinkStates []string  `json:"initialized_think_states"`
 
 	// Topology Routing
-	ActiveBranch string                `json:"active_branch"`
-	Branches     map[string]BranchMeta `json:"branches"`
+	ActiveBranch string `json:"active_branch"`
 
 	// Memory Sliding Window State
-	DigestionHorizon  uuid.UUID `json:"digestion_horizon,omitempty"`  // Last event successfully digested
-	EvaluationHorizon uuid.UUID `json:"evaluation_horizon,omitempty"` // Last event evaluated by the background worker
+	DigestionHorizon  uuid.UUID `json:"digestion_horizon,omitempty"`
+	EvaluationHorizon uuid.UUID `json:"evaluation_horizon,omitempty"`
 }
 
 // AppConfig defines the server's global capabilities and supported domain environments.
@@ -43,7 +35,7 @@ type AppConfig struct {
 
 // SpaceState stores the persistent environmental configuration for a physical ThinkSpace.
 type SpaceState struct {
-	ThinkState string `json:"think_state"` // e.g., "concept" or "golang"
+	ThinkState string `json:"think_state"`
 }
 
 // ReviewPolicySettings controls the human-in-the-loop context review heuristic.

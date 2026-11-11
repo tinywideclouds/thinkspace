@@ -31,15 +31,19 @@ type ContextApprovalDecision struct {
 	RetainedHistoryIndices []int
 }
 
+// UserInterface is the pure contract required by the cognitive engines.
+// It is strictly isolated from network transports, Protobufs, and routing coordinates.
 type UserInterface interface {
 	tools.UI
 	ReviewContext(turnContext TurnContext) ContextApprovalDecision
 	ChooseNextStep() flows.FlowStrategy
 	ReviewCandidate(branch string) (accepted bool)
-	GetAgentTokenChannel() chan<- workspace.AgentToken
+
+	GetChunkChannel() chan<- workspace.NodeChunk
+
+	StreamGraphEvent(node thinkgraph.Node)
 }
 
-// ContextReviewPolicy determines if a human-in-the-loop context review is required.
 type ContextReviewPolicy interface {
 	ShouldReview(settings workspace.SpaceSettings, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus) bool
 }

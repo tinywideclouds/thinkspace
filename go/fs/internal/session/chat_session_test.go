@@ -14,7 +14,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// csMockChatEngine provides a safe no-op implementation of ChatVersioner for initialization tests.
 type csMockChatEngine struct{}
 
 func (e *csMockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
@@ -53,15 +52,12 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &csMockChatEngine{} }, graphDB, nil)
 
-	// Create the workspace directory structure
 	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
 
-	// Scaffold meta.json to bypass CreateChat REST endpoint dependency
 	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
 	_ = os.MkdirAll(chatDir, 0755)
-	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
+	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main"}`), 0644)
 
-	// Scaffold base space state so the ChatSession can inherit the default ThinkState on boot
 	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" })
 
 	registry := config.NewRegistry()
@@ -71,9 +67,9 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 		logger,
 		registry,
 		svcManager,
-		nil, // modelClient not required just for init
-		nil, // fanOutFlow
-		nil, // digestManager
+		nil,
+		nil,
+		nil,
 		spaceID,
 		chatID,
 	)
@@ -89,7 +85,6 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 		t.Errorf("Expected SpaceID %s, got %s", spaceID, chatSession.SpaceID)
 	}
 
-	// Verify that the ChatSession correctly pulled the fallback ActiveThinkState from the SpaceState
 	if chatSession.Meta.ActiveThinkState != "golang" {
 		t.Errorf("Expected initialized ActiveThinkState to be 'golang', got %s", chatSession.Meta.ActiveThinkState)
 	}
@@ -131,7 +126,7 @@ func TestChatSession_GetGraphData_MissingThinkState(t *testing.T) {
 
 	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
 	_ = os.MkdirAll(chatDir, 0755)
-	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main", "branches": {"main": {"parent_branch": "", "fork_point": ""}}}`), 0644)
+	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main"}`), 0644)
 
 	registry := config.NewRegistry()
 

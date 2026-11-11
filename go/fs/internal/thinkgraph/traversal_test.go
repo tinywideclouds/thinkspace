@@ -2,6 +2,7 @@ package thinkgraph_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -15,7 +16,6 @@ type mockGraphRepoForTraversal struct {
 }
 
 func (m *mockGraphRepoForTraversal) GetSubGraphTimelinePage(ctx context.Context, c *thinkgraph.ChatAddress, graphID thinkgraph.GraphID, cursor string, limit int) ([]thinkgraph.Node, string, bool, error) {
-	// The mock fakes GraphID resolution by just reading c.Name for simplicity of testing traversal logic
 	branchNodes, ok := m.nodesByBranch[c.Name]
 	if !ok {
 		return nil, "", false, nil
@@ -25,7 +25,7 @@ func (m *mockGraphRepoForTraversal) GetSubGraphTimelinePage(ctx context.Context,
 	if cursor != "" {
 		for i, n := range branchNodes {
 			if n.ID.String() == cursor {
-				startIdx = i
+				startIdx = i + 1 // Inclusive of cursor when hopping across branches
 				break
 			}
 		}
@@ -57,7 +57,7 @@ func (m *mockGraphRepoForTraversal) WalkSubGraphReverse(ctx context.Context, c *
 	if startCursor != "" {
 		for i, n := range branchNodes {
 			if n.ID.String() == startCursor {
-				startIdx = i - 1
+				startIdx = i // Inclusive of cursor when hopping across branches
 				break
 			}
 		}
@@ -74,7 +74,6 @@ func (m *mockGraphRepoForTraversal) WalkSubGraphReverse(ctx context.Context, c *
 func TestTraversalEngine_GetTimelinePage(t *testing.T) {
 	ctx := context.Background()
 
-	// Create a chain of events: Main -> Branch A -> Branch B
 	mainNodes := make([]thinkgraph.Node, 3)
 	for i := 0; i < 3; i++ {
 		ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("main-%d", i))
@@ -82,9 +81,19 @@ func TestTraversalEngine_GetTimelinePage(t *testing.T) {
 		mainNodes[i] = thinkgraph.Node{Event: ev}
 	}
 
-	branchANodes := make([]thinkgraph.Node, 2)
-	for i := 0; i < 2; i++ {
-		ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("branchA-%d", i))
+	branchANodes := make([]thinkgraph.Node, 3)
+
+	anchorEv := thinkgraph.NewEvent(thinkgraph.EventBranchAnchor, "Forked")
+	anchorEv.Timestamp = time.Now().Add(10 * time.Second)
+	anchorData := thinkgraph.BranchAnchor{
+		ParentBranch: "main",
+		ForkPoint:    mainNodes[2].ID,
+	}
+	anchorEv.Data, _ = json.Marshal(anchorData)
+	branchANodes[0] = thinkgraph.Node{Event: anchorEv}
+
+	for i := 1; i < 3; i++ {
+		ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("branchA-%d", i-1))
 		ev.Timestamp = time.Now().Add(time.Duration(i+10) * time.Second)
 		branchANodes[i] = thinkgraph.Node{Event: ev}
 	}
@@ -97,10 +106,6 @@ func TestTraversalEngine_GetTimelinePage(t *testing.T) {
 	}
 	engine := thinkgraph.NewTraversalEngine(repo)
 
-	topology := map[string]thinkgraph.BranchTopology{
-		"branchA": {ParentBranch: "main", ForkPoint: mainNodes[2].ID.String()},
-	}
-
 	chat := &thinkgraph.ChatAddress{
 		ChatID:    "test-chat",
 		ProjectID: "space",
@@ -109,17 +114,16 @@ func TestTraversalEngine_GetTimelinePage(t *testing.T) {
 		},
 	}
 
-	// Requesting 3 items should get the 2 from BranchA and hop back to grab the latest 1 from Main
-	page, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chat, "", 3, topology)
+	page, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chat, "", 4)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(page) != 3 {
-		t.Fatalf("expected 3 nodes, got %d", len(page))
+	if len(page) != 4 {
+		t.Fatalf("expected 4 nodes, got %d", len(page))
 	}
 
-	if page[2].Content != "branchA-1" || page[1].Content != "branchA-0" || page[0].Content != "main-2" {
+	if page[3].Content != "branchA-1" || page[2].Content != "branchA-0" || page[1].Type != thinkgraph.EventBranchAnchor || page[0].Content != "main-2" {
 		t.Errorf("Unexpected timeline stitching order across branches")
 	}
 
@@ -135,7 +139,18 @@ func TestTraversalEngine_GetFullTimeline(t *testing.T) {
 	ctx := context.Background()
 
 	mainNodes := []thinkgraph.Node{{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "main-start")}}
-	branchNodes := []thinkgraph.Node{{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "branch-1")}}
+
+	anchorEv := thinkgraph.NewEvent(thinkgraph.EventBranchAnchor, "Forked")
+	anchorData := thinkgraph.BranchAnchor{
+		ParentBranch: "main",
+		ForkPoint:    mainNodes[0].ID,
+	}
+	anchorEv.Data, _ = json.Marshal(anchorData)
+
+	branchNodes := []thinkgraph.Node{
+		{Event: anchorEv},
+		{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "branch-1")},
+	}
 
 	repo := &mockGraphRepoForTraversal{
 		nodesByBranch: map[string][]thinkgraph.Node{
@@ -145,25 +160,21 @@ func TestTraversalEngine_GetFullTimeline(t *testing.T) {
 	}
 	engine := thinkgraph.NewTraversalEngine(repo)
 
-	topology := map[string]thinkgraph.BranchTopology{
-		"branchA": {ParentBranch: "main", ForkPoint: mainNodes[0].ID.String()},
-	}
-
 	chat := &thinkgraph.ChatAddress{
 		ChatID:    "test-chat",
 		ProjectID: "space",
 		SubGraph:  thinkgraph.SubGraph{Name: "branchA"},
 	}
 
-	timeline, err := engine.GetFullTimeline(ctx, chat, topology)
+	timeline, err := engine.GetFullTimeline(ctx, chat)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(timeline) != 2 {
-		t.Fatalf("expected 2 total nodes stitched together, got %d", len(timeline))
+	if len(timeline) != 3 {
+		t.Fatalf("expected 3 total nodes stitched together, got %d", len(timeline))
 	}
-	if timeline[0].Content != "main-start" || timeline[1].Content != "branch-1" {
+	if timeline[0].Content != "main-start" || timeline[1].Type != thinkgraph.EventBranchAnchor || timeline[2].Content != "branch-1" {
 		t.Errorf("Timeline returned in wrong chronological order")
 	}
 }
