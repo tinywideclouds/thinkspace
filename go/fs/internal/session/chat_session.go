@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sync"
-	"time"
 
 	"uuid"
 
@@ -35,10 +33,10 @@ type ChatSession struct {
 	bundleAssembler  *BundleAssembler
 	digestManager    *DigestManager
 	reviewPolicy     ContextReviewPolicy
-	fanOutFlow       flows.Flow
 
-	chatEngine *ChatEngine
-	flowEngine *FlowEngine
+	chatEngine   *ChatEngine
+	workerEngine *WorkerEngine
+	systemEngine *SystemEngine
 }
 
 func NewChatSession(
@@ -82,7 +80,6 @@ func NewChatSession(
 		modelClient:      modelClient,
 		digestManager:    digestManager,
 		reviewPolicy:     NewTokenThresholdPolicy(),
-		fanOutFlow:       fanOutFlow,
 	}
 
 	address := session.getActiveAddress()
@@ -97,12 +94,13 @@ func NewChatSession(
 		registry,
 		workspaceService.WorkspaceRoot(),
 	)
+	session.bundleAssembler = assembler
 
 	turnExecutor := NewTurnExecutor(logger, modelClient, workspaceService, nil)
 
-	session.bundleAssembler = assembler
 	session.chatEngine = NewChatEngine(logger, session, registry, workspaceManager, workspaceService, assembler, digestManager, turnExecutor)
-	session.flowEngine = NewFlowEngine(logger, workspaceService, turnExecutor, workspaceService.Dispatcher())
+	session.workerEngine = NewWorkerEngine(logger, session, registry, workspaceService, turnExecutor, workspaceService.Dispatcher(), fanOutFlow)
+	session.systemEngine = NewSystemEngine(logger, session, registry, workspaceService)
 
 	return session, nil
 }
@@ -159,6 +157,26 @@ func (s *ChatSession) getActiveAddress() *thinkgraph.ChatAddress {
 	}
 }
 
+func (s *ChatSession) GetSystemAddress() *thinkgraph.ChatAddress {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	gID, exists := s.graphIDs[thinkgraph.SystemSubGraphName]
+	if !exists {
+		gID = thinkgraph.NewGraphID(thinkgraph.PrefixSystem)
+		s.graphIDs[thinkgraph.SystemSubGraphName] = gID
+	}
+
+	return &thinkgraph.ChatAddress{
+		ChatID:    s.ChatID,
+		ProjectID: s.SpaceID,
+		SubGraph: thinkgraph.SubGraph{
+			Name:    thinkgraph.SystemSubGraphName,
+			GraphID: gID,
+		},
+	}
+}
+
 func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, error) {
 	address := s.getActiveAddress()
 
@@ -172,115 +190,53 @@ func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, 
 		s.logger.WarnContext(ctx, "failed resolving think state for graph data", "thinkState", activeThinkState)
 	}
 
-	_, graphData, err := s.bundleAssembler.Assemble(ctx, address, digestionHorizon, activeThinkState, thinkState)
+	// For standard graph views, we just pass uuid.Nil to grab the latest state bounds without a specific anchor
+	_, graphData, err := s.bundleAssembler.Assemble(ctx, address, digestionHorizon, uuid.Nil(), activeThinkState, thinkState)
 	return graphData, err
 }
 
 func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInterface, emitter telemetry.Emitter) error {
 	address := s.getActiveAddress()
 
-	var currentSignal signals.EngineSignal = &signals.SignalStartChat{}
-	var err error
+	if err := s.workspaceService.AppendUserPrompt(ctx, address, promptText); err != nil {
+		s.logger.ErrorContext(ctx, "failed appending user prompt to ledger", "chat_id", s.ChatID, "error", err)
+		return fmt.Errorf("appending user prompt: %w", err)
+	}
+
+	traversalEngine := thinkgraph.NewTraversalEngine(s.workspaceManager.GraphRepository())
+	timeline, _, _, err := traversalEngine.GetTimelinePage(ctx, address, "", 1)
+
+	var catalystID uuid.UUID
+	if err == nil && len(timeline) > 0 {
+		ui.StreamGraphEvent(timeline[0])
+		catalystID = timeline[0].ID
+	} else {
+		return fmt.Errorf("failed to anchor catalyst prompt to graph: %w", err)
+	}
+
+	turnID := uuid.NewV7()
+	var currentSignal signals.EngineSignal = &signals.SignalExecuteChat{}
 
 	for !currentSignal.IsTerminal() {
-		switch sig := currentSignal.(type) {
+		var engine TurnEngine
 
-		case *signals.SignalStartChat:
-			currentSignal, err = s.chatEngine.Run(ctx, address, promptText, ui, emitter)
-			promptText = ""
-			if err != nil {
-				return err
-			}
-
+		switch currentSignal.(type) {
+		case *signals.SignalExecuteChat, *signals.SignalSynthesize:
+			engine = s.chatEngine
 		case *signals.SignalDispatchFlow:
-			s.mu.RLock()
-			activeThinkState := s.Meta.ActiveThinkState
-			s.mu.RUnlock()
-
-			thinkState, ok := s.registry.GetThinkState(activeThinkState)
-			if !ok {
-				return fmt.Errorf("think state not found: %s", activeThinkState)
-			}
-
-			currentSignal, err = s.flowEngine.Run(ctx, address, thinkState, s.fanOutFlow, sig.Tasks, sig.Summary, ui, emitter)
-			if err != nil {
-				return err
-			}
-
-		case *signals.SignalSynthesize:
-			currentSignal, err = s.chatEngine.RunSynthesis(ctx, address, sig, ui, emitter)
-			if err != nil {
-				return err
-			}
-
+			engine = s.workerEngine
 		case *signals.SignalTransition:
-			if rebootErr := s.handleTransition(ctx, address, sig.TargetThinkState, ui, emitter); rebootErr != nil {
-				return rebootErr
-			}
-			currentSignal = &signals.SignalStartChat{}
-
+			engine = s.systemEngine
 		default:
-			return fmt.Errorf("supervisor encountered unknown engine signal: %T", sig)
+			return fmt.Errorf("supervisor encountered unknown engine signal: %T", currentSignal)
+		}
+
+		currentSignal, err = engine.Execute(ctx, address, turnID, catalystID, currentSignal, ui, emitter)
+		if err != nil {
+			return err
 		}
 	}
 
 	_, err = s.workspaceService.Checkpoint(ctx, address, "End of session turn")
 	return err
-}
-
-func (s *ChatSession) handleTransition(ctx context.Context, address *thinkgraph.ChatAddress, targetThinkState string, ui UserInterface, emitter telemetry.Emitter) error {
-	targetSpace, exists := s.registry.GetThinkState(targetThinkState)
-	if !exists {
-		ui.OnTextChunk(workspace.NodeChunk{NodeID: uuid.UUID{}, Text: fmt.Sprintf("\n\n⚠️ **System Error:** Think state '%s' does not exist in registry. Transition aborted.\n", targetThinkState)})
-		return fmt.Errorf("invalid transition target: %s", targetThinkState)
-	}
-
-	chatDir := filepath.Join(s.workspaceService.WorkspaceRoot(), s.SpaceID, "chats", address.ChatID)
-
-	s.mu.Lock()
-	hasInitialized := false
-	for _, d := range s.Meta.InitializedThinkStates {
-		if d == targetThinkState {
-			hasInitialized = true
-			break
-		}
-	}
-
-	if !hasInitialized {
-		if initErr := targetSpace.Initialize(ctx, chatDir); initErr != nil {
-			s.mu.Unlock()
-			return fmt.Errorf("failed to initialize domain %s: %w", targetThinkState, initErr)
-		}
-		s.Meta.InitializedThinkStates = append(s.Meta.InitializedThinkStates, targetThinkState)
-	}
-
-	s.Meta.ActiveThinkState = targetThinkState
-	if err := s.flushMetaLocked(); err != nil {
-		s.logger.WarnContext(ctx, "failed to flush meta after domain transition", "error", err)
-	}
-	s.mu.Unlock()
-
-	if emitter != nil {
-		emitter.Emit("manager", telemetry.Event{
-			ID:        uuid.NewV7(),
-			Type:      "thinkstate_transition",
-			Timestamp: time.Now(),
-			Message:   fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState),
-			Payload:   map[string]any{"target_think_state": targetThinkState},
-		})
-	}
-
-	if err := s.workspaceService.AppendDigest(ctx, address, fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState), []string{"system"}, false, nil); err != nil {
-		s.logger.WarnContext(ctx, "failed appending transition digest", "error", err)
-	}
-
-	sysEv := thinkgraph.NewEvent(thinkgraph.EventSystem, fmt.Sprintf("Workspace transitioned to %s", targetThinkState))
-	if err := s.workspaceService.Dispatcher().AppendEvent(ctx, address, sysEv); err != nil {
-		s.logger.WarnContext(ctx, "failed appending transition system event", "error", err)
-	}
-	if ui != nil {
-		ui.StreamGraphEvent(thinkgraph.Node{Event: sysEv})
-	}
-
-	return nil
 }

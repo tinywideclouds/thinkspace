@@ -3,7 +3,7 @@
     "offsetMs": 200,
     "payload": {
       "streamedGraphEvent": {
-        "spaceId": "golang",
+        "spaceId": "project-alpha",
         "chatId": "chat-1",
         "projectionId": "main",
         "event": {
@@ -109,7 +109,7 @@
     "offsetMs": 5000,
     "payload": {
       "streamedGraphEvent": {
-        "spaceId": "golang",
+        "spaceId": "project-alpha",
         "chatId": "chat-1",
         "projectionId": "main",
         "event": {
@@ -154,7 +154,7 @@
     "offsetMs": 100,
     "payload": {
       "streamedGraphEvent": {
-        "spaceId": "golang",
+        "spaceId": "project-alpha",
         "chatId": "chat-1",
         "projectionId": "main",
         "event": {
@@ -175,7 +175,7 @@
     "offsetMs": 0,
     "payload": {
       "streamedGraphEvent": {
-        "spaceId": "golang",
+        "spaceId": "project-alpha",
         "chatId": "chat-1",
         "projectionId": "flow-succ-1",
         "event": {

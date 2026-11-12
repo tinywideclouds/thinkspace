@@ -45,6 +45,15 @@ describe('UserMessageBlockComponent', () => {
   it('should render the provided content', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.textContent).toContain('Hello World');
+    expect(compiled.textContent).not.toContain('Transitioned to:');
+  });
+
+  it('should render the transitioned_to metadata badge if present', () => {
+    componentRef.setInput('metadata', { transitioned_to: 'golang' });
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.textContent).toContain('⚡ Transitioned to: golang');
   });
 
   it('should not display edit actions when edit mode is false', () => {

@@ -166,7 +166,6 @@ func TestRehydrator_PrefixRouting(t *testing.T) {
 	spaceID := "golang"
 	chatID := "chat-prefix"
 
-	// Create multiplexed sub-agent flows physically mapping to "flow-123" directory
 	chatFlowAgent1 := &thinkgraph.ChatAddress{
 		ProjectID: spaceID,
 		ChatID:    chatID,
@@ -201,13 +200,13 @@ func TestRehydrator_PrefixRouting(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Initial FastForward Check for agent-1 multiplexed file
+	// Initial CheckSync for cold database with disk events expects SyncStatusMismatch
 	status, diskMan, _, err := rehydrator.CheckSync(ctx, chatFlowAgent1)
 	if err != nil {
 		t.Fatalf("unexpected CheckSync error: %v", err)
 	}
-	if status != thinkgraph.SyncStatusOK {
-		t.Errorf("Expected OK status on initial fast forward due to empty db handling, got %v", status)
+	if status != thinkgraph.SyncStatusMismatch {
+		t.Errorf("Expected Mismatch status on cold DB with disk events, got %v", status)
 	}
 	if diskMan.TotalEvents != 2 {
 		t.Errorf("Expected physical disk manifest to reflect 2 total multiplexed events, got %d", diskMan.TotalEvents)
@@ -218,8 +217,6 @@ func TestRehydrator_PrefixRouting(t *testing.T) {
 		t.Fatalf("unexpected Rebuild error: %v", err)
 	}
 
-	// Verify logical namespace separation in DB reading back specific subgraphs
-	// agent-1 should only have 1 timeline node returned logically, despite file having 2
 	t1, _ := graph.GetSubGraphTimeline(ctx, chatFlowAgent1, chatFlowAgent1.GraphID)
 	if len(t1) != 1 || t1[0].Content != "Task for agent 1" {
 		t.Errorf("Expected exactly 1 logically separated node for agent-1, got %d nodes", len(t1))

@@ -14,10 +14,10 @@ type SignalTerminal struct{}
 
 func (s *SignalTerminal) IsTerminal() bool { return true }
 
-// SignalStartChat is an internal routing signal to begin or resume the ChatEngine.
-type SignalStartChat struct{}
+// SignalExecuteChat is an internal routing signal to execute generation against the active anchored Catalyst.
+type SignalExecuteChat struct{}
 
-func (s *SignalStartChat) IsTerminal() bool { return false }
+func (s *SignalExecuteChat) IsTerminal() bool { return false }
 
 // SignalDispatchFlow indicates the ChatEngine wants to fan-out to sub-agents.
 type SignalDispatchFlow struct {

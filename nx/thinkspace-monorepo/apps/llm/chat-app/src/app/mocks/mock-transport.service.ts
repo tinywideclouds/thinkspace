@@ -101,10 +101,8 @@ export class MockTransportService {
     
     const actionCase = message.payload.case;
 
-    // Check if the scenario playback is currently blocked waiting for this exact action
     if (this.pendingActionResolver && actionCase === this.expectedAction) {
       this.pendingActionResolver(null);
-      // Return here to prevent triggering standard mock behavior while a scenario is orchestrating
       return; 
     }
 
@@ -155,7 +153,7 @@ export class MockTransportService {
               focus: payload.cursor ? undefined : mockGraph.focus as any,
               nextCursor,
               hasMore,
-              spaceId: 'golang',
+              spaceId: 'project-alpha',
               chatId: 'chat-1',
               projectionId: 'main'
             }
@@ -222,9 +220,9 @@ export class MockTransportService {
           } else {
             if (payloadRecord['streamedGraphEvent']) {
                const sge = payloadRecord['streamedGraphEvent'] as any;
-               sge.spaceId = 'golang';
-               sge.chatId = 'chat-1';
-               sge.projectionId = 'main';
+               sge.spaceId = sge.spaceId || 'project-alpha';
+               sge.chatId = sge.chatId || 'chat-1';
+               sge.projectionId = sge.projectionId || 'main';
             }
             this.logger.info('MockTransport', `[DEBUG] Parsing scenario payload: ${JSON.stringify(step.payload)}`);
             const parsedEvent = fromJson(WSEventSchema, step.payload);
@@ -261,7 +259,7 @@ export class MockTransportService {
         payload: {
           case: 'streamedGraphEvent',
           value: {
-            spaceId: 'golang',
+            spaceId: 'project-alpha',
             chatId: 'chat-1',
             projectionId: 'main',
             event: {
@@ -310,7 +308,7 @@ export class MockTransportService {
         payload: {
           case: 'streamedGraphEvent',
           value: {
-            spaceId: 'golang',
+            spaceId: 'project-alpha',
             chatId: 'chat-1',
             projectionId: 'main',
             event: {
@@ -356,7 +354,7 @@ export class MockTransportService {
         payload: {
           case: 'streamedGraphEvent',
           value: {
-            spaceId: 'golang',
+            spaceId: 'project-alpha',
             chatId: 'chat-1',
             projectionId: 'main',
             event: {

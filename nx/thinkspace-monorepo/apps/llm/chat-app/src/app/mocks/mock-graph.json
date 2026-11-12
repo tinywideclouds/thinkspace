@@ -61,7 +61,7 @@
         "offsetMs": 100,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -125,7 +125,7 @@
         "offsetMs": 200,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -146,7 +146,7 @@
         "offsetMs": 1200,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -199,7 +199,7 @@
         "offsetMs": 200,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -305,7 +305,7 @@
         "offsetMs": 5000,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -364,7 +364,7 @@
         "offsetMs": 200,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -470,7 +470,7 @@
         "offsetMs": 5000,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -528,7 +528,7 @@
         "offsetMs": 100,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -549,7 +549,7 @@
         "offsetMs": 0,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "flow-succ-1",
             "event": {
@@ -590,7 +590,7 @@
         "offsetMs": 100,
         "payload": {
           "syncHistory": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "recentEvents": [
@@ -738,7 +738,7 @@
         "offsetMs": 100,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -865,7 +865,7 @@
         "offsetMs": 50,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -886,7 +886,7 @@
         "offsetMs": 450,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -907,7 +907,7 @@
         "offsetMs": 500,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -951,7 +951,7 @@
         "offsetMs": 900,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "mock-subgraph-stream",
             "event": {
@@ -972,7 +972,7 @@
         "offsetMs": 1500,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "mock-subgraph-stream",
             "event": {
@@ -996,7 +996,7 @@
         "offsetMs": 500,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "mock-subgraph-stream",
             "event": {
@@ -1020,7 +1020,7 @@
         "offsetMs": 2000,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "mock-subgraph-stream",
             "event": {
@@ -1044,7 +1044,7 @@
         "offsetMs": 1500,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "mock-subgraph-stream",
             "event": {
@@ -1068,7 +1068,7 @@
         "offsetMs": 1000,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "mock-subgraph-stream",
             "event": {
@@ -1093,7 +1093,7 @@
         "offsetMs": 500,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -1138,7 +1138,7 @@
         "offsetMs": 100,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "mock-subgraph-stream",
             "event": {
@@ -1159,7 +1159,7 @@
         "offsetMs": 0,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -1190,7 +1190,7 @@
         "offsetMs": 100,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "intake",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -1211,7 +1211,7 @@
         "offsetMs": 100,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "intake",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {
@@ -1242,9 +1242,32 @@
         "offsetMs": 500,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
+            "event": {
+              "id": "mock-prompt-1",
+              "timestamp": "2026-10-23T12:05:59Z",
+              "tags": [],
+              "tombstoned": false,
+              "metadata": {
+                "transitioned_to": "golang"
+              },
+              "message": {
+                "type": "PROMPT",
+                "text": "Please build a Go HTTP server."
+              }
+            }
+          }
+        }
+      },
+      {
+        "offsetMs": 500,
+        "payload": {
+          "streamedGraphEvent": {
+            "spaceId": "project-alpha",
+            "chatId": "chat-1",
+            "projectionId": "system",
             "event": {
               "id": "mock-system-whisper-1",
               "timestamp": "2026-10-23T12:06:03Z",
@@ -1274,7 +1297,7 @@
         "offsetMs": 200,
         "payload": {
           "streamedGraphEvent": {
-            "spaceId": "golang",
+            "spaceId": "project-alpha",
             "chatId": "chat-1",
             "projectionId": "main",
             "event": {

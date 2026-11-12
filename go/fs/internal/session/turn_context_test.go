@@ -3,6 +3,8 @@ package session_test
 import (
 	"testing"
 
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
@@ -11,6 +13,7 @@ import (
 func TestProjectTurnContext(t *testing.T) {
 	spaceID := "space-1"
 	chatID := "chat-1"
+	responseID := uuid.NewV7()
 	focus := thinkgraph.AttentionFocus{
 		PrimaryFocus: []string{"backend"},
 	}
@@ -33,13 +36,16 @@ func TestProjectTurnContext(t *testing.T) {
 		},
 	}
 
-	turnContext := session.ProjectTurnContext(spaceID, chatID, bundle, focus)
+	turnContext := session.ProjectTurnContext(spaceID, chatID, responseID, bundle, focus)
 
 	if turnContext.SpaceID != spaceID {
 		t.Errorf("expected SpaceID %s, got %s", spaceID, turnContext.SpaceID)
 	}
 	if turnContext.ChatID != chatID {
 		t.Errorf("expected ChatID %s, got %s", chatID, turnContext.ChatID)
+	}
+	if turnContext.ResponseID != responseID {
+		t.Errorf("expected ResponseID %s, got %s", responseID, turnContext.ResponseID)
 	}
 	if turnContext.ManagerSystemPrompt != "System instructions" {
 		t.Errorf("expected ManagerSystemPrompt 'System instructions', got %s", turnContext.ManagerSystemPrompt)

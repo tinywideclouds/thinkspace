@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
@@ -13,6 +15,7 @@ import (
 func TestTokenThresholdPolicy_ShouldReview(t *testing.T) {
 	policy := session.NewTokenThresholdPolicy()
 	focus := thinkgraph.AttentionFocus{}
+	responseID := uuid.NewV7()
 
 	tests := []struct {
 		name     string
@@ -94,7 +97,7 @@ func TestTokenThresholdPolicy_ShouldReview(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := policy.ShouldReview(tt.settings, tt.bundle, focus)
+			result := policy.ShouldReview(tt.settings, responseID, tt.bundle, focus)
 			if result != tt.expected {
 				t.Errorf("expected ShouldReview to be %v, got %v", tt.expected, result)
 			}

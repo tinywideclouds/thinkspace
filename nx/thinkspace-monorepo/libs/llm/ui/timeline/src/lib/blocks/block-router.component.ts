@@ -92,7 +92,8 @@ import { ChatFlowCardComponent } from '@org/llm-ui-core';
             @if (!facade.isItemCollapsed(item)) {
               <llm-user-message-block 
                 [id]="item.id"
-                [content]="item.content">
+                [content]="item.content"
+                [metadata]="item.metadata || {}">
               </llm-user-message-block>
               <ng-content></ng-content>
             }

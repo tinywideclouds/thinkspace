@@ -36,7 +36,6 @@ func (a *ContextProjecter) extractContent(node Node) string {
 			if err := json.Unmarshal(node.Data, &m); err == nil && m.Content != "" {
 				return m.Content
 			}
-		// Safely ignore MaterializedState diffs. Just extract semantic summary.
 		case "flow_lifecycle":
 			return fmt.Sprintf("[System: A sub-agent flow is executing or completed. Result: %s]", node.Content)
 		case "candidate_resolution":
@@ -75,7 +74,6 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 	}
 
 	for _, node := range req.RecentEvents {
-		// Strict LLM context isolation: Omit internal system noise entirely
 		if node.Type == EventSystem {
 			continue
 		}
@@ -87,7 +85,6 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 
 		content := a.extractContent(node)
 
-		// If the node represents an empty placeholder (like an interrupted tool call shell), skip appending it
 		if strings.TrimSpace(content) == "" {
 			continue
 		}
@@ -99,7 +96,6 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 			}
 		}
 
-		// Role Collapsing: merge contiguous roles to prevent LLM API turn-taking violations
 		if len(trajectory.WorkingMemory) > 0 && trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Role == role {
 			trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Content += "\n\n" + content
 		} else {
@@ -125,7 +121,6 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 				}
 			}
 
-			// If Catalyst is the same role as the last item in memory, collapse it into WorkingMemory instead
 			if len(trajectory.WorkingMemory) > 0 && trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Role == role {
 				trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Content += "\n\n" + content
 			} else {
@@ -137,9 +132,6 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 		}
 	}
 
-	// Defensive Integrity Check: Ensure we don't send a trajectory ending on a model turn,
-	// which will crash the Gemini API. If the final working memory node is a model,
-	// it should only happen if the Catalyst was empty (e.g. recovering state).
 	if trajectory.Catalyst.Content == "" && len(trajectory.WorkingMemory) > 0 {
 		lastIdx := len(trajectory.WorkingMemory) - 1
 		if trajectory.WorkingMemory[lastIdx].Role == "model" {

@@ -1,6 +1,8 @@
 package session
 
 import (
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -13,12 +15,12 @@ func NewTokenThresholdPolicy() *TokenThresholdPolicy {
 	return &TokenThresholdPolicy{}
 }
 
-func (policy *TokenThresholdPolicy) ShouldReview(settings workspace.SpaceSettings, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus) bool {
+func (policy *TokenThresholdPolicy) ShouldReview(settings workspace.SpaceSettings, responseID uuid.UUID, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus) bool {
 	if !settings.ReviewPolicy.Active {
 		return false
 	}
 
-	turnContext := ProjectTurnContext("", "", bundle, focus)
+	turnContext := ProjectTurnContext("", "", responseID, bundle, focus)
 	estimatedTokens := policy.estimateTokens(turnContext, settings.ReviewPolicy.IncludePersona)
 
 	return estimatedTokens >= settings.ReviewPolicy.MinTokens

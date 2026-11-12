@@ -47,6 +47,7 @@ func (a *BundleAssembler) Assemble(
 	ctx context.Context,
 	chatObj *thinkgraph.ChatAddress,
 	digestionHorizon uuid.UUID,
+	catalystID uuid.UUID,
 	activeThinkState string,
 	thinkState spaces.ThinkState,
 ) (cognition.ThinkBundle, *thinkgraph.GraphData, error) {
@@ -92,6 +93,26 @@ func (a *BundleAssembler) Assemble(
 		DormantLenses:  []string{},
 	}
 
+	var catalystNode *thinkgraph.Node
+	if catalystID != uuid.Nil() {
+		nodes, err := a.graphRepo.GetNodes(ctx, chatObj, []string{catalystID.String()})
+		if err == nil && len(nodes) > 0 {
+			catalystNode = &nodes[0]
+		}
+	} else if len(volatileEvents) > 0 {
+		last := volatileEvents[len(volatileEvents)-1]
+		catalystNode = &last
+	}
+
+	// Filter catalyst out of working memory events to prevent duplication
+	var filteredTimeline []thinkgraph.Node
+	for _, ev := range volatileEvents {
+		if catalystNode == nil || ev.ID != catalystNode.ID {
+			filteredTimeline = append(filteredTimeline, ev)
+		}
+	}
+	volatileEvents = filteredTimeline
+
 	graphData := &thinkgraph.GraphData{
 		Timeline: volatileEvents,
 		Digests:  activeDigests,
@@ -111,13 +132,6 @@ func (a *BundleAssembler) Assemble(
 	stringMaps := make(map[string]string)
 	for k, v := range rawMapbook {
 		stringMaps[string(k)] = v
-	}
-
-	var catalystNode *thinkgraph.Node
-	if len(volatileEvents) > 0 {
-		last := volatileEvents[len(volatileEvents)-1]
-		catalystNode = &last
-		volatileEvents = volatileEvents[:len(volatileEvents)-1]
 	}
 
 	trajectoryRequest := thinkgraph.ContextRequest{

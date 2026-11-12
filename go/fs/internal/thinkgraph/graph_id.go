@@ -12,7 +12,10 @@ const (
 	PrefixChat    GraphPrefix = "c"
 	PrefixFlow    GraphPrefix = "f"
 	PrefixFeature GraphPrefix = "ft"
+	PrefixSystem  GraphPrefix = "s"
 )
+
+const SystemSubGraphName = "system"
 
 // GraphID strongly types our DAG identities while retaining native UUID v7 sorting and operations.
 type GraphID struct {
@@ -46,7 +49,7 @@ func ParseGraphID(s string) (GraphID, error) {
 	}, nil
 }
 
-// String implements the fmt.Stringer interface (e.g., "f:018e6b...").
+// String implements the fmt.Stringer interface (e.g., "s:018e6b...").
 func (g GraphID) String() string {
 	return fmt.Sprintf("%s:%s", g.Prefix, g.UUID.String())
 }

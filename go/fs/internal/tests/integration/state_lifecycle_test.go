@@ -7,10 +7,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/db"
@@ -171,6 +174,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 	}
 
 	var targetEvents []thinkgraph.Event
+	var integrationChatSession *session.ChatSession
 
 	t.Run("Act I: The Conversation", func(t *testing.T) {
 		if err := svc.AppendUserPrompt(ctx, chatAddress, "How do I build a server?"); err != nil {
@@ -273,9 +277,10 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		toolRegistry.Register(tools.NewProposeChangeTool())
 
 		turnExecutor := session.NewTurnExecutor(logger, toolLLM, svc, emitter)
-		flowEngine := session.NewFlowEngine(logger, svc, turnExecutor, svc.Dispatcher())
 
-		signal, err := turnExecutor.Execute(ctx, chatAddress, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui)
+		responseID := uuid.NewV7()
+		// Fixed: Execute matches (ctx, address, responseID, thinkState, bundle, registry, ui)
+		signal, err := turnExecutor.Execute(ctx, chatAddress, responseID, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui)
 		if err != nil {
 			t.Fatalf("TurnExecutor failed: %v", err)
 		}
@@ -285,9 +290,17 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 			t.Fatalf("Expected TurnExecutor to yield a SignalDispatchFlow, got %T", signal)
 		}
 
-		_, err = flowEngine.Run(ctx, chatAddress, mockSpace, &mockFlow{}, dispatchSig.Tasks, "Refactor the backend", ui, emitter)
+		digestManager := session.NewDigestManager(logger, toolLLM, session.DigestConfig{})
+		integrationChatSession, err = session.NewChatSession(ctx, logger, registry, svcManager, toolLLM, &mockFlow{}, digestManager, spaceID, chatID)
 		if err != nil {
-			t.Fatalf("FlowEngine failed: %v", err)
+			t.Fatalf("Failed to spin up ChatSession supervisor: %v", err)
+		}
+
+		workerEngine := session.NewWorkerEngine(logger, integrationChatSession, registry, svc, turnExecutor, svc.Dispatcher(), &mockFlow{})
+
+		_, err = workerEngine.Execute(ctx, chatAddress, responseID, uuid.NewV7(), dispatchSig, ui, emitter)
+		if err != nil {
+			t.Fatalf("WorkerEngine failed: %v", err)
 		}
 
 		timeline, err := graphDB.GetSubGraphTimeline(ctx, chatAddress, chatAddress.GraphID)
@@ -304,7 +317,54 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}
 
 		if !foundLifecycle {
-			t.Errorf("Expected EventFlowLifecycle to be appended to graph timeline after FlowEngine completed execution")
+			t.Errorf("Expected EventFlowLifecycle to be appended to graph timeline after WorkerEngine completed execution")
+		}
+	})
+
+	t.Run("Act V: System Transition & Turn Reboot", func(t *testing.T) {
+		registry.RegisterThinkState("concept", mockSpace)
+		registry.RegisterConfig("concept", mockSpace.Config())
+
+		systemEngine := session.NewSystemEngine(logger, integrationChatSession, registry, svc)
+
+		transitionSig := &signals.SignalTransition{
+			TargetThinkState: "concept",
+			Reasoning:        "Moving to ideation phase",
+		}
+
+		turnID := uuid.NewV7()
+		catalystID := uuid.NewV7()
+		nextSignal, err := systemEngine.Execute(ctx, chatAddress, turnID, catalystID, transitionSig, &mockUI{}, &mockEmitter{})
+		if err != nil {
+			t.Fatalf("SystemEngine failed: %v", err)
+		}
+
+		if _, ok := nextSignal.(*signals.SignalExecuteChat); !ok {
+			t.Fatalf("Expected SystemEngine to yield SignalExecuteChat to reboot the turn, got %T", nextSignal)
+		}
+
+		meta, err := svcManager.GetChatMeta(spaceID, chatID)
+		if err != nil {
+			t.Fatalf("Failed to fetch chat meta: %v", err)
+		}
+		if meta.ActiveThinkState != "concept" {
+			t.Errorf("Expected active think state to be explicitly mutated to 'concept', got '%s'", meta.ActiveThinkState)
+		}
+
+		sysAddr := integrationChatSession.GetSystemAddress()
+		sysTimeline, err := svc.Graph().GetSubGraphTimeline(ctx, sysAddr, sysAddr.GraphID)
+		if err != nil {
+			t.Fatalf("Failed to fetch system timeline: %v", err)
+		}
+		foundSystemEvent := false
+		for _, n := range sysTimeline {
+			if n.Type == thinkgraph.EventSystem && strings.Contains(n.Content, "Workspace transitioned to concept") {
+				foundSystemEvent = true
+				break
+			}
+		}
+		if !foundSystemEvent {
+			t.Errorf("Expected transition EventSystem node to be appended to 'system' subgraph timeline")
 		}
 	})
 }

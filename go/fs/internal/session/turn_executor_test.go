@@ -21,6 +21,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"uuid"
 )
 
 type teTestModelClient struct {
@@ -149,6 +150,7 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 	defer cancel()
 
 	executor, wsService, client := setupExecutorTest(t, "golang", "test-thread")
+	responseID := uuid.NewV7()
 
 	address := &thinkgraph.ChatAddress{
 		ChatID:    "test-thread",
@@ -167,7 +169,7 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 	registry := tools.NewRegistry()
 	ui := &teTestUI{}
 
-	signal, err := executor.Execute(ctx, address, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui)
+	signal, err := executor.Execute(ctx, address, responseID, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -213,6 +215,8 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	defer cancel()
 
 	executor, wsService, client := setupExecutorTest(t, "golang", "test-thread")
+	responseID := uuid.NewV7()
+
 	address := &thinkgraph.ChatAddress{
 		ChatID:    "test-thread",
 		ProjectID: "golang",
@@ -237,7 +241,7 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewTransitionThinkStateTool([]string{"concept"}))
 
-	signal, err := executor.Execute(ctx, address, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
+	signal, err := executor.Execute(ctx, address, responseID, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
 	if err != nil {
 		t.Fatalf("Expected nil error, got %v", err)
 	}
@@ -250,18 +254,11 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 		t.Errorf("Expected transition to concept, got %s", tr.TargetThinkState)
 	}
 
-	// Verify that the empty model shell node was written
+	// Structural invariant: Because no text tokens were produced prior to the tool call,
+	// zero empty EventModel shell nodes are persisted to storage.
 	timeline, _ := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
-	if len(timeline) == 0 {
-		t.Errorf("Expected graph timeline to have been appended")
-	} else {
-		lastNode := timeline[len(timeline)-1]
-		if lastNode.Type != thinkgraph.EventModel {
-			t.Errorf("Expected saved shell node to be EventModel, got %s", lastNode.Type)
-		}
-		if lastNode.Content != "" {
-			t.Errorf("Expected model node content to remain empty on tool route, got %s", lastNode.Content)
-		}
+	if len(timeline) != 0 {
+		t.Errorf("Expected zero persisted nodes in main timeline on direct tool intercept, got %d", len(timeline))
 	}
 }
 
@@ -270,6 +267,8 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 	defer cancel()
 
 	executor, _, client := setupExecutorTest(t, "golang", "test-thread")
+	responseID := uuid.NewV7()
+
 	address := &thinkgraph.ChatAddress{
 		ChatID:    "test-thread",
 		ProjectID: "golang",
@@ -297,7 +296,7 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 		},
 	}
 
-	signal, err := executor.Execute(ctx, address, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{})
+	signal, err := executor.Execute(ctx, address, responseID, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}

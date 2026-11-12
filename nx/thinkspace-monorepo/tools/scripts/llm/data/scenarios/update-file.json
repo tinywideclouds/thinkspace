@@ -3,7 +3,7 @@
     "offsetMs": 200,
     "payload": {
       "streamedGraphEvent": {
-        "spaceId": "golang",
+        "spaceId": "project-alpha",
         "chatId": "chat-1",
         "projectionId": "main",
         "event": {

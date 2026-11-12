@@ -3,7 +3,6 @@ package thinkgraph
 import (
 	"encoding/json"
 	"time"
-
 	"uuid"
 )
 
@@ -31,8 +30,9 @@ type MutationEvent struct {
 	TargetID  uuid.UUID
 	Type      MutationType
 	Timestamp time.Time
-	Payload   string          // Legacy content text updates
-	Data      json.RawMessage // Strongly typed data updates
+	Payload   string            // Legacy content text updates
+	Data      json.RawMessage   // Strongly typed data updates
+	Metadata  map[string]string // Key-value metadata updates
 }
 
 // AttentionFocus models the cognitive focus of the immediate conversational trajectory.

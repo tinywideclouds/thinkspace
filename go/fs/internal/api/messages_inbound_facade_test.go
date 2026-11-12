@@ -52,7 +52,7 @@ func TestUnmarshalInbound_SubmitPrompt(t *testing.T) {
 	payload := []byte(`{
 		"submitPrompt": {
 			"text": "build a server",
-			"spaceId": "golang",
+			"spaceId": "project-alpha",
 			"chatId": "chat-123"
 		}
 	}`)
@@ -151,7 +151,7 @@ func TestUnmarshalInbound_TransitionDecision(t *testing.T) {
 func TestUnmarshalInbound_LoadHistory(t *testing.T) {
 	payload := []byte(`{
 		"loadHistory": {
-			"spaceId": "golang",
+			"spaceId": "project-alpha",
 			"chatId": "chat-123",
 			"cursor": "some-uuid-v7",
 			"limit": 50
@@ -183,7 +183,7 @@ func TestUnmarshalInbound_LoadHistory(t *testing.T) {
 func TestUnmarshalInbound_LoadSubGraph(t *testing.T) {
 	payload := []byte(`{
 		"loadSubGraph": {
-			"spaceId": "golang",
+			"spaceId": "project-alpha",
 			"chatId": "chat-123",
 			"graphId": "flow-456"
 		}
@@ -211,7 +211,7 @@ func TestUnmarshalInbound_LoadSubGraph(t *testing.T) {
 func TestUnmarshalInbound_ForkChat(t *testing.T) {
 	payload := []byte(`{
 		"forkChat": {
-			"spaceId": "golang",
+			"spaceId": "project-alpha",
 			"chatId": "chat-123",
 			"targetEventId": "event-uuid"
 		}
@@ -236,7 +236,7 @@ func TestUnmarshalInbound_ForkChat(t *testing.T) {
 func TestUnmarshalInbound_InlineEdit(t *testing.T) {
 	payload := []byte(`{
 		"inlineEdit": {
-			"spaceId": "golang",
+			"spaceId": "project-alpha",
 			"chatId": "chat-123",
 			"targetEventId": "event-uuid",
 			"newText": "corrected text"
@@ -262,7 +262,7 @@ func TestUnmarshalInbound_InlineEdit(t *testing.T) {
 func TestUnmarshalInbound_SwitchBranch(t *testing.T) {
 	payload := []byte(`{
 		"switchBranch": {
-			"spaceId": "golang",
+			"spaceId": "project-alpha",
 			"chatId": "chat-123",
 			"targetBranch": "branch-b"
 		}

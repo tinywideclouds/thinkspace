@@ -168,6 +168,14 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddres
 					if len(mutation.Data) > 0 {
 						node.Data = mutation.Data
 					}
+					if len(mutation.Metadata) > 0 {
+						if node.Metadata == nil {
+							node.Metadata = make(map[string]string)
+						}
+						for k, v := range mutation.Metadata {
+							node.Metadata[k] = v
+						}
+					}
 				}
 
 				data, _ := json.Marshal(node)
@@ -247,7 +255,13 @@ func (g *BadgerGraph) ClearChatGraph(ctx context.Context, c *thinkgraph.ChatAddr
 
 func (g *BadgerGraph) GetSubGraphTimeline(ctx context.Context, c *thinkgraph.ChatAddress, graphID thinkgraph.GraphID) ([]thinkgraph.Node, error) {
 	var nodes []thinkgraph.Node
-	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.ProjectID, c.ChatID, graphID.String())
+
+	graphIDStr := graphID.String()
+	if graphID.IsZero() {
+		graphIDStr = "c:legacy"
+	}
+
+	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.ProjectID, c.ChatID, graphIDStr)
 
 	err := g.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
@@ -281,7 +295,12 @@ func (g *BadgerGraph) GetSubGraphTimelinePage(ctx context.Context, c *thinkgraph
 	var hasMore bool
 	var nextCursor string
 
-	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.ProjectID, c.ChatID, graphID.String())
+	graphIDStr := graphID.String()
+	if graphID.IsZero() {
+		graphIDStr = "c:legacy"
+	}
+
+	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.ProjectID, c.ChatID, graphIDStr)
 
 	err := g.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -300,7 +319,7 @@ func (g *BadgerGraph) GetSubGraphTimelinePage(ctx context.Context, c *thinkgraph
 			_ = item.Value(func(val []byte) error {
 				return json.Unmarshal(val, &node)
 			})
-			seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.ProjectID, c.ChatID, graphID.String(), node.Timestamp.UnixNano(), node.ID.String())
+			seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.ProjectID, c.ChatID, graphIDStr, node.Timestamp.UnixNano(), node.ID.String())
 		} else {
 			seekPrefix = append(prefix, 0xFF)
 		}
@@ -339,7 +358,11 @@ func (g *BadgerGraph) GetSubGraphTimelinePage(ctx context.Context, c *thinkgraph
 }
 
 func (g *BadgerGraph) WalkSubGraphReverse(ctx context.Context, c *thinkgraph.ChatAddress, graphID thinkgraph.GraphID, startCursor string, fn func(thinkgraph.Node) bool) error {
-	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.ProjectID, c.ChatID, graphID.String())
+	graphIDStr := graphID.String()
+	if graphID.IsZero() {
+		graphIDStr = "c:legacy"
+	}
+	prefix := fmt.Appendf(nil, "%s:%s:%s:%s:", nsTimeline, c.ProjectID, c.ChatID, graphIDStr)
 
 	return g.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -354,7 +377,7 @@ func (g *BadgerGraph) WalkSubGraphReverse(ctx context.Context, c *thinkgraph.Cha
 			if err == nil {
 				var node thinkgraph.Node
 				_ = item.Value(func(val []byte) error { return json.Unmarshal(val, &node) })
-				seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.ProjectID, c.ChatID, graphID.String(), node.Timestamp.UnixNano(), node.ID.String())
+				seekPrefix = fmt.Appendf(nil, "%s:%s:%s:%s:%019d:%s", nsTimeline, c.ProjectID, c.ChatID, graphIDStr, node.Timestamp.UnixNano(), node.ID.String())
 			} else {
 				seekPrefix = append(prefix, 0xFF)
 			}

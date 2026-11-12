@@ -10,7 +10,7 @@
     "offsetMs": 100,
     "payload": {
       "syncHistory": {
-        "spaceId": "golang",
+        "spaceId": "project-alpha",
         "chatId": "chat-1",
         "projectionId": "main",
         "recentEvents": [

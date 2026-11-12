@@ -2,12 +2,12 @@ import { Injectable, signal } from '@angular/core';
 
 @Injectable({ providedIn: 'root' })
 export class MockThinkspaceStateService {
-  public activeSpaceId = signal<string | null>('golang');
+  public activeSpaceId = signal<string | null>('project-alpha');
   public activeChatId = signal<string | null>('chat-1');
 
   public spaces = signal([
-    { id: 'golang', name: 'Go Developer (Mock)', isConfigured: true },
-    { id: 'angular', name: 'Angular Expert (Mock)', isConfigured: false }
+    { id: 'project-alpha', name: 'Alpha Project (Mock)', isConfigured: true },
+    { id: 'project-beta', name: 'Beta Project (Mock)', isConfigured: false }
   ]);
   
   public chats = signal([

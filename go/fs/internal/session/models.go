@@ -1,9 +1,15 @@
 package session
 
 import (
+	"context"
+
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
+	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -11,6 +17,7 @@ import (
 type TurnContext struct {
 	SpaceID             string
 	ChatID              string
+	ResponseID          uuid.UUID // Identifies the active turn across engine transitions
 	PreviewID           string
 	ManagerSystemPrompt string
 	StickyDigests       []string
@@ -32,7 +39,6 @@ type ContextApprovalDecision struct {
 }
 
 // UserInterface is the pure contract required by the cognitive engines.
-// It is strictly isolated from network transports, Protobufs, and routing coordinates.
 type UserInterface interface {
 	tools.UI
 	ReviewContext(turnContext TurnContext) ContextApprovalDecision
@@ -45,5 +51,10 @@ type UserInterface interface {
 }
 
 type ContextReviewPolicy interface {
-	ShouldReview(settings workspace.SpaceSettings, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus) bool
+	ShouldReview(settings workspace.SpaceSettings, responseID uuid.UUID, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus) bool
+}
+
+// TurnEngine represents a polymorphic execution block orchestrated by the ChatSession.
+type TurnEngine interface {
+	Execute(ctx context.Context, address *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, signal signals.EngineSignal, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error)
 }

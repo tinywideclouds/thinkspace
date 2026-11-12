@@ -43,12 +43,13 @@ func NewTurnExecutor(
 func (e *TurnExecutor) Execute(
 	ctx context.Context,
 	address *thinkgraph.ChatAddress,
+	responseID uuid.UUID,
 	thinkState spaces.ThinkState,
 	bundle cognition.ThinkBundle,
 	registry *tools.Registry,
 	ui tools.UI,
 ) (signals.EngineSignal, error) {
-	turnContext, cancel := context.WithTimeout(ctx, thinkState.Config().TurnTimeout())
+	timeoutCtx, cancel := context.WithTimeout(ctx, thinkState.Config().TurnTimeout())
 	defer cancel()
 
 	managerModel := thinkState.Config().Roles.Manager.Model
@@ -62,8 +63,8 @@ func (e *TurnExecutor) Execute(
 			Message:   "Analyzing context and formulating a plan...",
 		})
 
-		responseID := uuid.NewV7()
-
+		// Stream the empty model shell node to the UI to anchor the response bubble ephemerally.
+		// Note: We do NOT persist this empty shell to storage.
 		shellEvent := thinkgraph.NewEvent(thinkgraph.EventModel, "")
 		shellEvent.ID = responseID
 		if address != nil && !address.GraphID.IsZero() {
@@ -77,7 +78,7 @@ func (e *TurnExecutor) Execute(
 		}
 
 		stream := e.modelClient.GenerateContentStream(
-			turnContext,
+			timeoutCtx,
 			managerModel,
 			bundle,
 			registry,
@@ -106,6 +107,7 @@ func (e *TurnExecutor) Execute(
 
 		e.logger.DebugContext(ctx, "raw LLM generation complete", "output", fullModelResponse.String())
 
+		// Persist strictly when non-empty content was emitted
 		if fullModelResponse.Len() > 0 {
 			var usage *telemetry.TokenUsage
 			if finalUsage != nil {
@@ -116,7 +118,7 @@ func (e *TurnExecutor) Execute(
 				}
 			}
 
-			_ = e.workspaceService.AppendModelResponse(turnContext, address, responseID, fullModelResponse.String(), usage)
+			_ = e.workspaceService.AppendModelResponse(timeoutCtx, address, responseID, fullModelResponse.String(), usage)
 
 			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 				Role:    "model",
@@ -142,22 +144,6 @@ func (e *TurnExecutor) Execute(
 		call := interceptedTools[0]
 		e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name)
 
-		if fullModelResponse.Len() == 0 {
-			// Save the empty model node to persist the 'thinking' placeholder state
-			_ = e.workspaceService.AppendModelResponse(turnContext, address, responseID, "", nil)
-
-			if graph := e.workspaceService.Graph(); graph != nil {
-				timeline, _ := graph.GetNodes(ctx, address, []string{responseID.String()})
-				if len(timeline) > 0 {
-					if sessionUI, ok := ui.(UserInterface); ok {
-						sessionUI.StreamGraphEvent(timeline[0])
-					} else if castUI, ok := ui.(interface{ StreamGraphEvent(node thinkgraph.Node) }); ok {
-						castUI.StreamGraphEvent(timeline[0])
-					}
-				}
-			}
-		}
-
 		tool, exists := registry.Get(call.Name)
 		if !exists {
 			e.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
@@ -172,7 +158,7 @@ func (e *TurnExecutor) Execute(
 			RawArguments: call.Args,
 		}
 
-		signal, err := tool.Execute(turnContext, ec)
+		signal, err := tool.Execute(timeoutCtx, ec)
 		if err != nil {
 			return nil, err
 		}

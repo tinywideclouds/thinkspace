@@ -52,7 +52,6 @@ func NewChatEngine(
 	}
 }
 
-// inlineDigestCommitter connects the generic tool interface to the specialized session DigestManager without creating an import cycle.
 type inlineDigestCommitter struct {
 	dm           *DigestManager
 	ws           *workspace.Service
@@ -64,22 +63,19 @@ func (c *inlineDigestCommitter) CommitDigest(ctx context.Context, address *think
 	return c.dm.CreateManualDigest(ctx, c.ws, address, topicName, tags, instruction, contextData, c.workerModel, c.workerPrompt)
 }
 
-func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, promptText string, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
-	e.turnExecutor.emitter = emitter
-
-	if promptText != "" {
-		e.logger.InfoContext(ctx, "processing user prompt", "chat_id", e.session.ChatID, "prompt", promptText)
-		if err := e.workspaceService.AppendUserPrompt(ctx, address, promptText); err != nil {
-			e.logger.ErrorContext(ctx, "failed appending user prompt to ledger", "chat_id", e.session.ChatID, "error", err)
-			return nil, fmt.Errorf("appending user prompt: %w", err)
-		}
-
-		traversalEngine := thinkgraph.NewTraversalEngine(e.workspaceManager.GraphRepository())
-		timeline, _, _, err := traversalEngine.GetTimelinePage(ctx, address, "", 1)
-		if err == nil && len(timeline) > 0 {
-			ui.StreamGraphEvent(timeline[0])
-		}
+func (e *ChatEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, signal signals.EngineSignal, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
+	switch s := signal.(type) {
+	case *signals.SignalExecuteChat:
+		return e.runStandard(ctx, address, turnID, catalystID, ui, emitter)
+	case *signals.SignalSynthesize:
+		return e.runSynthesis(ctx, address, turnID, catalystID, s, ui, emitter)
+	default:
+		return nil, fmt.Errorf("ChatEngine received unexpected signal type: %T", signal)
 	}
+}
+
+func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
+	e.turnExecutor.emitter = emitter
 
 	emitter.Emit("manager", telemetry.Event{
 		ID:        uuid.NewV7(),
@@ -100,7 +96,7 @@ func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, p
 	}
 
 	e.logger.InfoContext(ctx, "assembling context bundle", "think_state", activeThinkState, "branch", activeBranch)
-	bundle, graphData, err := e.bundleAssembler.Assemble(ctx, address, digestionHorizon, activeThinkState, thinkState)
+	bundle, graphData, err := e.bundleAssembler.Assemble(ctx, address, digestionHorizon, catalystID, activeThinkState, thinkState)
 	if err != nil {
 		e.logger.ErrorContext(ctx, "failed assembling bundle", "error", err)
 		return nil, fmt.Errorf("assembling bundle: %w", err)
@@ -118,8 +114,8 @@ func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, p
 		policy = NewTokenThresholdPolicy()
 	}
 
-	shouldReview := policy.ShouldReview(settings, &bundle, graphData.Focus)
-	if !e.contextReview(ctx, shouldReview, &bundle, graphData, ui) {
+	shouldReview := policy.ShouldReview(settings, turnID, &bundle, graphData.Focus)
+	if !e.contextReview(ctx, shouldReview, turnID, &bundle, graphData, ui) {
 		return &signals.SignalTerminal{}, nil
 	}
 
@@ -149,7 +145,7 @@ func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, p
 		registry.Register(tools.NewCreateDigestTool(committer))
 	}
 
-	signal, err := e.turnExecutor.Execute(ctx, address, thinkState, bundle, registry, ui)
+	signal, err := e.turnExecutor.Execute(ctx, address, turnID, thinkState, bundle, registry, ui)
 	if err == nil {
 		e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
 	}
@@ -157,7 +153,7 @@ func (e *ChatEngine) Run(ctx context.Context, address *thinkgraph.ChatAddress, p
 	return signal, err
 }
 
-func (e *ChatEngine) RunSynthesis(ctx context.Context, address *thinkgraph.ChatAddress, signal *signals.SignalSynthesize, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
+func (e *ChatEngine) runSynthesis(ctx context.Context, address *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, signal *signals.SignalSynthesize, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
 	e.turnExecutor.emitter = emitter
 
 	e.session.mu.RLock()
@@ -223,7 +219,6 @@ func (e *ChatEngine) RunSynthesis(ctx context.Context, address *thinkgraph.ChatA
 		Workbench: []cognition.WorkbenchItem{},
 	}
 
-	// 1. Spawn a dedicated Sandbox to apply the synthesized result
 	synthCandidateID := fmt.Sprintf("%s-synthesis-%s", address.ChatID, uuid.NewV7().String()[:8])
 	sandbox, err := e.workspaceService.SpawnSandbox(ctx, address.ChatID, synthCandidateID)
 	if err != nil {
@@ -231,17 +226,15 @@ func (e *ChatEngine) RunSynthesis(ctx context.Context, address *thinkgraph.ChatA
 	}
 	defer sandbox.TearDown(ctx)
 
-	// 2. Multiplex the stream so we can intercept the text output
 	mux := &streamMultiplexer{ui: ui}
 
-	_, err = e.turnExecutor.Execute(ctx, synthAddress, thinkState, bundle, tools.NewRegistry(), mux)
+	_, err = e.turnExecutor.Execute(ctx, synthAddress, turnID, thinkState, bundle, tools.NewRegistry(), mux)
 	if err != nil {
 		return nil, fmt.Errorf("synthesis execution failed: %w", err)
 	}
 
 	lastPayload := mux.buffer.String()
 
-	// 3. Apply Patch and Verify
 	if patcher := thinkState.Patcher(); patcher != nil {
 		if applyErr := patcher.Apply(ctx, sandbox, lastPayload); applyErr != nil {
 			e.logger.WarnContext(ctx, "failed to apply synthesis patch", "error", applyErr)
@@ -259,7 +252,6 @@ func (e *ChatEngine) RunSynthesis(ctx context.Context, address *thinkgraph.ChatA
 		}
 	}
 
-	// 4. Deliver and Request Manual Review
 	if err := sandbox.DeliverForReview(ctx); err != nil {
 		return nil, fmt.Errorf("failed to deliver synthesis sandbox for review: %w", err)
 	}
@@ -289,12 +281,12 @@ func (e *ChatEngine) RunSynthesis(ctx context.Context, address *thinkgraph.ChatA
 	return &signals.SignalTerminal{}, err
 }
 
-func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
+func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, responseID uuid.UUID, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
 	if !shouldReview {
 		return true
 	}
 
-	turnContext := ProjectTurnContext(e.session.SpaceID, e.session.ChatID, bundle, graphData.Focus)
+	turnContext := ProjectTurnContext(e.session.SpaceID, e.session.ChatID, responseID, bundle, graphData.Focus)
 	decision := ui.ReviewContext(turnContext)
 	if !decision.Approved {
 		return false
@@ -454,4 +446,20 @@ func (e *ChatEngine) executeBackgroundDigestion(
 		_ = e.session.flushMetaLocked()
 		e.session.mu.Unlock()
 	}
+}
+
+type streamMultiplexer struct {
+	buffer strings.Builder
+	ui     tools.UI
+}
+
+func (m *streamMultiplexer) OnTextChunk(chunk workspace.NodeChunk) {
+	m.buffer.WriteString(chunk.Text)
+	if m.ui != nil {
+		m.ui.OnTextChunk(chunk)
+	}
+}
+
+func (m *streamMultiplexer) ConfirmTransition(req signals.SignalTransition) bool {
+	return false
 }

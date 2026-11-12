@@ -264,27 +264,50 @@ func TestChatEngine_Run_Transition(t *testing.T) {
 		t.Errorf("Expected chat to transition to 'concept', got '%s'", meta.ActiveThinkState)
 	}
 
-	// Verify the dual-written EventSystem node is saved to the graph
-	address := &thinkgraph.ChatAddress{
-		ChatID:    chatID,
-		ProjectID: spaceID,
-		SubGraph: thinkgraph.SubGraph{
-			Name:    "main",
-			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat), // Approximate for test
-		},
+	// 1. Verify main timeline has no EventSystem nodes
+	chatData, err := chatSession.GetGraphData(ctx)
+	if err != nil {
+		t.Fatalf("Failed to fetch graph data: %v", err)
 	}
 
-	chatData, _ := workspaceService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
-	foundSystemEvent := false
-	for _, n := range chatData {
-		if n.Type == thinkgraph.EventSystem && strings.Contains(n.Content, "Workspace transitioned") {
-			foundSystemEvent = true
-			break
+	for _, n := range chatData.Timeline {
+		if n.Type == thinkgraph.EventSystem {
+			t.Errorf("Forbidden EventSystem node found in main timeline: %s", n.Content)
 		}
 	}
 
-	if !foundSystemEvent {
-		t.Errorf("Expected EventSystem node logging the transition to be appended to the graph")
+	// 2. Verify prompt node was mutated with transition metadata
+	var promptNode *thinkgraph.Node
+	for _, n := range chatData.Timeline {
+		if n.Type == thinkgraph.EventPrompt {
+			promptNode = &n
+			break
+		}
+	}
+	if promptNode == nil {
+		t.Fatalf("Expected prompt node in main timeline")
+	}
+	if promptNode.Metadata["transitioned_to"] != "concept" {
+		t.Errorf("Expected prompt metadata to have transitioned_to='concept', got %v", promptNode.Metadata)
+	}
+
+	// 3. Verify transition event was logged to dedicated 'system' subgraph via GetSystemAddress
+	sysAddr := chatSession.GetSystemAddress()
+	sysTimeline, _ := workspaceService.Graph().GetSubGraphTimeline(ctx, sysAddr, sysAddr.GraphID)
+	foundSysEvent := false
+	for _, n := range sysTimeline {
+		if n.Type == thinkgraph.EventSystem && strings.Contains(n.Content, "Workspace transitioned to concept") {
+			foundSysEvent = true
+			break
+		}
+	}
+	if !foundSysEvent {
+		t.Errorf("Expected EventSystem node in 'system' subgraph")
+	}
+
+	// 4. Verify Catalyst remained the original prompt across the transition reboot
+	if client.lastRequest.Trajectory.Catalyst.Content != "Let's plan" {
+		t.Errorf("Expected Catalyst to be 'Let's plan', got '%s'", client.lastRequest.Trajectory.Catalyst.Content)
 	}
 }
 
@@ -292,24 +315,34 @@ func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-context"
 	turnManager, chatSession, svcManager, workspaceService, client, spaceID, _ := setupEngineTest(t, chatID)
+	_ = turnManager
 
 	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
 		s.ReviewPolicy.MinTokens = 1
 	})
 
+	ui := &ceTestUI{reviewApproved: true}
+	emitter := &ceTestEmitter{}
+
+	client.responses = []llm.StreamChunk{{Text: "Initialized"}}
+	_ = chatSession.RunTurn(ctx, "initialize", ui, emitter)
+
 	chatData, err := chatSession.GetGraphData(ctx)
 	if err != nil {
-		t.Fatalf("Failed to get initial graph data: %v", err)
+		t.Fatalf("Failed to get initialized graph data: %v", err)
 	}
-	_ = chatData
-	_ = turnManager
+	if len(chatData.Timeline) == 0 {
+		t.Fatalf("Expected timeline to be initialized with at least one event")
+	}
+	activeGraphID := chatData.Timeline[0].GraphID
 
 	address := &thinkgraph.ChatAddress{
 		ChatID:    chatID,
 		ProjectID: spaceID,
 		SubGraph: thinkgraph.SubGraph{
-			Name: "main",
+			Name:    "main",
+			GraphID: activeGraphID,
 		},
 	}
 
@@ -326,13 +359,12 @@ func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 			Content:   "Setup the database",
 			Timestamp: time.Now().Add(-1 * time.Minute),
 			Tags:      []string{"database"},
+			GraphID:   activeGraphID,
 		},
 	}
 	_ = svcManager.GraphRepository().AppendNode(ctx, address, priorNode)
 
 	client.responses = []llm.StreamChunk{{Text: "Ok"}}
-	ui := &ceTestUI{reviewApproved: true}
-	emitter := &ceTestEmitter{}
 
 	_ = chatSession.RunTurn(ctx, "Build database", ui, emitter)
 
