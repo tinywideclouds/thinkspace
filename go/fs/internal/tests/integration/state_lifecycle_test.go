@@ -106,12 +106,12 @@ func (m *mockThinkState) EnrichBundle(ctx context.Context, bundle *cognition.Thi
 
 type mockUI struct{}
 
-func (ui *mockUI) OnTextChunk(chunk workspace.NodeChunk) {}
-func (ui *mockUI) StreamGraphEvent(node thinkgraph.Node) {}
+func (ui *mockUI) OnTextChunk(chunk workspace.NodeChunk)                                  {}
+func (ui *mockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {}
 func (ui *mockUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: true}
 }
-func (ui *mockUI) ChooseNextStep() flows.FlowStrategy                  { return flows.StrategyManual }
+func (ui *mockUI) ChooseNextStep() flows.FlowStrategy                  { return flows.StrategyRefine }
 func (ui *mockUI) ReviewCandidate(branch string) bool                  { return true }
 func (ui *mockUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
 func (ui *mockUI) GetChunkChannel() chan<- workspace.NodeChunk         { return nil }
@@ -119,13 +119,24 @@ func (ui *mockUI) GetChunkChannel() chan<- workspace.NodeChunk         { return 
 type mockFlow struct{ step int }
 
 func (f *mockFlow) Name() string  { return "MockFlow" }
-func (f *mockFlow) MaxSteps() int { return 2 }
+func (f *mockFlow) MaxSteps() int { return 5 }
 func (f *mockFlow) Next(state flows.FlowState) flows.FlowDirective {
 	if f.step == 0 {
 		f.step++
 		return flows.FlowDirective{
 			Action: flows.ActionSpawnAgents,
 			Tasks:  []flows.SubAgentTask{{AgentID: "1", Instruction: "mock"}},
+		}
+	}
+	if f.step == 1 {
+		f.step++
+		return flows.FlowDirective{Action: flows.ActionRequestStrategy}
+	}
+	if f.step == 2 {
+		f.step++
+		return flows.FlowDirective{
+			Action: flows.ActionSynthesize,
+			Tasks:  []flows.SubAgentTask{{Instruction: "synthesize logic"}},
 		}
 	}
 	return flows.FlowDirective{Action: flows.ActionFinish}
@@ -181,7 +192,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 			t.Fatalf("LogUserPrompt failed: %v", err)
 		}
 		time.Sleep(1 * time.Millisecond)
-		if err := svc.AppendModelResponse(ctx, chatAddress, thinkgraph.NewGraphID(thinkgraph.PrefixChat).UUID, "Use net/http.", nil); err != nil {
+		if err := svc.AppendModelResponse(ctx, chatAddress, uuid.NewV7(), "Use net/http.", nil, uuid.Nil()); err != nil {
 			t.Fatalf("LogModelResponse failed: %v", err)
 		}
 
@@ -254,7 +265,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("Act IV: Tool Delegation & Flow Resolution", func(t *testing.T) {
+	t.Run("Act IV: Tool Delegation & Synthesize Flow Resolution", func(t *testing.T) {
 		toolLLM := &mockDeterministicLLM{
 			Responses: []llm.StreamChunk{
 				{
@@ -268,6 +279,9 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 						},
 					}},
 				},
+				{
+					Text: "Golden Synthesis Candidate",
+				},
 			},
 		}
 
@@ -279,8 +293,8 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		turnExecutor := session.NewTurnExecutor(logger, toolLLM, svc, emitter)
 
 		responseID := uuid.NewV7()
-		// Fixed: Execute matches (ctx, address, responseID, thinkState, bundle, registry, ui)
-		signal, err := turnExecutor.Execute(ctx, chatAddress, responseID, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui)
+
+		signal, err := turnExecutor.Execute(ctx, chatAddress, responseID, uuid.Nil(), false, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui)
 		if err != nil {
 			t.Fatalf("TurnExecutor failed: %v", err)
 		}
@@ -297,27 +311,50 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}
 
 		workerEngine := session.NewWorkerEngine(logger, integrationChatSession, registry, svc, turnExecutor, svc.Dispatcher(), &mockFlow{})
+		synthEngine := session.NewSynthesizeEngine(logger, registry, svc, turnExecutor, integrationChatSession)
 
-		_, err = workerEngine.Execute(ctx, chatAddress, responseID, uuid.NewV7(), dispatchSig, ui, emitter)
+		// 1. WorkerEngine executes the flow and yields Synthesize
+		workerSig, err := workerEngine.Execute(ctx, chatAddress, responseID, uuid.NewV7(), dispatchSig, ui, emitter)
 		if err != nil {
 			t.Fatalf("WorkerEngine failed: %v", err)
 		}
 
-		timeline, err := graphDB.GetSubGraphTimeline(ctx, chatAddress, chatAddress.GraphID)
-		if err != nil {
-			t.Fatalf("GetSubGraphTimeline failed: %v", err)
+		synthSig, ok := workerSig.(*signals.SignalSynthesize)
+		if !ok {
+			t.Fatalf("Expected WorkerEngine to yield a SignalSynthesize, got %T", workerSig)
 		}
 
-		foundLifecycle := false
-		for _, n := range timeline {
-			if n.Event.Type == flows.EventFlowLifecycle {
-				foundLifecycle = true
-				break
+		// 2. SynthesizeEngine concludes the turn
+		finalSig, err := synthEngine.Execute(ctx, chatAddress, responseID, uuid.NewV7(), synthSig, ui, emitter)
+		if err != nil {
+			t.Fatalf("SynthesizeEngine failed: %v", err)
+		}
+
+		if !finalSig.IsTerminal() {
+			t.Fatalf("Expected SynthesizeEngine to yield a Terminal signal")
+		}
+
+		// 3. Graph Integrity Validation
+		flowAddr := synthSig.FlowAddress
+		_ = svc.SyncGraphContext(context.Background(), flowAddr)
+		flowTimeline, _ := svc.Graph().GetSubGraphTimeline(ctx, flowAddr, flowAddr.GraphID)
+
+		hasSynthPrompt := false
+		hasSynthRes := false
+		for _, n := range flowTimeline {
+			if n.Type == thinkgraph.EventPrompt && n.Edges["parent_id"] == synthSig.ParentNodeID.String() {
+				hasSynthPrompt = true
+			}
+			if n.Type == workspace.EventCandidateResolution && strings.Contains(n.Content, "ACCEPTED") {
+				hasSynthRes = true
 			}
 		}
 
-		if !foundLifecycle {
-			t.Errorf("Expected EventFlowLifecycle to be appended to graph timeline after WorkerEngine completed execution")
+		if !hasSynthPrompt {
+			t.Errorf("Expected synthesis prompt node linked to ParentNodeID %s across boundary", synthSig.ParentNodeID.String())
+		}
+		if !hasSynthRes {
+			t.Errorf("Expected candidate resolution ACCEPTED node at the tail of the flow subgraph")
 		}
 	})
 

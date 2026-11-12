@@ -330,10 +330,12 @@ func (api *ManagementAPI) handleTombstoneEvent(w http.ResponseWriter, r *http.Re
 	svc := api.manager.GetService(spaceID)
 	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
-	mut := thinkgraph.MutationEvent{
-		TargetID:  targetID,
-		Type:      thinkgraph.MutationTombstone,
-		Timestamp: time.Now().UTC(),
+	mut := thinkgraph.TombstoneMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  targetID,
+			Type:      thinkgraph.MutationTombstone,
+			Timestamp: time.Now().UTC(),
+		},
 	}
 
 	if err := svc.SaveMutation(r.Context(), chat, mut); err != nil {
@@ -358,10 +360,12 @@ func (api *ManagementAPI) handleRestoreEvent(w http.ResponseWriter, r *http.Requ
 	svc := api.manager.GetService(spaceID)
 	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
-	mut := thinkgraph.MutationEvent{
-		TargetID:  targetID,
-		Type:      thinkgraph.MutationRestore,
-		Timestamp: time.Now().UTC(),
+	mut := thinkgraph.RestoreMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  targetID,
+			Type:      thinkgraph.MutationRestore,
+			Timestamp: time.Now().UTC(),
+		},
 	}
 
 	if err := svc.SaveMutation(r.Context(), chat, mut); err != nil {
@@ -394,11 +398,13 @@ func (api *ManagementAPI) handleUpdateEvent(w http.ResponseWriter, r *http.Reque
 	svc := api.manager.GetService(spaceID)
 	chat := &thinkgraph.ChatAddress{ChatID: chatID, ProjectID: spaceID}
 
-	mut := thinkgraph.MutationEvent{
-		TargetID:  targetID,
-		Type:      thinkgraph.MutationUpdate,
-		Timestamp: time.Now().UTC(),
-		Payload:   payload.Content,
+	mut := thinkgraph.ContentMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  targetID,
+			Type:      thinkgraph.MutationContent,
+			Timestamp: time.Now().UTC(),
+		},
+		Content: payload.Content,
 	}
 
 	if err := svc.SaveMutation(r.Context(), chat, mut); err != nil {

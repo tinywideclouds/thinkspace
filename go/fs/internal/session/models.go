@@ -47,7 +47,7 @@ type UserInterface interface {
 
 	GetChunkChannel() chan<- workspace.NodeChunk
 
-	StreamGraphEvent(node thinkgraph.Node)
+	StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
 }
 
 type ContextReviewPolicy interface {

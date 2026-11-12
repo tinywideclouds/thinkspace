@@ -102,7 +102,7 @@ type teTestUI struct {
 func (ui *teTestUI) OnTextChunk(chunk workspace.NodeChunk) {
 	ui.chunks = append(ui.chunks, chunk)
 }
-func (ui *teTestUI) StreamGraphEvent(node thinkgraph.Node) {
+func (ui *teTestUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {
 	ui.streamedNodes = append(ui.streamedNodes, node)
 }
 func (ui *teTestUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
@@ -151,6 +151,7 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 
 	executor, wsService, client := setupExecutorTest(t, "golang", "test-thread")
 	responseID := uuid.NewV7()
+	parentID := uuid.NewV7()
 
 	address := &thinkgraph.ChatAddress{
 		ChatID:    "test-thread",
@@ -169,7 +170,7 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 	registry := tools.NewRegistry()
 	ui := &teTestUI{}
 
-	signal, err := executor.Execute(ctx, address, responseID, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui)
+	signal, err := executor.Execute(ctx, address, responseID, parentID, true, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -186,6 +187,9 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 	if shellNode.Content != "" {
 		t.Errorf("Expected first streamed node to be an empty shell, got content: %s", shellNode.Content)
 	}
+	if shellNode.Edges["parent_id"] != parentID.String() {
+		t.Errorf("Expected shell node to carry parent_id edge %s, got %v", parentID.String(), shellNode.Edges)
+	}
 
 	finalNode := ui.streamedNodes[1]
 	if finalNode.ID != shellNode.ID {
@@ -193,6 +197,9 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 	}
 	if finalNode.Content != "Hello world" {
 		t.Errorf("Expected final node to contain complete content, got %s", finalNode.Content)
+	}
+	if finalNode.Edges["parent_id"] != parentID.String() {
+		t.Errorf("Expected final node to carry parent_id edge %s, got %v", parentID.String(), finalNode.Edges)
 	}
 
 	if len(ui.chunks) != 2 {
@@ -241,7 +248,7 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewTransitionThinkStateTool([]string{"concept"}))
 
-	signal, err := executor.Execute(ctx, address, responseID, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
+	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), false, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
 	if err != nil {
 		t.Fatalf("Expected nil error, got %v", err)
 	}
@@ -254,8 +261,6 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 		t.Errorf("Expected transition to concept, got %s", tr.TargetThinkState)
 	}
 
-	// Structural invariant: Because no text tokens were produced prior to the tool call,
-	// zero empty EventModel shell nodes are persisted to storage.
 	timeline, _ := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
 	if len(timeline) != 0 {
 		t.Errorf("Expected zero persisted nodes in main timeline on direct tool intercept, got %d", len(timeline))
@@ -296,7 +301,7 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 		},
 	}
 
-	signal, err := executor.Execute(ctx, address, responseID, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{})
+	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), false, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}

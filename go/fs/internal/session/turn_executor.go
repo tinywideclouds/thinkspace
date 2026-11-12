@@ -44,6 +44,8 @@ func (e *TurnExecutor) Execute(
 	ctx context.Context,
 	address *thinkgraph.ChatAddress,
 	responseID uuid.UUID,
+	parentID uuid.UUID,
+	anticipateResponse bool,
 	thinkState spaces.ThinkState,
 	bundle cognition.ThinkBundle,
 	registry *tools.Registry,
@@ -63,18 +65,23 @@ func (e *TurnExecutor) Execute(
 			Message:   "Analyzing context and formulating a plan...",
 		})
 
-		// Stream the empty model shell node to the UI to anchor the response bubble ephemerally.
-		// Note: We do NOT persist this empty shell to storage.
-		shellEvent := thinkgraph.NewEvent(thinkgraph.EventModel, "")
-		shellEvent.ID = responseID
-		if address != nil && !address.GraphID.IsZero() {
-			shellEvent.GraphID = address.GraphID
-		}
+		if anticipateResponse {
+			shellEvent := thinkgraph.NewEvent(thinkgraph.EventModel, "")
+			shellEvent.ID = responseID
+			if address != nil && !address.GraphID.IsZero() {
+				shellEvent.GraphID = address.GraphID
+			}
+			if parentID != uuid.Nil() {
+				shellEvent.Edges = map[string]string{"parent_id": parentID.String()}
+			}
 
-		if sessionUI, ok := ui.(UserInterface); ok {
-			sessionUI.StreamGraphEvent(thinkgraph.Node{Event: shellEvent})
-		} else if castUI, ok := ui.(interface{ StreamGraphEvent(node thinkgraph.Node) }); ok {
-			castUI.StreamGraphEvent(thinkgraph.Node{Event: shellEvent})
+			if sessionUI, ok := ui.(UserInterface); ok {
+				sessionUI.StreamGraphEvent(address, thinkgraph.Node{Event: shellEvent})
+			} else if castUI, ok := ui.(interface {
+				StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
+			}); ok {
+				castUI.StreamGraphEvent(address, thinkgraph.Node{Event: shellEvent})
+			}
 		}
 
 		stream := e.modelClient.GenerateContentStream(
@@ -107,7 +114,6 @@ func (e *TurnExecutor) Execute(
 
 		e.logger.DebugContext(ctx, "raw LLM generation complete", "output", fullModelResponse.String())
 
-		// Persist strictly when non-empty content was emitted
 		if fullModelResponse.Len() > 0 {
 			var usage *telemetry.TokenUsage
 			if finalUsage != nil {
@@ -118,7 +124,7 @@ func (e *TurnExecutor) Execute(
 				}
 			}
 
-			_ = e.workspaceService.AppendModelResponse(timeoutCtx, address, responseID, fullModelResponse.String(), usage)
+			_ = e.workspaceService.AppendModelResponse(timeoutCtx, address, responseID, fullModelResponse.String(), usage, parentID)
 
 			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 				Role:    "model",
@@ -129,9 +135,11 @@ func (e *TurnExecutor) Execute(
 				timeline, _ := graph.GetNodes(ctx, address, []string{responseID.String()})
 				if len(timeline) > 0 {
 					if sessionUI, ok := ui.(UserInterface); ok {
-						sessionUI.StreamGraphEvent(timeline[0])
-					} else if castUI, ok := ui.(interface{ StreamGraphEvent(node thinkgraph.Node) }); ok {
-						castUI.StreamGraphEvent(timeline[0])
+						sessionUI.StreamGraphEvent(address, timeline[0])
+					} else if castUI, ok := ui.(interface {
+						StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
+					}); ok {
+						castUI.StreamGraphEvent(address, timeline[0])
 					}
 				}
 			}
@@ -141,31 +149,53 @@ func (e *TurnExecutor) Execute(
 			break
 		}
 
-		call := interceptedTools[0]
-		e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name)
+		var yieldedSignal signals.EngineSignal
+		var mergedDispatch *signals.SignalDispatchFlow
 
-		tool, exists := registry.Get(call.Name)
-		if !exists {
-			e.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
-			break
+		// Iterate over all tools instead of blindly dropping index 1+
+		for _, call := range interceptedTools {
+			e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name)
+
+			tool, exists := registry.Get(call.Name)
+			if !exists {
+				e.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
+				continue
+			}
+
+			ec := tools.ExecutionContext{
+				Address:      address,
+				Bundle:       &bundle,
+				UI:           ui,
+				Emitter:      e.emitter,
+				RawArguments: call.Args,
+			}
+
+			signal, err := tool.Execute(timeoutCtx, ec)
+			if err != nil {
+				return nil, err
+			}
+
+			if signal != nil {
+				e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", signal))
+				if dispatchSig, ok := signal.(*signals.SignalDispatchFlow); ok {
+					if mergedDispatch == nil {
+						mergedDispatch = &signals.SignalDispatchFlow{
+							Summary: dispatchSig.Summary,
+						}
+					}
+					for _, task := range dispatchSig.Tasks {
+						task.AgentID = fmt.Sprintf("agent-%d", len(mergedDispatch.Tasks)+1)
+						mergedDispatch.Tasks = append(mergedDispatch.Tasks, task)
+					}
+					yieldedSignal = mergedDispatch
+				} else if yieldedSignal == nil {
+					yieldedSignal = signal
+				}
+			}
 		}
 
-		ec := tools.ExecutionContext{
-			Address:      address,
-			Bundle:       &bundle,
-			UI:           ui,
-			Emitter:      e.emitter,
-			RawArguments: call.Args,
-		}
-
-		signal, err := tool.Execute(timeoutCtx, ec)
-		if err != nil {
-			return nil, err
-		}
-
-		if signal != nil {
-			e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", signal))
-			return signal, nil
+		if yieldedSignal != nil {
+			return yieldedSignal, nil
 		}
 	}
 

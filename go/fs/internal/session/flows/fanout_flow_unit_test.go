@@ -8,7 +8,7 @@ import (
 
 func TestFanOutFlow_StateTransitions(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	flow := NewFanOutFlow(logger, FanOutConfig{})
+	flow := NewFanOutFlow(logger, FanOutConfig{RefinePrompt: "Synthesize this"})
 
 	t.Run("Initial State -> Spawn Agents", func(t *testing.T) {
 		state := FlowState{
@@ -84,20 +84,19 @@ func TestFanOutFlow_StateTransitions(t *testing.T) {
 		}
 	})
 
-	t.Run("User Accepted Branch -> Commit", func(t *testing.T) {
+	t.Run("User Chose Refine Strategy -> Synthesize", func(t *testing.T) {
 		state := FlowState{
 			Candidates: []BranchResult{
 				{CandidateID: "cand-1", Passed: true},
 			},
-			UserStrategy: StrategyManual,
-			TargetBranch: "candidate/cand-1",
+			UserStrategy: StrategyRefine,
 		}
 		directive := flow.Next(state)
-		if directive.Action != ActionCommit {
-			t.Errorf("Expected ActionCommit, got %s", directive.Action)
+		if directive.Action != ActionSynthesize {
+			t.Errorf("Expected ActionSynthesize, got %s", directive.Action)
 		}
-		if directive.TargetBranch != "candidate/cand-1" {
-			t.Errorf("Expected target branch candidate/cand-1, got %s", directive.TargetBranch)
+		if len(directive.Tasks) != 1 || directive.Tasks[0].Instruction != "Synthesize this" {
+			t.Errorf("Expected RefinePrompt in task instruction")
 		}
 	})
 }

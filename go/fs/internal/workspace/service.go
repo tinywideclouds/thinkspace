@@ -227,9 +227,16 @@ func (s *Service) AppendUserPrompt(ctx context.Context, c *thinkgraph.ChatAddres
 	return s.dispatcher.AppendEvent(ctx, c, event)
 }
 
-func (s *Service) AppendModelResponse(ctx context.Context, c *thinkgraph.ChatAddress, eventID uuid.UUID, content string, usage *telemetry.TokenUsage) error {
+func (s *Service) AppendModelResponse(ctx context.Context, c *thinkgraph.ChatAddress, eventID uuid.UUID, content string, usage *telemetry.TokenUsage, parentID uuid.UUID) error {
 	event := thinkgraph.NewEvent(thinkgraph.EventModel, content)
 	event.ID = eventID
+
+	if parentID != uuid.Nil() {
+		if event.Edges == nil {
+			event.Edges = make(map[string]string)
+		}
+		event.Edges["parent_id"] = parentID.String()
+	}
 
 	if usage != nil && usage.TotalTokens > 0 {
 		event.Metadata = map[string]string{
@@ -349,7 +356,7 @@ func (s *Service) AppendDigest(ctx context.Context, c *thinkgraph.ChatAddress, s
 	})
 }
 
-func (s *Service) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddress, mut thinkgraph.MutationEvent) error {
+func (s *Service) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddress, mut thinkgraph.Mutator) error {
 	if s.dispatcher == nil {
 		return fmt.Errorf("dispatcher is not initialized")
 	}

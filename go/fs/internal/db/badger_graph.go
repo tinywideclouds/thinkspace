@@ -143,11 +143,11 @@ func (g *BadgerGraph) SaveSpaceContext(ctx context.Context, c *thinkgraph.ChatAd
 	})
 }
 
-func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddress, mutation thinkgraph.MutationEvent) error {
-	slog.InfoContext(ctx, "BadgerDB applying mutation", "type", mutation.Type, "target_id", mutation.TargetID.String())
+func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddress, mutation thinkgraph.Mutator) error {
+	slog.InfoContext(ctx, "BadgerDB applying mutation", "type", mutation.EventType(), "target_id", mutation.Target().String())
 
 	return g.db.Update(func(txn *badger.Txn) error {
-		evKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.ProjectID, c.ChatID, mutation.TargetID.String())
+		evKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsEvent, c.ProjectID, c.ChatID, mutation.Target().String())
 		if item, err := txn.Get(evKey); err == nil {
 			return item.Value(func(val []byte) error {
 				var node thinkgraph.Node
@@ -155,26 +155,21 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddres
 					return nil
 				}
 
-				if mutation.Type == thinkgraph.MutationTombstone {
+				switch m := mutation.(type) {
+				case thinkgraph.TombstoneMutation:
 					node.Tombstoned = true
-				}
-				if mutation.Type == thinkgraph.MutationRestore {
+				case thinkgraph.RestoreMutation:
 					node.Tombstoned = false
-				}
-				if mutation.Type == thinkgraph.MutationUpdate {
-					if mutation.Payload != "" {
-						node.Content = mutation.Payload
+				case thinkgraph.ContentMutation:
+					node.Content = m.Content
+				case thinkgraph.StateMutation:
+					node.MaterializedState = m.State
+				case thinkgraph.MetadataMutation:
+					if node.Metadata == nil {
+						node.Metadata = make(map[string]string)
 					}
-					if len(mutation.Data) > 0 {
-						node.Data = mutation.Data
-					}
-					if len(mutation.Metadata) > 0 {
-						if node.Metadata == nil {
-							node.Metadata = make(map[string]string)
-						}
-						for k, v := range mutation.Metadata {
-							node.Metadata[k] = v
-						}
+					for k, v := range m.Metadata {
+						node.Metadata[k] = v
 					}
 				}
 
@@ -183,7 +178,7 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddres
 			})
 		}
 
-		dKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsDigest, c.ProjectID, c.ChatID, mutation.TargetID.String())
+		dKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsDigest, c.ProjectID, c.ChatID, mutation.Target().String())
 		if item, err := txn.Get(dKey); err == nil {
 			return item.Value(func(val []byte) error {
 				var d thinkgraph.DigestMeta
@@ -191,14 +186,13 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddres
 					return nil
 				}
 
-				if mutation.Type == thinkgraph.MutationTombstone {
+				switch m := mutation.(type) {
+				case thinkgraph.TombstoneMutation:
 					d.Tombstoned = true
-				}
-				if mutation.Type == thinkgraph.MutationRestore {
+				case thinkgraph.RestoreMutation:
 					d.Tombstoned = false
-				}
-				if mutation.Type == thinkgraph.MutationUpdate && mutation.Payload != "" {
-					d.Summary = mutation.Payload
+				case thinkgraph.ContentMutation:
+					d.Summary = m.Content
 				}
 
 				data, _ := json.Marshal(d)
@@ -206,7 +200,7 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddres
 			})
 		}
 
-		scKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsSpaceContext, c.ProjectID, c.ChatID, mutation.TargetID.String())
+		scKey := fmt.Appendf(nil, "%s:%s:%s:%s", nsSpaceContext, c.ProjectID, c.ChatID, mutation.Target().String())
 		if item, err := txn.Get(scKey); err == nil {
 			return item.Value(func(val []byte) error {
 				var sc thinkgraph.SpaceContext
@@ -214,14 +208,13 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddres
 					return nil
 				}
 
-				if mutation.Type == thinkgraph.MutationTombstone {
+				switch m := mutation.(type) {
+				case thinkgraph.TombstoneMutation:
 					sc.Tombstoned = true
-				}
-				if mutation.Type == thinkgraph.MutationRestore {
+				case thinkgraph.RestoreMutation:
 					sc.Tombstoned = false
-				}
-				if mutation.Type == thinkgraph.MutationUpdate && mutation.Payload != "" {
-					sc.Content = mutation.Payload
+				case thinkgraph.ContentMutation:
+					sc.Content = m.Content
 				}
 
 				data, _ := json.Marshal(sc)
@@ -229,7 +222,7 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddres
 			})
 		}
 
-		return fmt.Errorf("target node %s not found in read graph for mutation", mutation.TargetID)
+		return fmt.Errorf("target node %s not found in read graph for mutation", mutation.Target())
 	})
 }
 

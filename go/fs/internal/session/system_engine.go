@@ -85,7 +85,6 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 		})
 	}
 
-	// 1. Dual-write transition event strictly into the dedicated administrative subgraph.
 	sysAddress := e.session.GetSystemAddress()
 
 	sysEv := thinkgraph.NewEvent(thinkgraph.EventSystem, fmt.Sprintf("Workspace transitioned to %s", targetThinkState))
@@ -93,24 +92,24 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 		e.logger.WarnContext(ctx, "failed appending transition system event", "error", err)
 	}
 
-	// 2. Attach inline transition badge metadata to the active prompt on main timeline
 	if graph := e.workspaceService.Graph(); graph != nil && catalystID != uuid.Nil() {
-		mut := thinkgraph.MutationEvent{
-			TargetID:  catalystID,
-			Type:      thinkgraph.MutationUpdate,
-			Timestamp: time.Now().UTC(),
-			Metadata:  map[string]string{"transitioned_to": targetThinkState},
+		mut := thinkgraph.MetadataMutation{
+			BaseMutation: thinkgraph.BaseMutation{
+				TargetID:  catalystID,
+				Type:      thinkgraph.MutationMetadata,
+				Timestamp: time.Now().UTC(),
+			},
+			Metadata: map[string]string{"transitioned_to": targetThinkState},
 		}
 		_ = e.workspaceService.SaveMutation(ctx, address, mut)
 
 		nodes, err := graph.GetNodes(ctx, address, []string{catalystID.String()})
 		if err == nil && len(nodes) > 0 {
 			if ui != nil {
-				ui.StreamGraphEvent(nodes[0])
+				ui.StreamGraphEvent(address, nodes[0])
 			}
 		}
 	}
 
-	// Reboot the conversational loop so the LLM resumes under the new domain
 	return &signals.SignalExecuteChat{}, nil
 }

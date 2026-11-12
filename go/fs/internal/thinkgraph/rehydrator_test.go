@@ -135,11 +135,13 @@ func TestRehydrator_MutationReplay(t *testing.T) {
 	targetEv := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Should be updated")
 	_ = ledger.AppendEvent(context.Background(), chat, targetEv)
 
-	mut := thinkgraph.MutationEvent{
-		TargetID:  targetEv.ID,
-		Type:      thinkgraph.MutationUpdate,
-		Timestamp: time.Now(),
-		Payload:   "Updated content!",
+	mut := thinkgraph.ContentMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  targetEv.ID,
+			Type:      thinkgraph.MutationContent,
+			Timestamp: time.Now(),
+		},
+		Content: "Updated content!",
 	}
 	_ = ledger.SaveMutation(context.Background(), chat, mut)
 

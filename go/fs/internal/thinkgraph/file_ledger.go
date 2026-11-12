@@ -21,8 +21,6 @@ func NewFileLedger(maxEvents int, workspaceRoot string) *FileLedger {
 	return &FileLedger{MaxEventsPerShard: maxEvents, workspaceRoot: workspaceRoot}
 }
 
-// ResolveLogDirName maps logical subgraphs to physical directories.
-// Detachable flows multiplex into a single directory based on their root prefix.
 func ResolveLogDirName(subgraphName string) string {
 	if subgraphName == "" {
 		return "main"
@@ -135,7 +133,7 @@ func (l *FileLedger) SaveSpaceContext(ctx context.Context, c *ChatAddress, space
 	return os.WriteFile(filePath, []byte(content), 0644)
 }
 
-func (l *FileLedger) SaveMutation(ctx context.Context, c *ChatAddress, mutation MutationEvent) error {
+func (l *FileLedger) SaveMutation(ctx context.Context, c *ChatAddress, mutation Mutator) error {
 	mutationsDir := filepath.Join(l.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "mutations")
 	_ = os.MkdirAll(mutationsDir, 0755)
 
@@ -144,7 +142,7 @@ func (l *FileLedger) SaveMutation(ctx context.Context, c *ChatAddress, mutation 
 		return fmt.Errorf("marshaling mutation: %w", err)
 	}
 
-	filename := fmt.Sprintf("%019d_%s.json", mutation.Timestamp.UnixNano(), mutation.TargetID.String())
+	filename := fmt.Sprintf("%019d_%s.json", mutation.Time().UnixNano(), mutation.Target().String())
 	filePath := filepath.Join(mutationsDir, filename)
 	return os.WriteFile(filePath, b, 0644)
 }

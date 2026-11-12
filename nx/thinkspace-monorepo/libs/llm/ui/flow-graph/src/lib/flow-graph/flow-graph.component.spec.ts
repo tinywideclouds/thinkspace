@@ -1,149 +1,178 @@
-import { Component, input, computed, inject, effect } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { FlowGraphComponent } from './flow-graph.component';
 import { GraphStore, ChatConnectionService, ThinkspaceStateService, ChatItem } from '@org/llm-state-chat';
-import { GraphCanvasComponent } from '@org/llm-ui-graph';
+import { signal, WritableSignal } from '@angular/core';
+import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
 
-export interface LayoutNode {
-  id: string;
-  x: number;
-  y: number;
-  data: any;
+interface MockGraphStore {
+  projections: WritableSignal<Map<string, string[]>>;
+  nodes: WritableSignal<Map<string, ChatItem>>;
 }
 
-export interface LayoutEdge {
-  id: string;
-  pathData: string;
+interface MockThinkspaceState {
+  activeSpaceId: WritableSignal<string>;
+  activeChatId: WritableSignal<string>;
 }
 
-@Component({
-  selector: 'llm-flow-graph',
-  standalone: true,
-  imports: [CommonModule, GraphCanvasComponent],
-  templateUrl: './flow-graph.component.html',
-  styleUrl: './flow-graph.component.scss',
-  host: {
-    class: 'block w-full h-full'
-  }
-})
-export class FlowGraphComponent {
-  private graphStore = inject(GraphStore);
-  private connection = inject(ChatConnectionService);
-  private workspace = inject(ThinkspaceStateService);
+describe('FlowGraphComponent', () => {
+  let component: FlowGraphComponent;
+  let fixture: ComponentFixture<FlowGraphComponent>;
+  let mockGraphStore: MockGraphStore;
+  let mockWorkspace: MockThinkspaceState;
+  let connectionLoadSpy: Mock<(graphId: string) => void>;
 
-  public flowId = input.required<string>();
+  const mockTime = (s: string) => ({ toString: () => s }) as unknown as Temporal.Instant;
 
-  constructor() {
-    effect(() => {
-      const id = this.flowId();
-      if (id) {
-        this.connection.loadSubGraph(id);
-      }
-    });
-  }
-
-  public layout = computed(() => {
-    const targetFlowId = this.flowId();
-    const spaceId = this.workspace.activeSpaceId();
-    const chatId = this.workspace.activeChatId();
-
-    if (!spaceId || !chatId || !targetFlowId) {
-      return { nodes: [], edges: [] };
-    }
-
-    const key = GraphStore.makeKey({ spaceId, chatId, projectionId: targetFlowId });
-    const pointers = this.graphStore.projections().get(key) || [];
-    const cache = this.graphStore.nodes();
-
-    // O(1) Cache Join: Instantly maps the subgraph's pointers to pure nodes
-    const flowNodes = pointers
-      .map(id => cache.get(id))
-      .filter((n): n is ChatItem => n !== undefined && !n.tombstoned);
-
-    if (flowNodes.length === 0) {
-      return { nodes: [], edges: [] };
-    }
-
-    const childrenMap = new Map<string, string[]>();
-    const isChild = new Set<string>();
-
-    // Build the DAG dependency mappings by checking explicit cryptographic edges
-    for (const node of flowNodes) {
-      const edges = node.edges || {};
-      const parentIds = Object.keys(edges)
-        .filter(k => k.startsWith('parent'))
-        .map(k => edges[k]);
-
-      for (const parentId of parentIds) {
-        if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
-        childrenMap.get(parentId)?.push(node.id);
-        isChild.add(node.id);
-      }
-    }
-
-    // Roots are nodes with no parents
-    const roots = flowNodes.filter(n => !isChild.has(n.id));
-    
-    const NODE_WIDTH = 280;
-    const NODE_HEIGHT = 100;
-    const GAP_X = 50;
-    const GAP_Y = 80;
-
-    const layoutNodes: LayoutNode[] = [];
-    const visited = new Set<string>();
-    let currentX = 0;
-
-    // Traverse DAG to assign spatial coordinates
-    const traverse = (nodeId: string, depthY: number) => {
-      if (visited.has(nodeId)) return;
-      visited.add(nodeId);
-
-      const nodeData = flowNodes.find(n => n.id === nodeId);
-      if (!nodeData) return;
-
-      const x = currentX;
-      const y = depthY * (NODE_HEIGHT + GAP_Y);
-
-      layoutNodes.push({ id: nodeId, x, y, data: nodeData });
-
-      const children = childrenMap.get(nodeId) || [];
-      if (children.length > 0) {
-        for (const childId of children) {
-          traverse(childId, depthY + 1);
-        }
-      } else {
-        // Only advance X-coordinate for leaf nodes (ensuring horizontal spread)
-        currentX += NODE_WIDTH + GAP_X;
-      }
+  beforeEach(async () => {
+    mockGraphStore = {
+      projections: signal(new Map()),
+      nodes: signal(new Map())
     };
 
-    for (const root of roots) {
-      traverse(root.id, 0);
-    }
+    mockWorkspace = {
+      activeSpaceId: signal('golang'),
+      activeChatId: signal('chat-1')
+    };
 
-    // Second pass to generate SVG edge paths using Bezier curves
-    const layoutEdges: LayoutEdge[] = [];
-    for (const node of layoutNodes) {
-      const edges = node.data.edges || {};
-      const parentIds = Object.keys(edges)
-        .filter(k => k.startsWith('parent'))
-        .map(k => edges[k]);
+    connectionLoadSpy = vi.fn();
 
-      for (const parentId of parentIds) {
-        const parentNode = layoutNodes.find(n => n.id === parentId);
-        if (parentNode) {
-          const startX = parentNode.x + (NODE_WIDTH / 2);
-          const startY = parentNode.y + NODE_HEIGHT;
-          const endX = node.x + (NODE_WIDTH / 2);
-          const endY = node.y;
+    await TestBed.configureTestingModule({
+      imports: [FlowGraphComponent],
+      providers: [
+        { provide: GraphStore, useValue: mockGraphStore },
+        { provide: ThinkspaceStateService, useValue: mockWorkspace },
+        { provide: ChatConnectionService, useValue: { loadSubGraph: connectionLoadSpy } }
+      ]
+    }).compileComponents();
 
-          const controlY = startY + (endY - startY) / 2;
-          const pathData = `M ${startX} ${startY} C ${startX} ${controlY}, ${endX} ${controlY}, ${endX} ${endY}`;
+    fixture = TestBed.createComponent(FlowGraphComponent);
+    component = fixture.componentInstance;
 
-          layoutEdges.push({ id: `${parentId}->${node.id}`, pathData });
-        }
-      }
-    }
-
-    return { nodes: layoutNodes, edges: layoutEdges };
+    fixture.componentRef.setInput('flowId', 'flow-123');
   });
-}
+
+  it('should trigger loadSubGraph on init', () => {
+    fixture.detectChanges();
+    expect(connectionLoadSpy).toHaveBeenCalledWith('flow-123');
+  });
+
+  it('should resolve cross-boundary parent (Manager Node) via the global cache', () => {
+    const managerNode: ChatItem = {
+      id: 'manager-1',
+      type: 'model',
+      content: 'Plan',
+      timestamp: mockTime('2026-11-12T10:00:00Z'),
+      tombstoned: false
+    };
+    const taskNode: ChatItem = {
+      id: 'task-1',
+      type: 'prompt',
+      content: 'Agent Work',
+      edges: { parent_id: 'manager-1' },
+      timestamp: mockTime('2026-11-12T10:00:01Z'),
+      tombstoned: false
+    };
+
+    const cache = new Map<string, ChatItem>();
+    cache.set(managerNode.id, managerNode);
+    cache.set(taskNode.id, taskNode);
+    mockGraphStore.nodes.set(cache);
+
+    const projections = new Map<string, string[]>();
+    projections.set('golang:chat-1:flow-123', ['task-1']);
+    mockGraphStore.projections.set(projections);
+
+    fixture.detectChanges();
+
+    const layout = component.layout();
+    expect(layout.nodes.length).toBe(2);
+    expect(layout.nodes.some(n => n.id === 'manager-1')).toBe(true);
+    expect(layout.nodes.some(n => n.id === 'task-1')).toBe(true);
+    expect(layout.edges.length).toBe(1);
+    expect(layout.edges[0].id).toBe('manager-1->task-1');
+  });
+
+  it('should resolve cross-boundary bridge (Options Node) and compute diamond convergence depth', () => {
+    const managerNode: ChatItem = {
+      id: 'manager-1',
+      type: 'model',
+      content: 'Plan',
+      timestamp: mockTime('2026-11-12T10:00:00Z'),
+      tombstoned: false
+    };
+    const task1: ChatItem = {
+      id: 'task-1',
+      type: 'prompt',
+      content: 'Branch 1',
+      edges: { parent_id: 'manager-1' },
+      timestamp: mockTime('2026-11-12T10:00:01Z'),
+      tombstoned: false
+    };
+    const task2: ChatItem = {
+      id: 'task-2',
+      type: 'prompt',
+      content: 'Branch 2',
+      edges: { parent_id: 'manager-1' },
+      timestamp: mockTime('2026-11-12T10:00:01Z'),
+      tombstoned: false
+    };
+    const retryTask2: ChatItem = {
+      id: 'task-2-retry',
+      type: 'prompt',
+      content: 'Branch 2 Retry',
+      edges: { parent_id: 'task-2' },
+      timestamp: mockTime('2026-11-12T10:00:02Z'),
+      tombstoned: false
+    };
+    const joinNode: ChatItem = {
+      id: 'join-1',
+      type: 'flow_execution',
+      content: 'Merged',
+      edges: { parent_0: 'task-1', parent_1: 'task-2-retry' },
+      timestamp: mockTime('2026-11-12T10:00:03Z'),
+      tombstoned: false
+    };
+    const optionsNode: ChatItem = {
+      id: 'options-1',
+      type: 'system',
+      content: 'Awaiting strategy',
+      edges: { parent_id: 'join-1' },
+      timestamp: mockTime('2026-11-12T10:00:04Z'),
+      tombstoned: false
+    };
+    const synthPrompt: ChatItem = {
+      id: 'synth-1',
+      type: 'prompt',
+      content: 'Synthesize',
+      edges: { parent_id: 'options-1' },
+      timestamp: mockTime('2026-11-12T10:00:05Z'),
+      tombstoned: false
+    };
+
+    const cache = new Map<string, ChatItem>();
+    [managerNode, task1, task2, retryTask2, joinNode, optionsNode, synthPrompt].forEach(n =>
+      cache.set(n.id, n)
+    );
+    mockGraphStore.nodes.set(cache);
+
+    const projections = new Map<string, string[]>();
+    projections.set('golang:chat-1:flow-123', ['task-1', 'task-2', 'task-2-retry', 'join-1', 'synth-1']);
+    mockGraphStore.projections.set(projections);
+
+    fixture.detectChanges();
+
+    const layout = component.layout();
+    expect(layout.nodes.length).toBe(7);
+    expect(layout.edges.length).toBe(7);
+
+    const retryLayout = layout.nodes.find(n => n.id === 'task-2-retry')!;
+    const joinLayout = layout.nodes.find(n => n.id === 'join-1')!;
+    const optionsLayout = layout.nodes.find(n => n.id === 'options-1')!;
+    const synthLayout = layout.nodes.find(n => n.id === 'synth-1')!;
+
+    // Join node must sit strictly below its deepest parent (retryTask2)
+    expect(joinLayout.y).toBeGreaterThan(retryLayout.y);
+    expect(optionsLayout.y).toBeGreaterThan(joinLayout.y);
+    expect(synthLayout.y).toBeGreaterThan(optionsLayout.y);
+  });
+});

@@ -31,3 +31,108 @@ A single execution turn executed by the `TurnCoordinator` follows a recursive lo
 4. **Verification & Strategy:** The CI verifier evaluates the code. The UI prompts the user to select a `DelegationStrategy`.
 5. **Resolution:** The user previews the final candidates and explicitly accepts or rejects them.
 6. **Checkpoint:** The `TurnCoordinator` commands the workspace service to permanently snapshot the thread state in the Git layer.
+
+
+```python
+import os
+
+def find_files(filename, search_path):
+    result = []
+    for root, dir, files in os.walk(search_path):
+        for file in files:
+            if filename.lower() in file.lower():
+                result.append(os.path.join(root, file))
+    return result
+
+print(find_files("readme", "go/fs"))
+print(find_files("session", "go/fs"))
+
+
+```
+
+```text
+[]
+[]
+
+
+```
+
+```python
+import os
+print(os.listdir('go/fs/internal/session') if os.path.exists('go/fs/internal/session') else "Path not found")
+
+
+```
+
+```text
+['tools', 'turn_executor.go', 'worker_engine.go', 'synthesize_engine.go', 'chat_engine.go', 'turn_executor_test.go']
+
+
+```
+
+```python
+import glob
+print(glob.glob('go/**/*.md', recursive=True))
+
+```
+
+## The Manager Subgraph: Fan-Out Diamond Topology
+
+The `WorkerEngine` executes parallel agent workflows (fan-out) using a strict "Diamond" DAG topology. This ensures that multi-agent delegation remains mathematically unbroken, visually encapsulated, and capable of yielding control back to the user without fracturing timeline rehydration.
+
+Instead of cluttering the Main Timeline with parallel execution nodes, the Manager's turn acts as a bridge to a dedicated Subgraph. The flow diverges into $N$ branches, verifies them independently, and joins them back together before yielding to the user.
+
+### Execution Sequence & Edge Routing
+
+**1. The Origin (Main Timeline)**
+The flow is initiated by the Manager LLM. The Manager's ephemeral response node (`turnID`) acts as the structural head of the workflow.
+
+* **Node:** `EventModel` (Manager's Turn)
+* **ID:** `turnID` (Parent edge points to the User's `catalystID`)
+
+**2. The Flow Card (Main Timeline)**
+A visual anchor is placed on the Main Timeline to represent the execution of the subgraph.
+
+* **Node:** `EventFlowLifecycle`
+* **ID:** `flowID`
+* **Edge:** `parent_id` $\rightarrow$ `turnID`
+
+**3. The Subgraph Fork (Cross-Boundary)**
+Inside the subgraph, the Manager spawns $N$ distinct agents based on the `propose_change` tool's `agent_instructions` array.
+
+* **Node:** `EventPrompt` ($N$ distinct sub-agent prompts)
+* **Edge:** `parent_id` $\rightarrow$ `turnID`
+* *Note: This is the first cross-boundary edge. The subgraph roots itself directly into the Manager's turn on the Main Timeline.*
+
+**4. Parallel Execution & Resolution (Subgraph)**
+Each agent executes independently within isolated sandboxes.
+
+* **Node:** `EventModel` (Agent generation, points to its respective `EventPrompt`)
+* **Node:** `EventCandidateResolution` (Verification pass/fail, points to the `EventModel`)
+
+**5. The Subgraph Join**
+Once all $N$ branches complete, the graph converges to a single state summarizing the results.
+
+* **Node:** `EventFlowLifecycle` (The Join Node)
+* **ID:** `joinNodeID`
+* **Edge:** `parent_0`...`parent_N` $\rightarrow$ Every leaf `EventCandidateResolution` ID from step 4.
+
+**6. Yield to Main Timeline (Cross-Boundary)**
+The workflow pauses and yields control back to the user on the Main Timeline for manual intervention or strategy selection.
+
+* **Node:** `EventSystem` (Strategy Options Node)
+* **ID:** `optionsNodeID`
+* **Edge:** `parent_id` $\rightarrow$ `joinNodeID`
+* *Note: This weaves the tail of the Subgraph back into the Main Timeline.*
+
+**7. Continuation: The Synthesis Return**
+If the user selects a continuation strategy like **Refine** or **Synthesize**, the `SynthesizeEngine` steps in. The flow drops *back* into the subgraph to encapsulate the synthesis, preventing Main Timeline clutter.
+
+* **Node:** `EventPrompt` (The Synthesis Prompt)
+* **Edge:** `parent_id` $\rightarrow$ `optionsNodeID`
+* *Note: Linking to the Options Node brings the entire multi-branch context forward.*
+
+### Architectural Guarantees
+
+* **No Dangling Edges:** Because all subgraph prompts hook back to the persisted `turnID`, and the Options node hooks to the `joinNodeID`, the DAG remains unbroken during BadgerDB syncs and context rehydration.
+* **Context Compression:** Main Timeline rehydration only pulls the Flow Card and the Options Node, neatly bypassing the massive token weight of the internal subgraph attempts unless explicitly traversed.

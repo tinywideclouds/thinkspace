@@ -3,6 +3,7 @@ package thinkgraph
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"uuid"
 )
@@ -14,6 +15,36 @@ type TraversalEngine struct {
 
 func NewTraversalEngine(graph GraphRepository) *TraversalEngine {
 	return &TraversalEngine{graph: graph}
+}
+
+// ResolveSubGraphID dynamically resolves a short flow alias (e.g. "flow-1234") into its strictly
+// mathematically indexed UUID location on the graph, avoiding abstraction leaks in the API transport layer.
+func (t *TraversalEngine) ResolveSubGraphID(ctx context.Context, c *ChatAddress, alias string) (GraphID, error) {
+	var targetGraphID GraphID
+
+	err := t.WalkTimelineReverse(ctx, c, func(n Node) bool {
+		if string(n.Type) == "flow_lifecycle" {
+			// Fast-path strict anonymous struct parsing so thinkgraph avoids importing session/flows
+			var config struct {
+				FlowID string `json:"flow_id"`
+			}
+			if json.Unmarshal(n.Data, &config) == nil && config.FlowID == alias {
+				targetGraphID = GraphID{Prefix: PrefixFlow, UUID: n.ID}
+				return false // Halt traversal once found
+			}
+		}
+		return true
+	})
+
+	if err != nil {
+		return GraphID{}, err
+	}
+
+	if targetGraphID.IsZero() {
+		return GraphID{}, fmt.Errorf("subgraph alias %q not found on timeline", alias)
+	}
+
+	return targetGraphID, nil
 }
 
 func (t *TraversalEngine) GetTimelinePage(

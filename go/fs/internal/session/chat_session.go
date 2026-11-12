@@ -34,9 +34,10 @@ type ChatSession struct {
 	digestManager    *DigestManager
 	reviewPolicy     ContextReviewPolicy
 
-	chatEngine   *ChatEngine
-	workerEngine *WorkerEngine
-	systemEngine *SystemEngine
+	chatEngine       *ChatEngine
+	workerEngine     *WorkerEngine
+	systemEngine     *SystemEngine
+	synthesizeEngine *SynthesizeEngine
 }
 
 func NewChatSession(
@@ -101,6 +102,7 @@ func NewChatSession(
 	session.chatEngine = NewChatEngine(logger, session, registry, workspaceManager, workspaceService, assembler, digestManager, turnExecutor)
 	session.workerEngine = NewWorkerEngine(logger, session, registry, workspaceService, turnExecutor, workspaceService.Dispatcher(), fanOutFlow)
 	session.systemEngine = NewSystemEngine(logger, session, registry, workspaceService)
+	session.synthesizeEngine = NewSynthesizeEngine(logger, registry, workspaceService, turnExecutor, session)
 
 	return session, nil
 }
@@ -190,7 +192,6 @@ func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, 
 		s.logger.WarnContext(ctx, "failed resolving think state for graph data", "thinkState", activeThinkState)
 	}
 
-	// For standard graph views, we just pass uuid.Nil to grab the latest state bounds without a specific anchor
 	_, graphData, err := s.bundleAssembler.Assemble(ctx, address, digestionHorizon, uuid.Nil(), activeThinkState, thinkState)
 	return graphData, err
 }
@@ -208,7 +209,7 @@ func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInt
 
 	var catalystID uuid.UUID
 	if err == nil && len(timeline) > 0 {
-		ui.StreamGraphEvent(timeline[0])
+		ui.StreamGraphEvent(address, timeline[0])
 		catalystID = timeline[0].ID
 	} else {
 		return fmt.Errorf("failed to anchor catalyst prompt to graph: %w", err)
@@ -221,10 +222,12 @@ func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInt
 		var engine TurnEngine
 
 		switch currentSignal.(type) {
-		case *signals.SignalExecuteChat, *signals.SignalSynthesize:
+		case *signals.SignalExecuteChat:
 			engine = s.chatEngine
 		case *signals.SignalDispatchFlow:
 			engine = s.workerEngine
+		case *signals.SignalSynthesize:
+			engine = s.synthesizeEngine
 		case *signals.SignalTransition:
 			engine = s.systemEngine
 		default:

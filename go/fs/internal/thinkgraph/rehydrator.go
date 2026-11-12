@@ -202,8 +202,7 @@ func (r *Rehydrator) Rebuild(ctx context.Context, c *ChatAddress) error {
 
 		for _, filename := range mutFiles {
 			if data, err := os.ReadFile(filepath.Join(mutationsDir, filename)); err == nil {
-				var mut MutationEvent
-				if json.Unmarshal(data, &mut) == nil {
+				if mut, unmarshalErr := UnmarshalMutation(data); unmarshalErr == nil {
 					_ = r.store.SaveMutation(ctx, c, mut)
 				}
 			}

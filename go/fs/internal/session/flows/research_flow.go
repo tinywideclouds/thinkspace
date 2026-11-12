@@ -34,7 +34,7 @@ func (f *ResearchFlow) MaxSteps() int {
 }
 
 func (f *ResearchFlow) Next(state FlowState) FlowDirective {
-	if len(state.Candidates) == 0 && state.TargetBranch == "" {
+	if len(state.Candidates) == 0 {
 		if len(state.InitialTasks) == 0 {
 			return FlowDirective{
 				Action: ActionError,
@@ -56,7 +56,7 @@ func (f *ResearchFlow) Next(state FlowState) FlowDirective {
 		}
 	}
 
-	if len(state.Candidates) > 0 && state.TargetBranch == "" {
+	if len(state.Candidates) > 0 {
 		hasPass := false
 		for _, c := range state.Candidates {
 			if c.Passed {
@@ -72,13 +72,6 @@ func (f *ResearchFlow) Next(state FlowState) FlowDirective {
 		}
 
 		return FlowDirective{Action: ActionManualReview}
-	}
-
-	if state.TargetBranch != "" {
-		return FlowDirective{
-			Action:       ActionCommit,
-			TargetBranch: state.TargetBranch,
-		}
 	}
 
 	return FlowDirective{Action: ActionFinish}

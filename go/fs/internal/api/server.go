@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"uuid"
@@ -152,37 +153,17 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		switch inbound.Type {
 		case "submit_prompt":
 			payload := inbound.SubmitPrompt
-			emitter := NewWebSocketEmitter(ctx, connection)
-
-			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
-			if err != nil {
-				server.logger.Error("failed to get chat session", "space_id", payload.SpaceID, "chat_id", payload.ChatID, "error", err)
-				emitter.Emit("system", telemetry.Event{
-					ID:        uuid.NewV7(),
-					Type:      "error",
-					Timestamp: time.Now(),
-					Message:   fmt.Sprintf("Failed to open chat session: %v", err),
-				})
-				continue
-			}
 
 			if payload.Text == "" {
 				continue
 			}
 
-			chatSession.Mu().RLock()
-			activeBranch := chatSession.Meta.ActiveBranch
-			chatSession.Mu().RUnlock()
-
-			coordinate := ProjectionCoordinate{
-				SpaceID:      payload.SpaceID,
-				ChatID:       payload.ChatID,
-				ProjectionID: activeBranch,
-			}
-			ui := NewTurnUI(connectionManager, coordinate)
+			emitter := NewWebSocketEmitter(ctx, connection)
+			ui := NewTurnUI(connectionManager)
 
 			go func(promptText string) {
 				server.logger.Info("Starting RunTurn goroutine", "space_id", payload.SpaceID, "chat_id", payload.ChatID, "prompt", promptText)
+
 				if err := server.turnManager.RunTurn(ctx, payload.SpaceID, payload.ChatID, promptText, ui, emitter); err != nil {
 					server.logger.Error("turn failed in execution", "space_id", payload.SpaceID, "chat_id", payload.ChatID, "error", err)
 					emitter.Emit("system", telemetry.Event{
@@ -257,11 +238,23 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		case "load_sub_graph":
 			payload := inbound.LoadSubGraph
 
+			var targetGraphID thinkgraph.GraphID
+			if strings.HasPrefix(payload.GraphID, "flow-") {
+				uuidStr := strings.TrimPrefix(payload.GraphID, "flow-")
+				if parsedUUID, err := uuid.Parse(uuidStr); err == nil {
+					targetGraphID = thinkgraph.GraphID{Prefix: thinkgraph.PrefixFlow, UUID: parsedUUID}
+				} else {
+					server.logger.Warn("Invalid UUID in flow projection ID", "graph_id", payload.GraphID, "error", err)
+					continue
+				}
+			}
+
 			chatAddress := &thinkgraph.ChatAddress{
 				ChatID:    payload.ChatID,
 				ProjectID: payload.SpaceID,
 				SubGraph: thinkgraph.SubGraph{
-					Name: payload.GraphID,
+					Name:    payload.GraphID,
+					GraphID: targetGraphID,
 				},
 			}
 
@@ -371,11 +364,13 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if targetID, err := uuid.Parse(payload.TargetEventID); err != nil {
 				server.logger.Error("Failed parsing target event ID for inline edit", "target_id", payload.TargetEventID, "error", err)
 			} else {
-				mut := thinkgraph.MutationEvent{
-					TargetID:  targetID,
-					Type:      thinkgraph.MutationUpdate,
-					Timestamp: time.Now().UTC(),
-					Payload:   payload.NewText,
+				mut := thinkgraph.ContentMutation{
+					BaseMutation: thinkgraph.BaseMutation{
+						TargetID:  targetID,
+						Type:      thinkgraph.MutationContent,
+						Timestamp: time.Now().UTC(),
+					},
+					Content: payload.NewText,
 				}
 				if err := server.manager.GetService(payload.SpaceID).SaveMutation(ctx, chatAddress, mut); err != nil {
 					server.logger.Error("Failed saving mutation for inline edit", "error", err)

@@ -71,6 +71,55 @@ func (m *mockGraphRepoForTraversal) WalkSubGraphReverse(ctx context.Context, c *
 	return nil
 }
 
+func TestTraversalEngine_ResolveSubGraphID(t *testing.T) {
+	ctx := context.Background()
+
+	lifecycleEvent := thinkgraph.NewEvent("flow_lifecycle", "Starting Flow")
+	lifecycleEvent.Data = []byte(`{"flow_id":"flow-xyz-123"}`)
+
+	mainNodes := []thinkgraph.Node{
+		{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "main-start")},
+		{Event: lifecycleEvent},
+		{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "main-end")},
+	}
+
+	repo := &mockGraphRepoForTraversal{
+		nodesByBranch: map[string][]thinkgraph.Node{
+			"main": mainNodes,
+		},
+	}
+	engine := thinkgraph.NewTraversalEngine(repo)
+
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "test-chat",
+		ProjectID: "space",
+		SubGraph:  thinkgraph.SubGraph{Name: "main"},
+	}
+
+	t.Run("Successfully resolves existing subgraph", func(t *testing.T) {
+		graphID, err := engine.ResolveSubGraphID(ctx, chat, "flow-xyz-123")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if graphID.UUID != lifecycleEvent.ID {
+			t.Errorf("Expected UUID %v, got %v", lifecycleEvent.ID, graphID.UUID)
+		}
+		if graphID.Prefix != thinkgraph.PrefixFlow {
+			t.Errorf("Expected Flow prefix, got %v", graphID.Prefix)
+		}
+	})
+
+	t.Run("Fails cleanly on missing subgraph alias", func(t *testing.T) {
+		graphID, err := engine.ResolveSubGraphID(ctx, chat, "flow-not-real")
+		if err == nil {
+			t.Errorf("Expected error for missing subgraph, got nil")
+		}
+		if !graphID.IsZero() {
+			t.Errorf("Expected zeroed GraphID on error")
+		}
+	})
+}
+
 func TestTraversalEngine_GetTimelinePage(t *testing.T) {
 	ctx := context.Background()
 

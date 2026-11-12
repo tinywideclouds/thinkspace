@@ -1,7 +1,10 @@
 package signals
 
 import (
+	"uuid"
+
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
 // EngineSignal represents a strictly typed intent yielded by a tool or engine back to the ChatSession supervisor.
@@ -27,11 +30,13 @@ type SignalDispatchFlow struct {
 
 func (s *SignalDispatchFlow) IsTerminal() bool { return false }
 
-// SignalSynthesize indicates the FlowEngine has finished and wants the ChatEngine to summarize the results.
+// SignalSynthesize indicates the FlowEngine has finished and wants the SynthesizeEngine to summarize the results.
 type SignalSynthesize struct {
 	OriginalInstruction string
 	OriginalContext     string
 	Candidates          []flows.BranchResult
+	FlowAddress         *thinkgraph.ChatAddress
+	ParentNodeID        uuid.UUID
 }
 
 func (s *SignalSynthesize) IsTerminal() bool { return false }

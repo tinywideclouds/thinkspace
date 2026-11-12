@@ -73,7 +73,7 @@ func (d *Dispatcher) SaveSpaceContext(ctx context.Context, c *ChatAddress, space
 	return nil
 }
 
-func (d *Dispatcher) SaveMutation(ctx context.Context, c *ChatAddress, mutation MutationEvent) error {
+func (d *Dispatcher) SaveMutation(ctx context.Context, c *ChatAddress, mutation Mutator) error {
 	if d.ledger != nil {
 		if err := d.ledger.SaveMutation(ctx, c, mutation); err != nil {
 			return fmt.Errorf("ledger save mutation failed: %w", err)

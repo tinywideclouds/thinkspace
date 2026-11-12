@@ -36,7 +36,7 @@ func (s *GraphStore) SaveSpaceContext(ctx context.Context, c *ChatAddress, space
 	return s.repo.SaveSpaceContext(ctx, c, spaceCtx)
 }
 
-func (s *GraphStore) SaveMutation(ctx context.Context, c *ChatAddress, mutation MutationEvent) error {
+func (s *GraphStore) SaveMutation(ctx context.Context, c *ChatAddress, mutation Mutator) error {
 	return s.repo.SaveMutation(ctx, c, mutation)
 }
 
@@ -48,7 +48,7 @@ type GraphRepository interface {
 	AppendNode(ctx context.Context, c *ChatAddress, node Node) error
 	SaveDigest(ctx context.Context, c *ChatAddress, digest DigestMeta) error
 	SaveSpaceContext(ctx context.Context, c *ChatAddress, spaceCtx SpaceContext) error
-	SaveMutation(ctx context.Context, c *ChatAddress, mutation MutationEvent) error
+	SaveMutation(ctx context.Context, c *ChatAddress, mutation Mutator) error
 
 	ClearChatGraph(ctx context.Context, c *ChatAddress) error
 	Close() error

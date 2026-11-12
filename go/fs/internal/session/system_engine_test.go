@@ -68,7 +68,7 @@ type seMockUI struct {
 func (ui *seMockUI) OnTextChunk(chunk workspace.NodeChunk) {
 	ui.textChunks = append(ui.textChunks, chunk.Text)
 }
-func (ui *seMockUI) StreamGraphEvent(node thinkgraph.Node) {}
+func (ui *seMockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {}
 func (ui *seMockUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: true}
 }

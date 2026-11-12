@@ -94,7 +94,7 @@ func ProjectEvents(nodes []thinkgraph.Node) []*pb.GraphEvent {
 					TaskId:  config.TaskID,
 					Task:    config.TaskPrompt,
 					Status:  mapFlowStatus(state.Status),
-					Summary: state.Summary,
+					Summary: state.Summary, // No fallback hack needed; UI safely reads from Projection Cache
 					Error:   state.Error,
 					Agents:  agents,
 				},

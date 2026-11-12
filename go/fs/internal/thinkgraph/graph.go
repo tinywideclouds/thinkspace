@@ -2,6 +2,7 @@ package thinkgraph
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 	"uuid"
 )
@@ -23,16 +24,87 @@ type MutationType string
 const (
 	MutationTombstone MutationType = "tombstone"
 	MutationRestore   MutationType = "restore"
-	MutationUpdate    MutationType = "update"
+	MutationContent   MutationType = "content"
+	MutationState     MutationType = "state"
+	MutationMetadata  MutationType = "metadata"
 )
 
-type MutationEvent struct {
-	TargetID  uuid.UUID
-	Type      MutationType
-	Timestamp time.Time
-	Payload   string            // Legacy content text updates
-	Data      json.RawMessage   // Strongly typed data updates
-	Metadata  map[string]string // Key-value metadata updates
+// Mutator defines the polymorphic interface for all graph projection updates.
+type Mutator interface {
+	Target() uuid.UUID
+	EventType() MutationType
+	Time() time.Time
+}
+
+type BaseMutation struct {
+	TargetID  uuid.UUID    `json:"target_id"`
+	Type      MutationType `json:"type"`
+	Timestamp time.Time    `json:"timestamp"`
+}
+
+func (b BaseMutation) Target() uuid.UUID       { return b.TargetID }
+func (b BaseMutation) EventType() MutationType { return b.Type }
+func (b BaseMutation) Time() time.Time         { return b.Timestamp }
+
+// TombstoneMutation marks a node as deleted without removing it from the ledger.
+type TombstoneMutation struct {
+	BaseMutation
+}
+
+// RestoreMutation un-marks a node as deleted.
+type RestoreMutation struct {
+	BaseMutation
+}
+
+// ContentMutation explicitly targets the Content field (e.g., for inline edits).
+type ContentMutation struct {
+	BaseMutation
+	Content string `json:"content"`
+}
+
+// StateMutation explicitly targets the MaterializedState field (e.g., for live flow progress).
+type StateMutation struct {
+	BaseMutation
+	State json.RawMessage `json:"state"`
+}
+
+// MetadataMutation explicitly targets the key-value metadata map (e.g., for transition badges).
+type MetadataMutation struct {
+	BaseMutation
+	Metadata map[string]string `json:"metadata"`
+}
+
+// UnmarshalMutation acts as a factory to rehydrate the correct concrete Mutator from disk.
+func UnmarshalMutation(data []byte) (Mutator, error) {
+	var base BaseMutation
+	if err := json.Unmarshal(data, &base); err != nil {
+		return nil, err
+	}
+
+	switch base.Type {
+	case MutationTombstone:
+		var m TombstoneMutation
+		err := json.Unmarshal(data, &m)
+		return m, err
+	case MutationRestore:
+		var m RestoreMutation
+		err := json.Unmarshal(data, &m)
+		return m, err
+	case MutationContent:
+		var m ContentMutation
+		err := json.Unmarshal(data, &m)
+		return m, err
+	case MutationState:
+		var m StateMutation
+		err := json.Unmarshal(data, &m)
+		return m, err
+	case MutationMetadata:
+		var m MetadataMutation
+		err := json.Unmarshal(data, &m)
+		return m, err
+	default:
+		return nil, fmt.Errorf("unknown mutation type: %s", base.Type)
+	}
 }
 
 // AttentionFocus models the cognitive focus of the immediate conversational trajectory.

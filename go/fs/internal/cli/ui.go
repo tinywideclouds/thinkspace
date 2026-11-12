@@ -23,7 +23,7 @@ func (ui *TerminalUI) OnTextChunk(chunk workspace.NodeChunk) {
 	fmt.Print(chunk.Text)
 }
 
-func (ui *TerminalUI) StreamGraphEvent(node thinkgraph.Node) {
+func (ui *TerminalUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {
 	// The standard CLI relies on raw text streams for output
 	// and does not explicitly render structural graph nodes.
 }

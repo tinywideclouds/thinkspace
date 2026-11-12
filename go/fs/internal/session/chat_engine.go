@@ -64,11 +64,9 @@ func (c *inlineDigestCommitter) CommitDigest(ctx context.Context, address *think
 }
 
 func (e *ChatEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, signal signals.EngineSignal, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
-	switch s := signal.(type) {
+	switch signal.(type) {
 	case *signals.SignalExecuteChat:
 		return e.runStandard(ctx, address, turnID, catalystID, ui, emitter)
-	case *signals.SignalSynthesize:
-		return e.runSynthesis(ctx, address, turnID, catalystID, s, ui, emitter)
 	default:
 		return nil, fmt.Errorf("ChatEngine received unexpected signal type: %T", signal)
 	}
@@ -145,140 +143,12 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 		registry.Register(tools.NewCreateDigestTool(committer))
 	}
 
-	signal, err := e.turnExecutor.Execute(ctx, address, turnID, thinkState, bundle, registry, ui)
+	signal, err := e.turnExecutor.Execute(ctx, address, turnID, catalystID, true, thinkState, bundle, registry, ui)
 	if err == nil {
 		e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
 	}
 
 	return signal, err
-}
-
-func (e *ChatEngine) runSynthesis(ctx context.Context, address *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, signal *signals.SignalSynthesize, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
-	e.turnExecutor.emitter = emitter
-
-	e.session.mu.RLock()
-	activeThinkState := e.session.Meta.ActiveThinkState
-	e.session.mu.RUnlock()
-
-	thinkState, ok := e.registry.GetThinkState(activeThinkState)
-	if !ok {
-		return nil, fmt.Errorf("think state configuration not found: %s", activeThinkState)
-	}
-
-	var prompt strings.Builder
-	prompt.WriteString(signal.OriginalInstruction + "\n\n")
-
-	if signal.OriginalContext != "" {
-		prompt.WriteString("### Original Task Context\n")
-		prompt.WriteString(signal.OriginalContext + "\n\n")
-	}
-
-	prompt.WriteString("### Candidate Results\n")
-	for _, c := range signal.Candidates {
-		status := "PASSED"
-		if !c.Passed {
-			status = "FAILED"
-		}
-		prompt.WriteString(fmt.Sprintf("\n--- Candidate Branch: %s (Status: %s) ---\n", c.CandidateID, status))
-		if c.Instruction != "" {
-			prompt.WriteString(fmt.Sprintf("**Sub-Task Instruction:** %s\n", c.Instruction))
-		}
-		if c.Trace != "" {
-			prompt.WriteString(fmt.Sprintf("**Verification Error Trace:**\n```\n%s\n```\n", c.Trace))
-		}
-		if c.RawPayload != "" {
-			prompt.WriteString(fmt.Sprintf("**Raw Sub-Agent Output:**\n```\n%s\n```\n", c.RawPayload))
-		}
-	}
-
-	synthAddress := &thinkgraph.ChatAddress{
-		ProjectID: address.ProjectID,
-		ChatID:    address.ChatID,
-		SubGraph: thinkgraph.SubGraph{
-			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixFlow),
-			Name:    "synthesis",
-		},
-	}
-
-	projectWorkspaceDir := e.workspaceService.ProjectWorkspaceDir(address.ProjectID)
-	rawMapbook, _ := thinkState.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
-	stringMaps := make(map[string]string)
-	for k, v := range rawMapbook {
-		stringMaps[string(k)] = v
-	}
-
-	bundle := cognition.ThinkBundle{
-		Rules:   cognition.SystemRules{Persona: thinkState.Config().ManagerSystemPrompt()},
-		Mapbook: cognition.Mapbook{Maps: stringMaps},
-		Trajectory: cognition.Trajectory{
-			Catalyst: cognition.TrajectoryEvent{
-				Role:    "user",
-				Content: prompt.String(),
-			},
-		},
-		Workbench: []cognition.WorkbenchItem{},
-	}
-
-	synthCandidateID := fmt.Sprintf("%s-synthesis-%s", address.ChatID, uuid.NewV7().String()[:8])
-	sandbox, err := e.workspaceService.SpawnSandbox(ctx, address.ChatID, synthCandidateID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to spawn synthesis sandbox: %w", err)
-	}
-	defer sandbox.TearDown(ctx)
-
-	mux := &streamMultiplexer{ui: ui}
-
-	_, err = e.turnExecutor.Execute(ctx, synthAddress, turnID, thinkState, bundle, tools.NewRegistry(), mux)
-	if err != nil {
-		return nil, fmt.Errorf("synthesis execution failed: %w", err)
-	}
-
-	lastPayload := mux.buffer.String()
-
-	if patcher := thinkState.Patcher(); patcher != nil {
-		if applyErr := patcher.Apply(ctx, sandbox, lastPayload); applyErr != nil {
-			e.logger.WarnContext(ctx, "failed to apply synthesis patch", "error", applyErr)
-		}
-	}
-
-	_ = sandbox.ApplyDraft(ctx, "synthesis")
-
-	passed := true
-	var finalTrace string
-	if verifier := thinkState.Verifier(); verifier != nil {
-		if vErr := verifier.Verify(ctx, sandbox); vErr != nil {
-			passed = false
-			finalTrace = vErr.Error()
-		}
-	}
-
-	if err := sandbox.DeliverForReview(ctx); err != nil {
-		return nil, fmt.Errorf("failed to deliver synthesis sandbox for review: %w", err)
-	}
-
-	diff, _ := e.workspaceService.ReadCandidate(ctx, address, synthCandidateID)
-
-	emitter.Emit("manager", telemetry.Event{
-		ID:        uuid.NewV7(),
-		Type:      "flow_complete",
-		Timestamp: time.Now(),
-		Message:   "Synthesis pipeline completed",
-		Payload:   map[string]any{"candidate_id": synthCandidateID, "passed": passed, "trace": finalTrace, "diff": diff},
-	})
-
-	uiBranchName := fmt.Sprintf("candidate/%s", synthCandidateID)
-	accepted := ui.ReviewCandidate(uiBranchName)
-
-	reason := "Accepted by user"
-	if !accepted {
-		reason = "Rejected by user"
-	}
-
-	_ = e.workspaceService.ResolveCandidate(ctx, address, synthCandidateID, accepted, reason)
-
-	e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
-
-	return &signals.SignalTerminal{}, err
 }
 
 func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, responseID uuid.UUID, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {

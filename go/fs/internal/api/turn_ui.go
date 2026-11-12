@@ -10,21 +10,25 @@ import (
 type TurnUI struct {
 	// Embedding automatically promotes all standard UI methods (OnTextChunk, ReviewContext, etc.)
 	*ConnectionManager
-	coordinate ProjectionCoordinate
 }
 
-func NewTurnUI(conn *ConnectionManager, coordinate ProjectionCoordinate) *TurnUI {
+func NewTurnUI(connectionManager *ConnectionManager) *TurnUI {
 	return &TurnUI{
-		ConnectionManager: conn,
-		coordinate:        coordinate,
+		ConnectionManager: connectionManager,
 	}
 }
 
 // StreamGraphEvent satisfies the final requirement of session.UserInterface.
-// It intercepts the pure node from the domain, attaches the transport coordinates,
+// It intercepts the pure node and address from the domain, attaches the transport coordinates,
 // marshals the envelope, and dispatches it via the embedded ConnectionManager.
-func (ui *TurnUI) StreamGraphEvent(node thinkgraph.Node) {
-	data, err := MarshalStreamedGraphEvent(node, ui.coordinate)
+func (ui *TurnUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {
+	coordinate := ProjectionCoordinate{
+		SpaceID:      address.ProjectID,
+		ChatID:       address.ChatID,
+		ProjectionID: address.SubGraph.Name,
+	}
+
+	data, err := MarshalStreamedGraphEvent(node, coordinate)
 	if err != nil {
 		ui.logger.Error("failed to marshal streamed graph event envelope", "error", err, "node_id", node.ID)
 		return

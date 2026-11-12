@@ -21,7 +21,7 @@ func (m *mockEventWriter) SaveDigest(ctx context.Context, c *thinkgraph.ChatAddr
 func (m *mockEventWriter) SaveSpaceContext(ctx context.Context, c *thinkgraph.ChatAddress, spaceCtx thinkgraph.SpaceContext) error {
 	return nil
 }
-func (m *mockEventWriter) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddress, mutation thinkgraph.MutationEvent) error {
+func (m *mockEventWriter) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddress, mutation thinkgraph.Mutator) error {
 	return nil
 }
 

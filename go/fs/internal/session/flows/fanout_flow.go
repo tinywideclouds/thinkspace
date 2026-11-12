@@ -71,7 +71,7 @@ func (f *FanOutFlow) Next(state FlowState) FlowDirective {
 		return FlowDirective{Action: ActionRequestStrategy}
 	}
 
-	if state.UserStrategy != "" && state.TargetBranch == "" {
+	if state.UserStrategy != "" {
 		switch state.UserStrategy {
 		case StrategySkip:
 			return FlowDirective{Action: ActionFinish}
@@ -89,13 +89,6 @@ func (f *FanOutFlow) Next(state FlowState) FlowDirective {
 				Action: ActionError,
 				Error:  fmt.Errorf("unknown flow strategy: %s", state.UserStrategy),
 			}
-		}
-	}
-
-	if state.TargetBranch != "" {
-		return FlowDirective{
-			Action:       ActionCommit,
-			TargetBranch: state.TargetBranch,
 		}
 	}
 

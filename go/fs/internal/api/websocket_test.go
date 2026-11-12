@@ -36,10 +36,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		}
 
 		connectionManager = api.NewConnectionManager(r.Context(), conn, chunkChan, nil)
-
-		coordinate := api.ProjectionCoordinate{SpaceID: "space-1", ChatID: "chat-1", ProjectionID: "main"}
-		ui = api.NewTurnUI(connectionManager, coordinate)
-
+		ui = api.NewTurnUI(connectionManager)
 		close(uiReady)
 
 		<-r.Context().Done()
@@ -76,7 +73,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Fatal("timed out waiting for chunkChan push")
 	}
 
-	// Test 2: StreamGraphEvent routing via TurnUI with projection coordinates
+	// Test 2: StreamGraphEvent routing via TurnUI with domain address
 	graphNodeID := uuid.NewV7()
 	node := thinkgraph.Node{
 		Event: thinkgraph.Event{
@@ -85,8 +82,17 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 			Content: "Durable node test",
 		},
 	}
+
+	address := &thinkgraph.ChatAddress{
+		ProjectID: "space-1",
+		ChatID:    "chat-1",
+		SubGraph: thinkgraph.SubGraph{
+			Name: "main",
+		},
+	}
+
 	go func() {
-		ui.StreamGraphEvent(node)
+		ui.StreamGraphEvent(address, node)
 	}()
 
 	_, data, err := conn.Read(ctx)

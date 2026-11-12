@@ -47,5 +47,5 @@ type EventWriter interface {
 	AppendEvent(ctx context.Context, c *ChatAddress, event Event) error
 	SaveDigest(ctx context.Context, c *ChatAddress, digest DigestMeta) error
 	SaveSpaceContext(ctx context.Context, c *ChatAddress, spaceCtx SpaceContext) error
-	SaveMutation(ctx context.Context, c *ChatAddress, mutation MutationEvent) error
+	SaveMutation(ctx context.Context, c *ChatAddress, mutation Mutator) error
 }

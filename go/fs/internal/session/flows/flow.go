@@ -27,7 +27,6 @@ const (
 	ActionRequestStrategy FlowAction = "request_strategy"
 	ActionSynthesize      FlowAction = "synthesize"
 	ActionManualReview    FlowAction = "manual_review"
-	ActionCommit          FlowAction = "commit"
 	ActionFinish          FlowAction = "finish"
 	ActionError           FlowAction = "error"
 )
@@ -37,15 +36,13 @@ type FlowState struct {
 	InitialTasks []SubAgentTask
 	Candidates   []BranchResult
 	UserStrategy FlowStrategy
-	TargetBranch string
 }
 
 // FlowDirective is the command the Flow returns to direct the FlowEngine.
 type FlowDirective struct {
-	Action       FlowAction
-	Tasks        []SubAgentTask
-	TargetBranch string
-	Error        error
+	Action FlowAction
+	Tasks  []SubAgentTask
+	Error  error
 }
 
 // SubAgentTask defines a single isolated work unit for a sub-agent.

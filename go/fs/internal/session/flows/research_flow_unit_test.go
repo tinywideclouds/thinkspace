@@ -42,16 +42,15 @@ func TestResearchFlow_StateTransitions(t *testing.T) {
 		}
 	})
 
-	t.Run("Stage 3 -> Commit Accepted Research", func(t *testing.T) {
+	t.Run("All Agents Failed -> Error", func(t *testing.T) {
 		state := FlowState{
 			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: true},
+				{CandidateID: "cand-1", Passed: false},
 			},
-			TargetBranch: "candidate/cand-1",
 		}
 		directive := flow.Next(state)
-		if directive.Action != ActionCommit {
-			t.Errorf("Expected ActionCommit, got %s", directive.Action)
+		if directive.Action != ActionError {
+			t.Errorf("Expected ActionError, got %s", directive.Action)
 		}
 	})
 }

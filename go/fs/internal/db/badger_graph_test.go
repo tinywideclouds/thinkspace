@@ -161,10 +161,12 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 		t.Fatalf("Expected 2 nodes baseline, got %d", len(t1))
 	}
 
-	mut1 := thinkgraph.MutationEvent{
-		TargetID:  node1.ID,
-		Type:      thinkgraph.MutationTombstone,
-		Timestamp: time.Now(),
+	mut1 := thinkgraph.TombstoneMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  node1.ID,
+			Type:      thinkgraph.MutationTombstone,
+			Timestamp: time.Now(),
+		},
 	}
 	if err := graph.SaveMutation(ctx, chat, mut1); err != nil {
 		t.Fatalf("Failed to save tombstone mutation: %v", err)
@@ -175,11 +177,13 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 		t.Fatalf("Tombstoned node was not filtered out of timeline")
 	}
 
-	mut2 := thinkgraph.MutationEvent{
-		TargetID:  node2.ID,
-		Type:      thinkgraph.MutationUpdate,
-		Timestamp: time.Now(),
-		Payload:   "Updated content!",
+	mut2 := thinkgraph.ContentMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  node2.ID,
+			Type:      thinkgraph.MutationContent,
+			Timestamp: time.Now(),
+		},
+		Content: "Updated content!",
 	}
 	_ = graph.SaveMutation(ctx, chat, mut2)
 
@@ -188,16 +192,54 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 		t.Errorf("Mutation update failed, content is: %s", t3[0].Content)
 	}
 
-	mut3 := thinkgraph.MutationEvent{
-		TargetID:  node1.ID,
-		Type:      thinkgraph.MutationRestore,
-		Timestamp: time.Now(),
+	mut3 := thinkgraph.RestoreMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  node1.ID,
+			Type:      thinkgraph.MutationRestore,
+			Timestamp: time.Now(),
+		},
 	}
 	_ = graph.SaveMutation(ctx, chat, mut3)
 
 	t4, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
 	if len(t4) != 2 {
 		t.Fatalf("Failed to restore tombstoned node")
+	}
+}
+
+func TestBadgerGraph_Mutations_StateUpdate(t *testing.T) {
+	graph := setupTestGraph(t)
+	ctx := context.Background()
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "chat-state-mutations",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: graphID,
+		},
+	}
+
+	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Flow Node")
+	ev1.GraphID = graphID
+	node1 := thinkgraph.Node{Event: ev1}
+	_ = graph.AppendNode(ctx, chat, node1)
+
+	stateBytes := []byte(`{"status":"running"}`)
+	mut := thinkgraph.StateMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  node1.ID,
+			Type:      thinkgraph.MutationState,
+			Timestamp: time.Now(),
+		},
+		State: stateBytes,
+	}
+
+	_ = graph.SaveMutation(ctx, chat, mut)
+
+	t1, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
+	if string(t1[0].MaterializedState) != string(stateBytes) {
+		t.Errorf("State mutation update failed, got %s", string(t1[0].MaterializedState))
 	}
 }
 

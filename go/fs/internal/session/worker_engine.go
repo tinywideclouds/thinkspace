@@ -79,7 +79,7 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 
 	flowID := uuid.NewV7()
 	flowContext := flows.FlowContext{
-		FlowID:         fmt.Sprintf("flow-%s", flowID.String()[:8]),
+		FlowID:         fmt.Sprintf("flow-%s", flowID.String()),
 		SpaceID:        chatSession.ProjectID,
 		BaseAgentRules: space.Config().WorkerSystemPrompt(),
 		FlowSummary:    sig.Summary,
@@ -100,6 +100,9 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 		},
 	}
 
+	var joinNodeID uuid.UUID
+	var optionsNodeID uuid.UUID
+
 	for step := 0; step < maxSteps; step++ {
 		directive := engine.flow.Next(state)
 
@@ -107,6 +110,9 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 		case flows.ActionSpawnAgents:
 			ev := thinkgraph.NewEvent(flows.EventFlowLifecycle, fmt.Sprintf("Flow started: %s", flowContext.FlowSummary))
 			ev.ID = flowID
+			// Link to turnID: establishing the Manager node as the head of the subgraph/flow
+			ev.Edges = map[string]string{"parent_id": turnID.String()}
+
 			configPayload := flows.FlowData{
 				FlowID:     flowContext.FlowID,
 				TaskID:     chatSession.ChatID,
@@ -118,23 +124,27 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 				return nil, fmt.Errorf("failed to initialize flow anchor in graph: %w", err)
 			}
 			if ui != nil {
-				ui.StreamGraphEvent(thinkgraph.Node{Event: ev})
+				ui.StreamGraphEvent(chatSession, thinkgraph.Node{Event: ev})
 			}
 
-			candidates, err := engine.spawnAgents(ctx, chatSession, flowAddress, space, flowContext, directive.Tasks, flowID, ui, emitter)
+			// Pass turnID to root the Agent Prompts in the Subgraph back to the Manager Turn
+			candidates, returnedJoinID, err := engine.spawnAgents(ctx, chatSession, flowAddress, space, flowContext, directive.Tasks, turnID, ui, emitter)
 			if err != nil {
 				return nil, err
 			}
 			state.Candidates = candidates
+			joinNodeID = returnedJoinID
 
 		case flows.ActionRequestStrategy:
 			yieldEv := thinkgraph.NewEvent(thinkgraph.EventSystem, "Awaiting delegation strategy selection...")
+			yieldEv.Edges = map[string]string{"parent_id": joinNodeID.String()}
+
 			_ = engine.dispatcher.AppendEvent(ctx, chatSession, yieldEv)
-			_ = engine.dispatcher.AppendEvent(ctx, flowAddress, yieldEv)
 			if ui != nil {
-				ui.StreamGraphEvent(thinkgraph.Node{Event: yieldEv})
+				ui.StreamGraphEvent(chatSession, thinkgraph.Node{Event: yieldEv})
 			}
 
+			optionsNodeID = yieldEv.ID
 			strategy := ui.ChooseNextStep()
 			state.UserStrategy = strategy
 
@@ -153,6 +163,8 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 			signal := &signals.SignalSynthesize{
 				OriginalInstruction: directive.Tasks[0].Instruction,
 				Candidates:          state.Candidates,
+				FlowAddress:         flowAddress,
+				ParentNodeID:        optionsNodeID,
 			}
 
 			if len(state.InitialTasks) > 0 {
@@ -163,27 +175,26 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 
 		case flows.ActionManualReview:
 			yieldEv := thinkgraph.NewEvent(thinkgraph.EventSystem, "Awaiting manual review of candidate branches...")
+			yieldEv.Edges = map[string]string{"parent_id": joinNodeID.String()}
 			_ = engine.dispatcher.AppendEvent(ctx, chatSession, yieldEv)
-			_ = engine.dispatcher.AppendEvent(ctx, flowAddress, yieldEv)
+
 			if ui != nil {
-				ui.StreamGraphEvent(thinkgraph.Node{Event: yieldEv})
+				ui.StreamGraphEvent(chatSession, thinkgraph.Node{Event: yieldEv})
 			}
 
-			acceptedBranch := ""
 			for _, cand := range state.Candidates {
-				if ui != nil && ui.ReviewCandidate(cand.CandidateID) {
-					acceptedBranch = cand.CandidateID
-					break
+				accepted := false
+				if ui != nil {
+					accepted = ui.ReviewCandidate(cand.CandidateID)
 				}
 				branchName := strings.TrimPrefix(cand.CandidateID, "candidate/")
-				_ = engine.service.ResolveCandidate(ctx, chatSession, branchName, false, "Rejected via manual review")
+				reason := "Rejected via manual review"
+				if accepted {
+					reason = "Accepted by user"
+				}
+				_ = engine.service.ResolveCandidate(ctx, chatSession, branchName, accepted, reason)
 			}
-			state.TargetBranch = acceptedBranch
-
-		case flows.ActionCommit:
-			branchName := strings.TrimPrefix(directive.TargetBranch, "candidate/")
-			err := engine.service.ResolveCandidate(ctx, chatSession, branchName, true, "Accepted by user")
-			return &signals.SignalTerminal{}, err
+			return &signals.SignalTerminal{}, nil
 
 		case flows.ActionFinish:
 			return &signals.SignalTerminal{}, nil
@@ -206,10 +217,10 @@ func (engine *WorkerEngine) spawnAgents(
 	space spaces.ThinkState,
 	flowContext flows.FlowContext,
 	tasks []flows.SubAgentTask,
-	flowUUID uuid.UUID,
+	managerNodeID uuid.UUID,
 	ui UserInterface,
 	emitter telemetry.Emitter,
-) ([]flows.BranchResult, error) {
+) ([]flows.BranchResult, uuid.UUID, error) {
 	emitter.Emit("manager", telemetry.Event{
 		ID:        uuid.NewV7(),
 		Type:      "flow_start",
@@ -223,7 +234,7 @@ func (engine *WorkerEngine) spawnAgents(
 
 	for i, task := range tasks {
 		go func(agentIndex int, t flows.SubAgentTask) {
-			results <- engine.runSingleAgent(ctx, chatSession, flowAddress, space, flowContext, t, agentIndex, flowUUID, ui, emitter)
+			results <- engine.runSingleAgent(ctx, chatSession, flowAddress, space, flowContext, t, agentIndex, managerNodeID, ui, emitter)
 		}(i+1, task)
 	}
 
@@ -256,18 +267,28 @@ func (engine *WorkerEngine) spawnAgents(
 			Agents:  records,
 		}
 		stateBytes, _ := json.Marshal(statePayload)
-		mut := thinkgraph.MutationEvent{
-			TargetID:  flowUUID,
-			Type:      thinkgraph.MutationUpdate,
-			Timestamp: time.Now().UTC(),
-			Data:      stateBytes,
+		mut := thinkgraph.StateMutation{
+			BaseMutation: thinkgraph.BaseMutation{
+				TargetID:  flowAddress.GraphID.UUID, // Mutates the Flow Card
+				Type:      thinkgraph.MutationState,
+				Timestamp: time.Now().UTC(),
+			},
+			State: stateBytes,
 		}
 
 		_ = engine.dispatcher.SaveMutation(ctx, chatSession, mut)
+
+		if ui != nil {
+			if graph := engine.service.Graph(); graph != nil {
+				if nodes, err := graph.GetNodes(ctx, chatSession, []string{flowAddress.GraphID.UUID.String()}); err == nil && len(nodes) > 0 {
+					ui.StreamGraphEvent(chatSession, nodes[0])
+				}
+			}
+		}
 	}
 
 	if len(errMsgs) > 0 {
-		return nil, fmt.Errorf("fatal system errors aborted execution: %s", strings.Join(errMsgs, " ; "))
+		return nil, uuid.Nil(), fmt.Errorf("fatal system errors aborted execution: %s", strings.Join(errMsgs, " ; "))
 	}
 
 	joinEvent := thinkgraph.NewEvent(flows.EventFlowLifecycle, fmt.Sprintf("Generated %d candidate branches.", len(branches)))
@@ -284,22 +305,34 @@ func (engine *WorkerEngine) spawnAgents(
 		Summary: joinEvent.Content,
 		Agents:  records,
 	}
-	joinEvent.Data, _ = json.Marshal(statePayload)
+	stateBytes, _ := json.Marshal(statePayload)
+	joinEvent.Data = []byte(`{}`)
 
-	_ = engine.dispatcher.AppendEvent(ctx, chatSession, joinEvent)
+	_ = engine.dispatcher.AppendEvent(ctx, flowAddress, joinEvent)
 	if ui != nil {
-		ui.StreamGraphEvent(thinkgraph.Node{Event: joinEvent})
+		ui.StreamGraphEvent(flowAddress, thinkgraph.Node{Event: joinEvent, MaterializedState: stateBytes})
 	}
 
-	mut := thinkgraph.MutationEvent{
-		TargetID:  flowUUID,
-		Type:      thinkgraph.MutationUpdate,
-		Timestamp: time.Now().UTC(),
-		Data:      joinEvent.Data,
+	// Persist the StateMutation to the JoinEvent's ID so it survives SyncGraphContext rehydration
+	mut := thinkgraph.StateMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  joinEvent.ID,
+			Type:      thinkgraph.MutationState,
+			Timestamp: time.Now().UTC(),
+		},
+		State: stateBytes,
 	}
 	_ = engine.dispatcher.SaveMutation(ctx, chatSession, mut)
 
-	return branches, nil
+	if ui != nil {
+		if graph := engine.service.Graph(); graph != nil {
+			if nodes, err := graph.GetNodes(ctx, chatSession, []string{flowAddress.GraphID.UUID.String()}); err == nil && len(nodes) > 0 {
+				ui.StreamGraphEvent(chatSession, nodes[0])
+			}
+		}
+	}
+
+	return branches, joinEvent.ID, nil
 }
 
 func (engine *WorkerEngine) runSingleAgent(
@@ -310,7 +343,7 @@ func (engine *WorkerEngine) runSingleAgent(
 	flowContext flows.FlowContext,
 	task flows.SubAgentTask,
 	agentIndex int,
-	rootFlowID uuid.UUID,
+	managerNodeID uuid.UUID,
 	ui UserInterface,
 	emitter telemetry.Emitter,
 ) agentResult {
@@ -370,10 +403,14 @@ func (engine *WorkerEngine) runSingleAgent(
 	if taskEvent.Edges == nil {
 		taskEvent.Edges = make(map[string]string)
 	}
-	taskEvent.Edges["parent_id"] = rootFlowID.String()
+	taskEvent.Edges["parent_id"] = managerNodeID.String()
 
 	taskEvent.Data, _ = json.Marshal(task)
 	_ = engine.dispatcher.AppendEvent(ctx, flowAddress, taskEvent)
+
+	if ui != nil {
+		ui.StreamGraphEvent(flowAddress, thinkgraph.Node{Event: taskEvent})
+	}
 
 	passed, finalTrace, rawPayload, genNodeID := engine.attemptLoop(ctx, flowAddress, sandbox, bundle, flowContext, task, agentIndex, taskEvent.ID, space, ui, emitter)
 
@@ -420,6 +457,10 @@ func (engine *WorkerEngine) runSingleAgent(
 	resEvent.Data, _ = json.Marshal(resPayload)
 	_ = engine.dispatcher.AppendEvent(ctx, flowAddress, resEvent)
 
+	if ui != nil {
+		ui.StreamGraphEvent(flowAddress, thinkgraph.Node{Event: resEvent})
+	}
+
 	return agentResult{
 		candidateID:  fmt.Sprintf("candidate/%s", candidateID),
 		passed:       passed,
@@ -463,6 +504,9 @@ func (engine *WorkerEngine) attemptLoop(
 				}
 				retry.Edges["parent_id"] = genNodeID.String()
 				_ = engine.dispatcher.AppendEvent(ctx, flowAddress, retry)
+				if ui != nil {
+					ui.StreamGraphEvent(flowAddress, thinkgraph.Node{Event: retry})
+				}
 
 				taskEventID = retry.ID
 			}
@@ -480,34 +524,34 @@ func (engine *WorkerEngine) attemptLoop(
 
 		taskResponseID := uuid.NewV7()
 		engine.turnExecutor.emitter = emitter
-		_, err := engine.turnExecutor.Execute(ctx, flowAddress, taskResponseID, space, bundle, tools.NewRegistry(), mux)
+
+		// Pass anticipateResponse: false
+		_, err := engine.turnExecutor.Execute(ctx, flowAddress, taskResponseID, taskEventID, false, space, bundle, tools.NewRegistry(), mux)
 		if err != nil {
 			return false, fmt.Errorf("Execution Error: %v", err).Error(), "", uuid.Nil()
 		}
+		genNodeID = taskResponseID
 
-		lastPayload = mux.buffer.String()
+		// Safely add the agent_id metadata to the durably appended Model Node
+		mut := thinkgraph.MetadataMutation{
+			BaseMutation: thinkgraph.BaseMutation{
+				TargetID:  taskResponseID,
+				Type:      thinkgraph.MutationMetadata,
+				Timestamp: time.Now().UTC(),
+			},
+			Metadata: map[string]string{"agent_id": task.AgentID},
+		}
+		_ = engine.service.SaveMutation(ctx, flowAddress, mut)
 
-		if graph := engine.service.Graph(); graph != nil {
-			timeline, _ := graph.GetSubGraphTimeline(ctx, flowAddress, flowAddress.GraphID)
+		// Re-fetch and stream so the UI picks up the newly added metadata badge
+		if graph := engine.service.Graph(); graph != nil && ui != nil {
+			timeline, _ := graph.GetNodes(ctx, flowAddress, []string{taskResponseID.String()})
 			if len(timeline) > 0 {
-				genNodeID = timeline[len(timeline)-1].ID
-
-				mutEvent := timeline[len(timeline)-1].Event
-				if mutEvent.Metadata == nil {
-					mutEvent.Metadata = make(map[string]string)
-				}
-				if mutEvent.Metadata["agent_id"] == "" {
-					mutEvent.Metadata["agent_id"] = task.AgentID
-				}
-
-				if mutEvent.Edges == nil {
-					mutEvent.Edges = make(map[string]string)
-				}
-				mutEvent.Edges["parent_id"] = taskEventID.String()
-
-				_ = graph.AppendNode(ctx, flowAddress, thinkgraph.Node{Event: mutEvent})
+				ui.StreamGraphEvent(flowAddress, timeline[0])
 			}
 		}
+
+		lastPayload = mux.buffer.String()
 
 		if patcher := space.Patcher(); patcher != nil {
 			if applyErr := patcher.Apply(ctx, sandbox, lastPayload); applyErr != nil {

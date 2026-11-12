@@ -2,7 +2,6 @@ package session_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"iter"
 	"log/slog"
@@ -10,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dgraph-io/badger/v4"
 	"uuid"
+
+	"github.com/dgraph-io/badger/v4"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
@@ -40,7 +40,9 @@ func (client *weMockModelClient) GenerateContentStream(
 ) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
 		for _, resp := range client.responses {
-			yield(resp, nil)
+			if !yield(resp, nil) {
+				return
+			}
 		}
 	}
 }
@@ -140,8 +142,8 @@ type weMockUI struct {
 	capturedReasoning  string
 }
 
-func (u *weMockUI) OnTextChunk(chunk workspace.NodeChunk) {}
-func (u *weMockUI) StreamGraphEvent(node thinkgraph.Node) {}
+func (u *weMockUI) OnTextChunk(chunk workspace.NodeChunk)                                  {}
+func (u *weMockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {}
 func (u *weMockUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: u.reviewToReturn}
 }
@@ -156,7 +158,7 @@ func (u *weMockUI) ConfirmTransition(req signals.SignalTransition) bool {
 }
 func (u *weMockUI) GetChunkChannel() chan<- workspace.NodeChunk { return nil }
 
-func TestWorkerEngine_FanOutIntegration_UnifiedFlowSubgraph(t *testing.T) {
+func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &weMockChatEngine{}
 	workspaceRoot := t.TempDir()
@@ -195,7 +197,7 @@ func TestWorkerEngine_FanOutIntegration_UnifiedFlowSubgraph(t *testing.T) {
 	scaffoldChat(workspaceRoot, "golang", "chat-1")
 
 	modelClient := &weMockModelClient{
-		responses: []llm.StreamChunk{{Text: "Sub-agent implemented the feature."}},
+		responses: []llm.StreamChunk{{Text: "Sub-agent output."}},
 	}
 	turnExecutor := session.NewTurnExecutor(logger, modelClient, service, emitter)
 
@@ -209,7 +211,7 @@ func TestWorkerEngine_FanOutIntegration_UnifiedFlowSubgraph(t *testing.T) {
 	}
 
 	workerEngine := session.NewWorkerEngine(logger, chatSupervisor, registry, service, turnExecutor, dispatcher, fanOutFlow)
-	ui := &weMockUI{strategyToReturn: flows.StrategyManual, reviewToReturn: true}
+	ui := &weMockUI{strategyToReturn: flows.StrategyRefine, reviewToReturn: true}
 
 	tasks := []flows.SubAgentTask{
 		{
@@ -218,12 +220,6 @@ func TestWorkerEngine_FanOutIntegration_UnifiedFlowSubgraph(t *testing.T) {
 			Instruction:   "Add auth",
 			TargetFiles:   []string{"src/main.go"},
 		},
-		{
-			AgentID:       "agent-2",
-			ContextDigest: "Basic server built",
-			Instruction:   "Add database",
-			TargetFiles:   []string{"src/db.go"},
-		},
 	}
 
 	dispatchSignal := &signals.SignalDispatchFlow{
@@ -231,59 +227,81 @@ func TestWorkerEngine_FanOutIntegration_UnifiedFlowSubgraph(t *testing.T) {
 		Summary: "Executing parallel flow",
 	}
 
-	signal, err := workerEngine.Execute(context.Background(), chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, ui, emitter)
+	turnID := uuid.NewV7()     // Represents the Manager Node ID on main timeline
+	catalystID := uuid.NewV7() // Represents the Manager Prompt ID
+	signal, err := workerEngine.Execute(context.Background(), chatSession, turnID, catalystID, dispatchSignal, ui, emitter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, ok := signal.(*signals.SignalTerminal); !ok {
-		t.Errorf("Expected SignalTerminal, got %T", signal)
+	synthSig, ok := signal.(*signals.SignalSynthesize)
+	if !ok {
+		t.Fatalf("Expected SignalSynthesize based on StrategyRefine yield, got %T", signal)
 	}
 
-	timeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), chatSession, chatSession.GraphID)
-	dispatchNode := timeline[0]
-
-	var flowData flows.FlowData
-	if err := json.Unmarshal(dispatchNode.Data, &flowData); err != nil {
-		t.Fatalf("Failed to parse flow data from dispatch node: %v", err)
+	if synthSig.FlowAddress == nil {
+		t.Errorf("Expected synthesise signal to carry active FlowAddress for cross-boundary routing")
 	}
 
-	flowGraphID := thinkgraph.GraphID{Prefix: thinkgraph.PrefixFlow, UUID: dispatchNode.ID}
-
-	subGraphAddr := &thinkgraph.ChatAddress{
-		ChatID:    chatSession.ChatID,
-		ProjectID: chatSession.ProjectID,
-		SubGraph: thinkgraph.SubGraph{
-			Name:    flowData.FlowID,
-			GraphID: flowGraphID,
-		},
-	}
-
-	_ = service.SyncGraphContext(context.Background(), subGraphAddr)
-	flowTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), subGraphAddr, flowGraphID)
-
-	if len(flowTimeline) < 8 {
-		t.Fatalf("Expected shared Flow Subgraph timeline to contain Task, Generation, Verification, and Yield nodes for both agents. Got %d", len(flowTimeline))
-	}
-
-	agent1Count := 0
-	agent2Count := 0
-	yieldCount := 0
-	for _, node := range flowTimeline {
-		if node.Metadata["agent_id"] == "agent-1" {
-			agent1Count++
-		} else if node.Metadata["agent_id"] == "agent-2" {
-			agent2Count++
-		} else if node.Type == thinkgraph.EventSystem && strings.Contains(node.Content, "Awaiting") {
-			yieldCount++
+	// 1. Verify Main Timeline Edges (Flow Card and Flow Options Node)
+	mainTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), chatSession, chatSession.GraphID)
+	var flowCard *thinkgraph.Node
+	var optionsNode *thinkgraph.Node
+	for _, n := range mainTimeline {
+		if n.Type == flows.EventFlowLifecycle {
+			nodeCopy := n
+			flowCard = &nodeCopy
+		} else if n.Type == thinkgraph.EventSystem && strings.Contains(n.Content, "Awaiting delegation strategy") {
+			nodeCopy := n
+			optionsNode = &nodeCopy
 		}
 	}
 
-	if agent1Count < 2 || agent2Count < 2 {
-		t.Errorf("Expected agents to tag their distinct linear nodes in the shared subgraph. Agent 1 nodes: %d, Agent 2 nodes: %d", agent1Count, agent2Count)
+	if flowCard == nil {
+		t.Fatalf("Expected Flow Card on main timeline")
 	}
-	if yieldCount != 2 {
-		t.Errorf("Expected exactly 2 dual-written yield events in subgraph, got %d", yieldCount)
+	if flowCard.Edges["parent_id"] != turnID.String() {
+		t.Errorf("Expected Flow Card to point parent_id to Manager Node (turnID), got %v", flowCard.Edges)
+	}
+
+	if optionsNode == nil {
+		t.Fatalf("Expected Flow Options Node on main timeline")
+	}
+
+	if synthSig.ParentNodeID != optionsNode.ID {
+		t.Errorf("Expected yielded signal ParentNodeID to match the Flow Options node ID")
+	}
+
+	// 2. Verify Subgraph Timeline Edges
+	subGraphAddr := synthSig.FlowAddress
+	_ = service.SyncGraphContext(context.Background(), subGraphAddr)
+	flowTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), subGraphAddr, subGraphAddr.GraphID)
+
+	var taskNode *thinkgraph.Node
+	var joinNode *thinkgraph.Node
+	for _, n := range flowTimeline {
+		if n.Metadata["agent_id"] == "agent-1" && n.Type == thinkgraph.EventPrompt {
+			nodeCopy := n
+			taskNode = &nodeCopy
+		} else if n.Type == flows.EventFlowLifecycle {
+			nodeCopy := n
+			joinNode = &nodeCopy
+		}
+	}
+
+	if taskNode == nil {
+		t.Fatalf("Expected Task Node in subgraph")
+	}
+	if taskNode.Edges["parent_id"] != turnID.String() {
+		t.Errorf("Expected Subgraph Task to point cross-boundary parent_id to Manager Node (turnID), got %v", taskNode.Edges)
+	}
+
+	if joinNode == nil {
+		t.Fatalf("Expected Join Node in subgraph")
+	}
+
+	if optionsNode.Edges["parent_id"] != joinNode.ID.String() {
+		t.Errorf("Expected Flow Options node (Main) to point cross-boundary parent_id to Join Node (Subgraph), got %v", optionsNode.Edges)
 	}
 }
 

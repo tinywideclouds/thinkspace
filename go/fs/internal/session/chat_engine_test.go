@@ -104,8 +104,8 @@ type ceTestUI struct {
 	transitionApproved     bool
 }
 
-func (ui *ceTestUI) OnTextChunk(chunk workspace.NodeChunk) {}
-func (ui *ceTestUI) StreamGraphEvent(node thinkgraph.Node) {}
+func (ui *ceTestUI) OnTextChunk(chunk workspace.NodeChunk)                                  {}
+func (ui *ceTestUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {}
 func (ui *ceTestUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
 	ui.reviewContextCalled = true
 	return session.ContextApprovalDecision{

@@ -68,8 +68,8 @@ func TestUnmarshalInbound_SubmitPrompt(t *testing.T) {
 	if inbound.SubmitPrompt.Text != "build a server" {
 		t.Errorf("expected text 'build a server', got '%s'", inbound.SubmitPrompt.Text)
 	}
-	if inbound.SubmitPrompt.SpaceID != "golang" {
-		t.Errorf("expected spaceId 'golang', got '%s'", inbound.SubmitPrompt.SpaceID)
+	if inbound.SubmitPrompt.SpaceID != "project-alpha" {
+		t.Errorf("expected spaceId 'project-alpha', got '%s'", inbound.SubmitPrompt.SpaceID)
 	}
 	if inbound.SubmitPrompt.ChatID != "chat-123" {
 		t.Errorf("expected chatId 'chat-123', got '%s'", inbound.SubmitPrompt.ChatID)
@@ -166,8 +166,8 @@ func TestUnmarshalInbound_LoadHistory(t *testing.T) {
 	if inbound.Type != "load_history" {
 		t.Errorf("expected 'load_history', got '%s'", inbound.Type)
 	}
-	if inbound.LoadHistory.SpaceID != "golang" {
-		t.Errorf("expected spaceId 'golang', got '%s'", inbound.LoadHistory.SpaceID)
+	if inbound.LoadHistory.SpaceID != "project-alpha" {
+		t.Errorf("expected spaceId 'project-alpha', got '%s'", inbound.LoadHistory.SpaceID)
 	}
 	if inbound.LoadHistory.ChatID != "chat-123" {
 		t.Errorf("expected chatId 'chat-123', got '%s'", inbound.LoadHistory.ChatID)
@@ -197,8 +197,8 @@ func TestUnmarshalInbound_LoadSubGraph(t *testing.T) {
 	if inbound.Type != "load_sub_graph" {
 		t.Errorf("expected 'load_sub_graph', got '%s'", inbound.Type)
 	}
-	if inbound.LoadSubGraph.SpaceID != "golang" {
-		t.Errorf("expected spaceId 'golang', got '%s'", inbound.LoadSubGraph.SpaceID)
+	if inbound.LoadSubGraph.SpaceID != "project-alpha" {
+		t.Errorf("expected spaceId 'project-alpha', got '%s'", inbound.LoadSubGraph.SpaceID)
 	}
 	if inbound.LoadSubGraph.ChatID != "chat-123" {
 		t.Errorf("expected chatId 'chat-123', got '%s'", inbound.LoadSubGraph.ChatID)
@@ -225,8 +225,8 @@ func TestUnmarshalInbound_ForkChat(t *testing.T) {
 	if inbound.Type != "fork_chat" {
 		t.Errorf("expected 'fork_chat', got '%s'", inbound.Type)
 	}
-	if inbound.ForkChat.SpaceID != "golang" {
-		t.Errorf("expected spaceId 'golang', got '%s'", inbound.ForkChat.SpaceID)
+	if inbound.ForkChat.SpaceID != "project-alpha" {
+		t.Errorf("expected spaceId 'project-alpha', got '%s'", inbound.ForkChat.SpaceID)
 	}
 	if inbound.ForkChat.TargetEventID != "event-uuid" {
 		t.Errorf("expected targetEventId 'event-uuid', got '%s'", inbound.ForkChat.TargetEventID)
