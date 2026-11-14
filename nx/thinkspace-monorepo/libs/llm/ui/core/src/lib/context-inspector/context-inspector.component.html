@@ -13,7 +13,7 @@
         📋 Copy Full Payload
       </button>
       <button (click)="reviewCancelled.emit()" style="background: #fff; border: 1px solid #ffa8a8; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #e03131;">
-        Abort
+        Cancel Prompt
       </button>
       <button (click)="onApprove()" style="background: #339af0; border: 1px solid #228be6; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #fff;">
         Approve & Send 🚀
@@ -22,6 +22,21 @@
   </div>
 
   <div style="padding: 16px; display: flex; flex-direction: column; gap: 16px; max-height: 70vh; overflow-y: auto;">
+
+    <!-- Prompt (Non-removable; cancel above to abort sending) -->
+    @if (prompt()) {
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 12px; font-weight: bold; color: #1971c2; text-transform: uppercase;">
+            Prompt
+          </span>
+          <span style="font-size: 11px; color: #868e96;">
+            Required — click Cancel Prompt above to abort
+          </span>
+        </div>
+        <div style="background: #e7f5ff; border: 1px solid #a5d8ff; border-radius: 6px; padding: 10px 12px; font-size: 12px; color: #1864ab; white-space: pre-wrap;">{{ prompt() }}</div>
+      </div>
+    }
     
     <!-- Manager System Prompt (Collapsible) -->
     <details style="background: #fff; border: 1px solid #dee2e6; border-radius: 4px; padding: 8px;">
@@ -46,7 +61,7 @@
         </ul>
       }
 
-      @if ((context().recentHistory || []).length > 0) {
+      @if (historyEntries().length > 0) {
         <div style="font-size: 12px; font-weight: bold; color: #1971c2; margin-top: 4px;">
           Recent Trajectory (Sliding Window):
           <span style="font-weight: normal; font-size: 11px; color: #868e96; margin-left: 4px;">
@@ -54,15 +69,15 @@
           </span>
         </div>
         <div style="background: #f1f3f5; border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 4px;">
-          @for (msg of context().recentHistory; track $index) {
+          @for (entry of historyEntries(); track entry.index) {
             <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer; transition: opacity 0.2s;"
-                   [style.opacity]="retainedHistory().has($index) ? '1' : '0.4'">
+                   [style.opacity]="retainedHistory().has(entry.index) ? '1' : '0.4'">
               <input type="checkbox"
-                     [checked]="retainedHistory().has($index)"
-                     (change)="toggleHistory($index)"
+                     [checked]="retainedHistory().has(entry.index)"
+                     (change)="toggleHistory(entry.index)"
                      style="margin-top: 4px;" />
               <div style="font-family: monospace; font-size: 11px; color: #495057; white-space: pre-wrap;">
-                {{ msg }}
+                {{ entry.text }}
               </div>
             </label>
           }

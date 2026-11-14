@@ -8,6 +8,13 @@ import {
 import { CommonModule } from '@angular/common';
 import { PreviewContext } from '@org/llm-core-facade';
 
+const CATALYST_PREFIX = '[catalyst] ';
+
+export interface HistoryEntry {
+  index: number;
+  text: string;
+}
+
 @Component({
   selector: 'llm-context-inspector',
   standalone: true,
@@ -24,14 +31,26 @@ export class ContextInspectorComponent {
   reviewCancelled = output<void>();
   copyFull = output<string>();
 
+  prompt = computed<string>(() => {
+    const history = this.context()?.recentHistory || [];
+    const catalystEntry = history.find((msg) => msg.startsWith(CATALYST_PREFIX));
+    return catalystEntry ? catalystEntry.slice(CATALYST_PREFIX.length) : '';
+  });
+
+  historyEntries = computed<HistoryEntry[]>(() => {
+    const history = this.context()?.recentHistory || [];
+    return history
+      .map((text, index) => ({ index, text }))
+      .filter((entry) => !entry.text.startsWith(CATALYST_PREFIX));
+  });
+
   retainedFiles = linkedSignal<Set<string>>(() => {
     const files = this.context()?.fileContexts || [];
     return new Set(files.map((f) => f.path));
   });
 
   retainedHistory = linkedSignal<Set<number>>(() => {
-    const history = this.context()?.recentHistory || [];
-    return new Set(history.map((_, i) => i));
+    return new Set(this.historyEntries().map((entry) => entry.index));
   });
 
   toggleFile(path: string): void {
@@ -63,9 +82,19 @@ export class ContextInspectorComponent {
   });
 
   onApprove() {
+    const allHistory = this.context()?.recentHistory || [];
+    const retained = new Set(this.retainedHistory());
+
+    // Always retain the catalyst index on the wire so the backend knows the prompt was not discarded
+    allHistory.forEach((msg, index) => {
+      if (msg.startsWith(CATALYST_PREFIX)) {
+        retained.add(index);
+      }
+    });
+
     this.approve.emit({
       retainedFilePaths: Array.from(this.retainedFiles()),
-      retainedHistoryIndices: Array.from(this.retainedHistory()),
+      retainedHistoryIndices: Array.from(retained).sort((a, b) => a - b),
     });
   }
 }

@@ -84,8 +84,7 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 		}
 
 		content := a.extractContent(node)
-
-		if strings.TrimSpace(content) == "" {
+		if content == "" {
 			continue
 		}
 
@@ -106,37 +105,36 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 		}
 	}
 
-	if req.Catalyst != nil && req.Catalyst.Type != EventSystem {
-		role := "user"
-		if req.Catalyst.Type == EventModel {
-			role = "model"
-		}
+	if req.Catalyst == nil {
+		return cognition.Trajectory{}, fmt.Errorf("invalid trajectory state: catalyst node is nil")
+	}
 
-		content := a.extractContent(*req.Catalyst)
-		if strings.TrimSpace(content) != "" {
-			if amendingID, ok := req.Catalyst.Metadata["amended_by"]; ok && req.Amendments != nil {
-				if correctionNode, exists := req.Amendments[amendingID]; exists {
-					correctionContent := a.extractContent(correctionNode)
-					content = fmt.Sprintf("%s\n\n[System Note: This prompt was later amended to: %s]", content, correctionContent)
-				}
-			}
+	role := "user"
+	if req.Catalyst.Type == EventModel {
+		role = "model"
+	}
 
-			if len(trajectory.WorkingMemory) > 0 && trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Role == role {
-				trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Content += "\n\n" + content
-			} else {
-				trajectory.Catalyst = cognition.TrajectoryEvent{
-					Role:    role,
-					Content: content,
-				}
-			}
+	content := a.extractContent(*req.Catalyst)
+	if content == "" {
+		return cognition.Trajectory{}, fmt.Errorf("invalid trajectory state: catalyst node %s has empty content", req.Catalyst.ID)
+	}
+
+	if amendingID, ok := req.Catalyst.Metadata["amended_by"]; ok && req.Amendments != nil {
+		if correctionNode, exists := req.Amendments[amendingID]; exists {
+			correctionContent := a.extractContent(correctionNode)
+			content = fmt.Sprintf("%s\n\n[System Note: This prompt was later amended to: %s]", content, correctionContent)
 		}
 	}
 
-	if trajectory.Catalyst.Content == "" && len(trajectory.WorkingMemory) > 0 {
-		lastIdx := len(trajectory.WorkingMemory) - 1
-		if trajectory.WorkingMemory[lastIdx].Role == "model" {
-			return cognition.Trajectory{}, fmt.Errorf("invalid trajectory state: working memory ends on a model turn and lacks a catalyst")
-		}
+	if len(trajectory.WorkingMemory) > 0 && trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1].Role == role {
+		trailing := trajectory.WorkingMemory[len(trajectory.WorkingMemory)-1]
+		trajectory.WorkingMemory = trajectory.WorkingMemory[:len(trajectory.WorkingMemory)-1]
+		content = trailing.Content + "\n\n" + content
+	}
+
+	trajectory.Catalyst = cognition.TrajectoryEvent{
+		Role:    role,
+		Content: content,
 	}
 
 	return trajectory, nil

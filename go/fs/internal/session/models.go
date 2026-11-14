@@ -17,7 +17,7 @@ import (
 type TurnContext struct {
 	SpaceID             string
 	ChatID              string
-	ResponseID          uuid.UUID // Identifies the active turn across engine transitions
+	ResponseID          uuid.UUID
 	PreviewID           string
 	ManagerSystemPrompt string
 	StickyDigests       []string
