@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Component, input, output, signal, WritableSignal } from '@angular/core';
+import { By } from '@angular/platform-browser';
 import { ChatContainerComponent } from './chat-container.component';
 import { 
   ChatConnectionService, 
@@ -15,6 +16,7 @@ import {
   FileContextMetaData, 
   AttentionFocus 
 } from '@org/llm-core-facade';
+import { ContextInspectorComponent } from '@org/llm-ui-core';
 import { TimelineFacade, LinearFeedComponent } from '@org/llm-ui-timeline';
 import { CognitiveGraphComponent } from '@org/llm-ui-cognitive-graph';
 import { FocusHudComponent } from '@org/llm-ui-hud';
@@ -22,7 +24,6 @@ import { DeskComponent } from '@org/llm-ui-workbench';
 import { FlowGraphComponent } from '@org/llm-ui-flow-graph';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
 
-// --- Angular Native Mocks for Child Standalone Components ---
 @Component({ selector: 'llm-linear-feed', standalone: true, template: '' })
 class MockLinearFeedComponent {}
 
@@ -51,6 +52,7 @@ class MockFlowGraphComponent {
 interface MockConnectionService {
   connected: WritableSignal<boolean>;
   clearSession: Mock<() => void>;
+  submitContextApproval: Mock<(approved: boolean, paths?: string[], indices?: number[]) => void>;
 }
 
 interface MockFlowStore {
@@ -68,7 +70,7 @@ interface MockCognitiveStore {
   pendingTransition: WritableSignal<{targetDomain: string, reasoning: string} | null>;
   pendingStrategy: WritableSignal<boolean>;
   pendingReviewBranch: WritableSignal<string | null>;
-  copyFullContextPreview: Mock<(previewId: string) => Promise<boolean>>;
+  copyFullContextPreview: Mock<(previewId: string) => void>;
 }
 
 interface MockTimelineFacade {
@@ -104,7 +106,8 @@ describe('ChatContainerComponent', () => {
   beforeEach(async () => {
     mockConnection = { 
       connected: signal(true), 
-      clearSession: vi.fn() 
+      clearSession: vi.fn(),
+      submitContextApproval: vi.fn()
     };
     
     mockFlow = { 
@@ -174,5 +177,29 @@ describe('ChatContainerComponent', () => {
     component.onChatSelected('chat-2');
     expect(mockWorkspace.activeChatId()).toBe('chat-2');
     expect(mockConnection.clearSession).toHaveBeenCalled();
+  });
+
+  it('should mount ContextInspector modal when pendingContextReview is set and forward approval/abort decisions', () => {
+    mockCognitive.pendingContextReview.set({
+      spaceId: 'space-1',
+      chatId: 'chat-1',
+      previewId: 'prev-123',
+      managerSystemPrompt: 'System rules',
+      stickyDigests: [],
+      recentHistory: ['[user] hello'],
+      fileContexts: [{ path: 'src/main.go', level: 'injected', tokenCount: 120 }],
+      focus: { primaryFocus: [], relatedContext: [], dormantLenses: [] }
+    });
+    fixture.detectChanges();
+
+    const inspectorDebug = fixture.debugElement.query(By.directive(ContextInspectorComponent));
+    expect(inspectorDebug).toBeTruthy();
+
+    const inspector = inspectorDebug.componentInstance as ContextInspectorComponent;
+    inspector.onApprove();
+    expect(mockConnection.submitContextApproval).toHaveBeenCalledWith(true, ['src/main.go'], [0]);
+
+    inspector.reviewCancelled.emit();
+    expect(mockConnection.submitContextApproval).toHaveBeenCalledWith(false);
   });
 });

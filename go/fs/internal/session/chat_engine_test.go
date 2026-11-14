@@ -113,8 +113,12 @@ func (ui *ceTestUI) ReviewContext(turnContext session.TurnContext) session.Conte
 		RetainedFilePaths:      ui.retainedFilePaths,
 	}
 }
-func (ui *ceTestUI) ChooseNextStep() flows.FlowStrategy { return flows.StrategyManual }
-func (ui *ceTestUI) ReviewCandidate(branch string) bool { return true }
+
+func (u *ceTestUI) ChooseNextStep() (flows.FlowStrategy, bool) { return flows.StrategyManual, true }
+func (u *ceTestUI) ReviewCandidate(branch string) (bool, string) {
+	return true, ""
+}
+
 func (ui *ceTestUI) ConfirmTransition(targetThinkState string, reasoning string) bool {
 	return ui.transitionApproved
 }

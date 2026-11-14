@@ -2351,6 +2351,7 @@ func (x *SubmitPrompt) GetChatId() string {
 type SelectStrategy struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StrategyId    DelegationStrategy     `protobuf:"varint,1,opt,name=strategy_id,json=strategyId,proto3,enum=thinkspace.api.v1.DelegationStrategy" json:"strategy_id,omitempty"`
+	AutoAccept    bool                   `protobuf:"varint,2,opt,name=auto_accept,json=autoAccept,proto3" json:"auto_accept,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2392,10 +2393,18 @@ func (x *SelectStrategy) GetStrategyId() DelegationStrategy {
 	return DelegationStrategy_DELEGATION_STRATEGY_UNSPECIFIED
 }
 
+func (x *SelectStrategy) GetAutoAccept() bool {
+	if x != nil {
+		return x.AutoAccept
+	}
+	return false
+}
+
 type ReviewDecision struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Branch        string                 `protobuf:"bytes,1,opt,name=branch,proto3" json:"branch,omitempty"`
 	Accepted      bool                   `protobuf:"varint,2,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2442,6 +2451,13 @@ func (x *ReviewDecision) GetAccepted() bool {
 		return x.Accepted
 	}
 	return false
+}
+
+func (x *ReviewDecision) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
 }
 
 type ApproveContext struct {
@@ -3670,13 +3686,16 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\fSubmitPrompt\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x19\n" +
 	"\bspace_id\x18\x02 \x01(\tR\aspaceId\x12\x17\n" +
-	"\achat_id\x18\x03 \x01(\tR\x06chatId\"X\n" +
+	"\achat_id\x18\x03 \x01(\tR\x06chatId\"y\n" +
 	"\x0eSelectStrategy\x12F\n" +
 	"\vstrategy_id\x18\x01 \x01(\x0e2%.thinkspace.api.v1.DelegationStrategyR\n" +
-	"strategyId\"D\n" +
+	"strategyId\x12\x1f\n" +
+	"\vauto_accept\x18\x02 \x01(\bR\n" +
+	"autoAccept\"\\\n" +
 	"\x0eReviewDecision\x12\x16\n" +
 	"\x06branch\x18\x01 \x01(\tR\x06branch\x12\x1a\n" +
-	"\baccepted\x18\x02 \x01(\bR\baccepted\"\x96\x01\n" +
+	"\baccepted\x18\x02 \x01(\bR\baccepted\x12\x16\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"\x96\x01\n" +
 	"\x0eApproveContext\x12\x1a\n" +
 	"\bapproved\x18\x01 \x01(\bR\bapproved\x12.\n" +
 	"\x13retained_file_paths\x18\x02 \x03(\tR\x11retainedFilePaths\x128\n" +

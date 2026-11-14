@@ -21,15 +21,20 @@ describe('ChatReviewPromptComponent', () => {
     fixture.detectChanges();
   });
 
-  it('should emit true when accepted', () => {
+  it('should emit accepted true with reason when accepted', () => {
     const emitSpy = vi.spyOn(component.reviewDecided, 'emit');
+    const input = fixture.nativeElement.querySelector('input[type="text"]') as HTMLInputElement;
+    input.value = 'Looks solid';
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+
     component.decide(true);
-    expect(emitSpy).toHaveBeenCalledWith(true);
+    expect(emitSpy).toHaveBeenCalledWith({ accepted: true, reason: 'Looks solid' });
   });
 
-  it('should emit false when rejected', () => {
+  it('should emit accepted false with empty reason by default when rejected', () => {
     const emitSpy = vi.spyOn(component.reviewDecided, 'emit');
     component.decide(false);
-    expect(emitSpy).toHaveBeenCalledWith(false);
+    expect(emitSpy).toHaveBeenCalledWith({ accepted: false, reason: '' });
   });
 });

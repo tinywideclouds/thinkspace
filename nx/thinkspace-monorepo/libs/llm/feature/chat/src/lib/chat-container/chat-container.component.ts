@@ -10,6 +10,7 @@ import {
   ChatInputComponent, 
   FlowTrackerComponent,
   FlowInspectorComponent,
+  ContextInspectorComponent,
   ChatHeaderComponent
 } from '@org/llm-ui-core';
 import { TimelineFacade, LinearFeedComponent } from '@org/llm-ui-timeline';
@@ -26,6 +27,7 @@ import { FlowGraphComponent } from '@org/llm-ui-flow-graph';
     ChatInputComponent,
     FlowTrackerComponent,
     FlowInspectorComponent,
+    ContextInspectorComponent,
     ChatHeaderComponent,
     LinearFeedComponent,
     CognitiveGraphComponent,
@@ -36,7 +38,7 @@ import { FlowGraphComponent } from '@org/llm-ui-flow-graph';
   templateUrl: './chat-container.component.html',
   styleUrl: './chat-container.component.scss',
   host: {
-    class: 'block h-full w-full relative' // Added relative for overlay positioning
+    class: 'block h-full w-full relative'
   }
 })
 export class ChatContainerComponent {

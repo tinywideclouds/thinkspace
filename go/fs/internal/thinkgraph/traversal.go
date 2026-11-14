@@ -24,13 +24,12 @@ func (t *TraversalEngine) ResolveSubGraphID(ctx context.Context, c *ChatAddress,
 
 	err := t.WalkTimelineReverse(ctx, c, func(n Node) bool {
 		if string(n.Type) == "flow_lifecycle" {
-			// Fast-path strict anonymous struct parsing so thinkgraph avoids importing session/flows
 			var config struct {
 				FlowID string `json:"flow_id"`
 			}
 			if json.Unmarshal(n.Data, &config) == nil && config.FlowID == alias {
 				targetGraphID = GraphID{Prefix: PrefixFlow, UUID: n.ID}
-				return false // Halt traversal once found
+				return false
 			}
 		}
 		return true
@@ -45,6 +44,17 @@ func (t *TraversalEngine) ResolveSubGraphID(ctx context.Context, c *ChatAddress,
 	}
 
 	return targetGraphID, nil
+}
+
+func (t *TraversalEngine) resolveParentGraphID(ctx context.Context, c *ChatAddress, forkPoint uuid.UUID) GraphID {
+	if forkPoint == uuid.Nil() {
+		return GraphID{}
+	}
+	nodes, err := t.graph.GetNodes(ctx, c, []string{forkPoint.String()})
+	if err == nil && len(nodes) > 0 {
+		return nodes[0].GraphID
+	}
+	return GraphID{}
 }
 
 func (t *TraversalEngine) GetTimelinePage(
@@ -72,7 +82,6 @@ func (t *TraversalEngine) GetTimelinePage(
 			return nil, "", false, err
 		}
 
-		// Look for a graph-native branch anchor to resolve ancestry dynamically
 		for _, node := range nodes {
 			if node.Type == EventBranchAnchor {
 				var anchor BranchAnchor
@@ -91,11 +100,11 @@ func (t *TraversalEngine) GetTimelinePage(
 		}
 
 		if parentBranch == "" {
-			break // Reached root of the entire chat DAG
+			break
 		}
 
 		currentName = parentBranch
-		currentGraphID = GraphID{}
+		currentGraphID = t.resolveParentGraphID(ctx, c, forkPoint)
 		currentCursor = forkPoint.String()
 	}
 
@@ -152,7 +161,7 @@ func (t *TraversalEngine) WalkTimelineReverse(
 		}
 
 		currentName = parentBranch
-		currentGraphID = GraphID{}
+		currentGraphID = t.resolveParentGraphID(ctx, c, forkPoint)
 		currentCursor = forkPoint.String()
 	}
 

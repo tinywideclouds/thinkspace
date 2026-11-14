@@ -15,6 +15,23 @@ type mockGraphRepoForTraversal struct {
 	nodesByBranch map[string][]thinkgraph.Node
 }
 
+func (m *mockGraphRepoForTraversal) GetNodes(ctx context.Context, c *thinkgraph.ChatAddress, ids []string) ([]thinkgraph.Node, error) {
+	idSet := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		idSet[id] = true
+	}
+
+	var matched []thinkgraph.Node
+	for _, branchNodes := range m.nodesByBranch {
+		for _, n := range branchNodes {
+			if idSet[n.ID.String()] {
+				matched = append(matched, n)
+			}
+		}
+	}
+	return matched, nil
+}
+
 func (m *mockGraphRepoForTraversal) GetSubGraphTimelinePage(ctx context.Context, c *thinkgraph.ChatAddress, graphID thinkgraph.GraphID, cursor string, limit int) ([]thinkgraph.Node, string, bool, error) {
 	branchNodes, ok := m.nodesByBranch[c.Name]
 	if !ok {

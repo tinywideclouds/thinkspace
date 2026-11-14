@@ -37,6 +37,7 @@ type SignalSynthesize struct {
 	Candidates          []flows.BranchResult
 	FlowAddress         *thinkgraph.ChatAddress
 	ParentNodeID        uuid.UUID
+	AutoAccept          bool
 }
 
 func (s *SignalSynthesize) IsTerminal() bool { return false }

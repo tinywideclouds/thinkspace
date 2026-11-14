@@ -111,8 +111,10 @@ func (ui *mockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgr
 func (ui *mockUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: true}
 }
-func (ui *mockUI) ChooseNextStep() flows.FlowStrategy                               { return flows.StrategyRefine }
-func (ui *mockUI) ReviewCandidate(branch string) bool                               { return true }
+func (ui *mockUI) ChooseNextStep() (flows.FlowStrategy, bool) { return flows.StrategyRefine, false }
+func (ui *mockUI) ReviewCandidate(branch string) (bool, string) {
+	return true, "verified and accepted"
+}
 func (ui *mockUI) ConfirmTransition(targetThinkState string, reasoning string) bool { return true }
 func (ui *mockUI) GetChunkChannel() chan<- workspace.NodeChunk                      { return nil }
 
@@ -135,8 +137,9 @@ func (f *mockFlow) Next(state flows.FlowState) flows.FlowDirective {
 	if f.step == 2 {
 		f.step++
 		return flows.FlowDirective{
-			Action: flows.ActionSynthesize,
-			Tasks:  []flows.SubAgentTask{{Instruction: "synthesize logic"}},
+			Action:     flows.ActionSynthesize,
+			AutoAccept: state.AutoAccept,
+			Tasks:      []flows.SubAgentTask{{Instruction: "synthesize logic"}},
 		}
 	}
 	return flows.FlowDirective{Action: flows.ActionFinish}
@@ -286,6 +289,9 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 					}},
 				},
 				{
+					Text: `{"thought":"Sub-agent branch output","patches":[]}`,
+				},
+				{
 					Text: `{"thought":"Golden Synthesis Patch","patches":[]}`,
 				},
 				{
@@ -365,14 +371,20 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 
 		mainTimeline, _ := svc.Graph().GetSubGraphTimeline(ctx, chatAddress, chatAddress.GraphID)
 		hasManagerReview := false
+		hasUserDecision := false
 		for _, n := range mainTimeline {
 			if n.Type == thinkgraph.EventModel && strings.Contains(n.Content, "Manager review:") {
 				hasManagerReview = true
-				break
+			}
+			if n.Type == thinkgraph.EventPrompt && strings.Contains(n.Content, "accepted flow: verified and accepted") {
+				hasUserDecision = true
 			}
 		}
 		if !hasManagerReview {
 			t.Errorf("Expected Manager review EventModel node on the main timeline")
+		}
+		if !hasUserDecision {
+			t.Errorf("Expected user decision EventPrompt node on the main timeline")
 		}
 	})
 

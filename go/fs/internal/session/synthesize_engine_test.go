@@ -6,6 +6,7 @@ import (
 	"iter"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/dgraph-io/badger/v4"
@@ -107,6 +108,8 @@ func (m *seTestThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.T
 
 type seTestUI struct {
 	reviewToReturn bool
+	reasonToReturn string
+	reviewCalled   bool
 }
 
 func (u *seTestUI) OnTextChunk(chunk workspace.NodeChunk)                                  {}
@@ -114,9 +117,10 @@ func (u *seTestUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkg
 func (u *seTestUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{}
 }
-func (u *seTestUI) ChooseNextStep() flows.FlowStrategy { return flows.StrategyRefine }
-func (u *seTestUI) ReviewCandidate(branch string) bool {
-	return u.reviewToReturn
+func (u *seTestUI) ChooseNextStep() (flows.FlowStrategy, bool) { return flows.StrategyRefine, false }
+func (u *seTestUI) ReviewCandidate(branch string) (bool, string) {
+	u.reviewCalled = true
+	return u.reviewToReturn, u.reasonToReturn
 }
 func (u *seTestUI) ConfirmTransition(targetThinkState string, reasoning string) bool { return true }
 func (u *seTestUI) GetChunkChannel() chan<- workspace.NodeChunk                      { return nil }
@@ -125,7 +129,7 @@ type seTestEmitter struct{}
 
 func (m *seTestEmitter) Emit(channel string, event telemetry.Event) {}
 
-func TestSynthesizeEngine_TopologyAndEdges(t *testing.T) {
+func TestSynthesizeEngine_TopologyAndManualReview(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &seTestChatEngine{}
 	workspaceRoot := t.TempDir()
@@ -174,7 +178,7 @@ func TestSynthesizeEngine_TopologyAndEdges(t *testing.T) {
 	}
 
 	synthEngine := session.NewSynthesizeEngine(logger, registry, service, turnExecutor, chatSupervisor)
-	ui := &seTestUI{reviewToReturn: true}
+	ui := &seTestUI{reviewToReturn: true, reasonToReturn: "looks great, ship it"}
 
 	flowID := uuid.NewV7()
 	optionsNodeID := uuid.NewV7()
@@ -191,6 +195,7 @@ func TestSynthesizeEngine_TopologyAndEdges(t *testing.T) {
 		OriginalInstruction: "Do work",
 		FlowAddress:         flowAddress,
 		ParentNodeID:        optionsNodeID,
+		AutoAccept:          false,
 	}
 
 	turnID := uuid.NewV7()
@@ -199,11 +204,14 @@ func TestSynthesizeEngine_TopologyAndEdges(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	if !ui.reviewCalled {
+		t.Errorf("Expected ui.ReviewCandidate to be called when AutoAccept is false")
+	}
+
 	if _, ok := signal.(*signals.SignalTerminal); !ok {
 		t.Errorf("Expected SignalTerminal from synthesis, got %T", signal)
 	}
 
-	// Verify subgraph nodes
 	_ = service.SyncGraphContext(context.Background(), flowAddress)
 	timeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), flowAddress, flowAddress.GraphID)
 
@@ -235,18 +243,100 @@ func TestSynthesizeEngine_TopologyAndEdges(t *testing.T) {
 		t.Errorf("Expected Synthesis Resolution to point to Synthesis Model")
 	}
 
-	// Verify Manager review node on Main Timeline
+	// Verify Main Timeline contains initial boundary node + Manager review + User acceptance reason node
 	mainTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), chatSession, chatSession.GraphID)
-	if len(mainTimeline) != 1 {
-		t.Fatalf("Expected 1 Manager review node on main timeline, got %d", len(mainTimeline))
+	if len(mainTimeline) != 3 {
+		t.Fatalf("Expected 3 nodes on main timeline (Init + Manager review + User decision), got %d", len(mainTimeline))
 	}
-	if mainTimeline[0].Type != thinkgraph.EventModel {
-		t.Errorf("Expected main timeline node to be EventModel, got %s", mainTimeline[0].Type)
+	if mainTimeline[1].Type != thinkgraph.EventModel {
+		t.Errorf("Expected Manager review node to be EventModel, got %s", mainTimeline[1].Type)
 	}
-	if mainTimeline[0].Content != "Manager review: Synthesized both approaches cleanly." {
-		t.Errorf("Expected human-readable Manager review on main timeline, got %q", mainTimeline[0].Content)
+	if mainTimeline[1].Content != "Manager review: Synthesized both approaches cleanly." {
+		t.Errorf("Expected human-readable Manager review on main timeline, got %q", mainTimeline[1].Content)
 	}
-	if mainTimeline[0].Edges["parent_id"] != optionsNodeID.String() {
-		t.Errorf("Expected Manager review node to point to OptionsNodeID (%s), got %v", optionsNodeID.String(), mainTimeline[0].Edges)
+	if mainTimeline[2].Type != thinkgraph.EventPrompt {
+		t.Errorf("Expected User decision node to be EventPrompt, got %s", mainTimeline[2].Type)
+	}
+	if !strings.Contains(mainTimeline[2].Content, "accepted flow: looks great, ship it") {
+		t.Errorf("Expected user decision reason on main timeline, got %q", mainTimeline[2].Content)
+	}
+}
+
+func TestSynthesizeEngine_AutoAccept_SkipsManualReview(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	engine := &seTestChatEngine{}
+	workspaceRoot := t.TempDir()
+
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	defer graphDB.Close()
+
+	emitter := &seTestEmitter{}
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return engine }, graphDB, emitter)
+	service := svcManager.GetService("golang")
+
+	chatSession := &thinkgraph.ChatAddress{
+		ChatID:    "chat-auto",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	_ = service.InitializeChat(context.Background(), chatSession)
+
+	registry := config.NewRegistry()
+	mockSpace := &seTestThinkSpace{}
+	registry.RegisterThinkState("golang", mockSpace)
+	registry.RegisterConfig("golang", mockSpace.Config())
+	_ = svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" })
+
+	scaffoldChat(workspaceRoot, "golang", "chat-auto")
+
+	modelClient := &seTestModelClient{
+		responses: []llm.StreamChunk{
+			{Text: `{"thought":"Merged patch","patches":[]}`},
+			{Text: "Manager review: Auto-accepted synthesis."},
+		},
+	}
+	turnExecutor := session.NewTurnExecutor(logger, modelClient, service, emitter)
+	sessionManager := session.NewManager(logger, registry, svcManager, modelClient, nil, nil)
+	chatSupervisor, _ := sessionManager.GetSession(context.Background(), "golang", "chat-auto")
+
+	synthEngine := session.NewSynthesizeEngine(logger, registry, service, turnExecutor, chatSupervisor)
+	ui := &seTestUI{reviewToReturn: false}
+
+	flowID := uuid.NewV7()
+	flowAddress := &thinkgraph.ChatAddress{
+		ChatID:    "chat-auto",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    fmt.Sprintf("flow-%s", flowID.String()),
+			GraphID: thinkgraph.GraphID{Prefix: thinkgraph.PrefixFlow, UUID: flowID},
+		},
+	}
+
+	synthSignal := &signals.SignalSynthesize{
+		OriginalInstruction: "Do work",
+		FlowAddress:         flowAddress,
+		ParentNodeID:        uuid.NewV7(),
+		AutoAccept:          true,
+	}
+
+	_, err = synthEngine.Execute(context.Background(), chatSession, uuid.NewV7(), uuid.NewV7(), synthSignal, ui, emitter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if ui.reviewCalled {
+		t.Errorf("Expected ui.ReviewCandidate to be skipped when AutoAccept is true")
+	}
+
+	mainTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), chatSession, chatSession.GraphID)
+	if len(mainTimeline) != 2 {
+		t.Fatalf("Expected only 2 nodes (Init + Manager review) on main timeline when AutoAccept is true, got %d", len(mainTimeline))
 	}
 }

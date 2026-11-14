@@ -95,6 +95,7 @@ export interface AttentionFocus {
 export interface PreviewContext {
   spaceId: string;
   chatId: string;
+  previewId?: string;
   managerSystemPrompt: string;
   stickyDigests: string[];
   recentHistory: string[];

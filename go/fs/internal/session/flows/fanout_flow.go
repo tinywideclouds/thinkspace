@@ -79,7 +79,8 @@ func (f *FanOutFlow) Next(state FlowState) FlowDirective {
 			return FlowDirective{Action: ActionManualReview}
 		case StrategyRefine:
 			return FlowDirective{
-				Action: ActionSynthesize,
+				Action:     ActionSynthesize,
+				AutoAccept: state.AutoAccept,
 				Tasks: []SubAgentTask{
 					{Instruction: f.config.RefinePrompt},
 				},

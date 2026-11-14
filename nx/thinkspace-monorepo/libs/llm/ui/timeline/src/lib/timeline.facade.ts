@@ -41,12 +41,12 @@ export class TimelineFacade {
 
   // --- Exposed Interactive Prompt Signals ---
   public inspectedFlow = this.flow.inspectedFlow;
+  public pendingContextReview = this.cognitive.pendingContextReview;
   public pendingStrategy = this.cognitive.pendingStrategy;
   public pendingReviewBranch = this.cognitive.pendingReviewBranch;
   public pendingTransition = this.cognitive.pendingTransition;
 
   constructor() {
-    // ---> ADDED LOGGING HERE <---
     effect(() => {
       const raw = this.rawFeed();
       const visible = this.visibleFeed();
@@ -162,6 +162,10 @@ export class TimelineFacade {
 
   public closeInspector(): void {
     this.flow.inspectedFlow.set(null);
+  }
+
+  public copyFullContextPreview(previewId: string): void {
+    this.cognitive.copyFullContextPreview(previewId);
   }
 
   public setHoveredTag(tag: string | null): void {

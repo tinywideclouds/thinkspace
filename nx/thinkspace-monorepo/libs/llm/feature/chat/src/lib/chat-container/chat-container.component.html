@@ -100,7 +100,7 @@
       <!-- Input Footer -->
       <div class="p-4 bg-white border-t border-gray-200 shrink-0 z-20">
         <div class="max-w-4xl mx-auto w-full">
-          <!-- The timeline linear-feed now has exclusive control over all interactive UI prompts -->
+          <!-- In-timeline flow prompts live in linear-feed; pre-flight JIT context review lives at shell level below -->
           <llm-chat-input 
             (sendPrompt)="connection.submitPrompt($event)">
           </llm-chat-input>
@@ -126,6 +126,20 @@
     </aside>
 
   </div>
+
+  <!-- Pre-flight JIT Context Review Modal Gate (Shell-scoped so it renders across both Linear & Graph views) -->
+  @if (cognitive.pendingContextReview(); as contextReview) {
+    <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-6">
+      <div class="w-full max-w-4xl shadow-2xl">
+        <llm-context-inspector
+          [context]="contextReview"
+          (approve)="connection.submitContextApproval(true, $event.retainedFilePaths, $event.retainedHistoryIndices)"
+          (reviewCancelled)="connection.submitContextApproval(false)"
+          (copyFull)="cognitive.copyFullContextPreview($event)">
+        </llm-context-inspector>
+      </div>
+    </div>
+  }
 
   <!-- Modals -->
   @if (flow.inspectedFlow(); as flowItem) {

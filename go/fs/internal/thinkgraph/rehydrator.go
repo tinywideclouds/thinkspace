@@ -113,10 +113,11 @@ func (r *Rehydrator) FastForward(ctx context.Context, c *ChatAddress, graphManif
 			}
 
 			saveAddr := *c
-			if event.Metadata["agent_id"] != "" && strings.HasPrefix(c.Name, "flow-") {
-				saveAddr.SubGraph.Name = fmt.Sprintf("%s/%s", dirName, event.Metadata["agent_id"])
-			} else if strings.HasPrefix(c.Name, "flow-") {
+			if strings.HasPrefix(c.Name, "flow-") {
 				saveAddr.SubGraph.Name = dirName
+			}
+			if !event.GraphID.IsZero() {
+				saveAddr.SubGraph.GraphID = event.GraphID
 			}
 
 			if err := r.store.AppendEvent(ctx, &saveAddr, event); err != nil {

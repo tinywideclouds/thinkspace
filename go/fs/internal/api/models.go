@@ -38,11 +38,13 @@ type SubmitPrompt struct {
 
 type SelectStrategy struct {
 	StrategyID flows.FlowStrategy
+	AutoAccept bool
 }
 
 type ReviewDecision struct {
 	Branch   string
 	Accepted bool
+	Reason   string
 }
 
 type ApproveContext struct {

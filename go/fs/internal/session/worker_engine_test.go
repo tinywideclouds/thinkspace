@@ -136,7 +136,9 @@ func (m *weMockEmitter) Emit(channel string, event telemetry.Event) {
 
 type weMockUI struct {
 	strategyToReturn   flows.FlowStrategy
+	autoAcceptToReturn bool
 	reviewToReturn     bool
+	reasonToReturn     string
 	reviewedBranch     string
 	transitionToReturn bool
 	capturedReasoning  string
@@ -147,10 +149,12 @@ func (u *weMockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkg
 func (u *weMockUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: u.reviewToReturn}
 }
-func (u *weMockUI) ChooseNextStep() flows.FlowStrategy { return u.strategyToReturn }
-func (u *weMockUI) ReviewCandidate(branch string) bool {
+func (u *weMockUI) ChooseNextStep() (flows.FlowStrategy, bool) {
+	return u.strategyToReturn, u.autoAcceptToReturn
+}
+func (u *weMockUI) ReviewCandidate(branch string) (bool, string) {
 	u.reviewedBranch = branch
-	return u.reviewToReturn
+	return u.reviewToReturn, u.reasonToReturn
 }
 func (u *weMockUI) ConfirmTransition(targetThinkState string, reasoning string) bool {
 	u.capturedReasoning = reasoning
@@ -211,7 +215,7 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	}
 
 	workerEngine := session.NewWorkerEngine(logger, chatSupervisor, registry, service, turnExecutor, dispatcher, fanOutFlow)
-	ui := &weMockUI{strategyToReturn: flows.StrategyRefine, reviewToReturn: true}
+	ui := &weMockUI{strategyToReturn: flows.StrategyRefine, autoAcceptToReturn: true, reviewToReturn: true}
 
 	tasks := []flows.SubAgentTask{
 		{
@@ -237,6 +241,10 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	synthSig, ok := signal.(*signals.SignalSynthesize)
 	if !ok {
 		t.Fatalf("Expected SignalSynthesize based on StrategyRefine yield, got %T", signal)
+	}
+
+	if !synthSig.AutoAccept {
+		t.Errorf("Expected AutoAccept=true to propagate into SignalSynthesize")
 	}
 
 	if synthSig.FlowAddress == nil {
@@ -281,7 +289,7 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 		if n.Metadata["agent_id"] == "agent-1" && n.Type == thinkgraph.EventPrompt {
 			nodeCopy := n
 			taskNode = &nodeCopy
-		} else if n.Type == flows.EventFlowLifecycle {
+		} else if n.Type == thinkgraph.EventSystem && strings.Contains(n.Content, "Generated") {
 			nodeCopy := n
 			joinNode = &nodeCopy
 		}

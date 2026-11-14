@@ -45,7 +45,9 @@ export class ScrollViewportComponent {
   private destroyRef = inject(DestroyRef);
   private debugObserver: IntersectionObserver | null = null;
   private prefetchObserver: IntersectionObserver | null = null;
-  private previousPrefetchElement: Element | null = null;
+  private observedPrefetchElement: Element | null = null;
+  private previousDebugPrefetchElement: Element | null = null;
+  private tailLockRafId: number | null = null;
 
   constructor() {
     // Dynamic top content debug observer
@@ -69,25 +71,33 @@ export class ScrollViewportComponent {
       if (topAnchor) this.debugObserver.observe(topAnchor);
     });
 
-    // Dynamic prefetch trigger & false-color debug renderer
+    // Dynamic false-color debug styling
+    effect(() => {
+      const anchor = this.prefetchAnchor();
+      const debugActive = this.isDebugMode();
+
+      if (this.previousDebugPrefetchElement && this.previousDebugPrefetchElement !== anchor) {
+        this.previousDebugPrefetchElement.classList.remove(...DEBUG_PREFETCH_CLASSES);
+        this.previousDebugPrefetchElement = null;
+      }
+
+      if (debugActive && anchor) {
+        if (!anchor.classList.contains(DEBUG_PREFETCH_CLASSES[0])) {
+          anchor.classList.add(...DEBUG_PREFETCH_CLASSES);
+        }
+        this.previousDebugPrefetchElement = anchor;
+      } else if (!debugActive && this.previousDebugPrefetchElement) {
+        this.previousDebugPrefetchElement.classList.remove(...DEBUG_PREFETCH_CLASSES);
+        this.previousDebugPrefetchElement = null;
+      }
+    });
+
+    // Dynamic prefetch IntersectionObserver (only re-binds when the actual DOM element changes)
     effect(() => {
       const anchor = this.prefetchAnchor();
       const container = this.containerRef()?.nativeElement;
-      const debugActive = this.isDebugMode();
 
-      // Clean up previous debug classes
-      if (this.previousPrefetchElement) {
-        this.previousPrefetchElement.classList.remove(...DEBUG_PREFETCH_CLASSES);
-        this.previousPrefetchElement = null;
-      }
-
-      // Apply debug false-color styling to the active prefetch element
-      if (debugActive && anchor) {
-        anchor.classList.add(...DEBUG_PREFETCH_CLASSES);
-        this.previousPrefetchElement = anchor;
-      }
-
-      if (!container) return;
+      if (!container || anchor === this.observedPrefetchElement) return;
 
       if (!this.prefetchObserver) {
         this.prefetchObserver = new IntersectionObserver(([entry]) => {
@@ -98,7 +108,10 @@ export class ScrollViewportComponent {
       }
 
       this.prefetchObserver.disconnect();
-      if (anchor) this.prefetchObserver.observe(anchor);
+      this.observedPrefetchElement = anchor;
+      if (anchor) {
+        this.prefetchObserver.observe(anchor);
+      }
     });
 
     afterNextRender(() => {
@@ -114,10 +127,15 @@ export class ScrollViewportComponent {
   }
 
   private enforceTailLock(): void {
-    if (this.scrollState() === 'auto') {
-      const container = this.containerRef().nativeElement;
-      container.scrollTop = container.scrollHeight;
-    }
+    if (this.scrollState() !== 'auto' || this.tailLockRafId !== null) return;
+
+    this.tailLockRafId = requestAnimationFrame(() => {
+      this.tailLockRafId = null;
+      if (this.scrollState() === 'auto') {
+        const container = this.containerRef().nativeElement;
+        container.scrollTop = container.scrollHeight;
+      }
+    });
   }
 
   private setupObservers(): void {
@@ -147,8 +165,11 @@ export class ScrollViewportComponent {
     });
 
     this.destroyRef.onDestroy(() => {
-      if (this.previousPrefetchElement) {
-        this.previousPrefetchElement.classList.remove(...DEBUG_PREFETCH_CLASSES);
+      if (this.tailLockRafId !== null) {
+        cancelAnimationFrame(this.tailLockRafId);
+      }
+      if (this.previousDebugPrefetchElement) {
+        this.previousDebugPrefetchElement.classList.remove(...DEBUG_PREFETCH_CLASSES);
       }
       bottomObserver.disconnect();
       if (this.debugObserver) this.debugObserver.disconnect();

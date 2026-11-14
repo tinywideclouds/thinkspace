@@ -1,22 +1,22 @@
 import { create } from '@bufbuild/protobuf';
-import {
-  WSEvent,
+import { 
+  WSEvent, 
   WSEventSchema,
   MessageType,
   FlowStatus,
   DelegationStrategy as ProtoDelegationStrategy,
   GraphEvent as ProtoGraphEvent
 } from '@org/llm-core-protos';
-import {
-  AppEvent,
-  DelegationStrategy,
-  DigestMeta,
+import { 
+  AppEvent, 
+  DelegationStrategy, 
+  DigestMeta, 
   GraphEvent,
   TelemetryPayload
 } from './domain-models';
 
 export class LlmFacade {
-
+  
   private static mapFlowStatus(status: FlowStatus): 'UNSPECIFIED' | 'RUNNING' | 'COMPLETED' | 'FAILED' {
     switch (status) {
       case FlowStatus.RUNNING: return 'RUNNING';
@@ -44,21 +44,21 @@ export class LlmFacade {
     switch (protoEvent.payload.case) {
       case 'message': {
         const msgType = protoEvent.payload.value.type;
-        let domainType: 'prompt' | 'model' | 'system' = 'prompt';
-
+        let domainType: 'prompt' | 'model' | 'system' = 'prompt'; 
+        
         if (msgType === MessageType.MODEL) {
           domainType = 'model';
         } else if (msgType === MessageType.SYSTEM) {
           domainType = 'system';
         }
-
+        
         return {
           ...base,
           type: domainType,
           content: protoEvent.payload.value.text
         };
       }
-
+      
       case 'fileDelta':
         return {
           ...base,
@@ -86,7 +86,7 @@ export class LlmFacade {
           reason
         };
       }
-
+      
       case 'flowExecution':
         return {
           ...base,
@@ -120,28 +120,28 @@ export class LlmFacade {
 
     switch (protocolBufferEvent.payload.case) {
       case 'chatStream':
-        return {
-          type: 'chat_stream',
-          nodeId: protocolBufferEvent.payload.value.nodeId,
-          text: protocolBufferEvent.payload.value.text
+        return { 
+          type: 'chat_stream', 
+          nodeId: protocolBufferEvent.payload.value.nodeId, 
+          text: protocolBufferEvent.payload.value.text 
         };
-
+        
       case 'requestStrategy':
         return { type: 'request_strategy', active: protocolBufferEvent.payload.value.active };
-
+      
       case 'requestReview':
         return { type: 'request_review', branch: protocolBufferEvent.payload.value.branch };
 
       case 'requestTransition':
-        return {
-          type: 'request_transition',
-          targetThinkState: protocolBufferEvent.payload.value.targetThinkState,
-          reasoning: protocolBufferEvent.payload.value.reasoning
+        return { 
+          type: 'request_transition', 
+          targetThinkState: protocolBufferEvent.payload.value.targetThinkState, 
+          reasoning: protocolBufferEvent.payload.value.reasoning 
         };
-
+      
       case 'availableSpaces':
         return { type: 'available_spaces', spaces: protocolBufferEvent.payload.value.spaces.map(space => ({ id: space.id, name: space.name })) };
-
+      
       case 'syncHistory': {
         const validEvents = protocolBufferEvent.payload.value.recentEvents
           .map(e => this.mapGraphEvent(e))
@@ -189,12 +189,13 @@ export class LlmFacade {
         return {
           type: 'preview_context',
           context: {
-            spaceId: protocolBufferEvent.payload.value.spaceId,
-            chatId: protocolBufferEvent.payload.value.chatId,
-            managerSystemPrompt: protocolBufferEvent.payload.value.managerSystemPrompt,
-            stickyDigests: protocolBufferEvent.payload.value.stickyDigests,
-            recentHistory: protocolBufferEvent.payload.value.recentHistory,
-            fileContexts: protocolBufferEvent.payload.value.fileContexts.map(context => ({
+            spaceId: protocolBufferEvent.payload.value.spaceId || '',
+            chatId: protocolBufferEvent.payload.value.chatId || '',
+            previewId: protocolBufferEvent.payload.value.previewId || '',
+            managerSystemPrompt: protocolBufferEvent.payload.value.managerSystemPrompt || '',
+            stickyDigests: protocolBufferEvent.payload.value.stickyDigests || [],
+            recentHistory: protocolBufferEvent.payload.value.recentHistory || [],
+            fileContexts: (protocolBufferEvent.payload.value.fileContexts || []).map(context => ({
               path: context.path,
               level: context.level,
               tokenCount: context.tokenCount
@@ -209,7 +210,7 @@ export class LlmFacade {
 
       case 'telemetryEvent': {
         const telemetry = protocolBufferEvent.payload.value;
-
+        
         let domainPayload: TelemetryPayload | undefined = undefined;
         if (telemetry.event?.payload) {
           switch (telemetry.event.payload.case) {
@@ -258,7 +259,7 @@ export class LlmFacade {
       case 'streamedGraphEvent': {
         const protoGraphEvent = protocolBufferEvent.payload.value.event;
         if (!protoGraphEvent) return null;
-
+        
         const mappedDomainEvent = this.mapGraphEvent(protoGraphEvent);
         if (!mappedDomainEvent) return null;
 
@@ -272,7 +273,7 @@ export class LlmFacade {
           }
         };
       }
-
+      
       default:
         console.warn(`[LlmFacade] Unhandled inbound protocol buffer case: ${protocolBufferEvent.payload.case}`);
         return null;
@@ -297,15 +298,28 @@ export class LlmFacade {
     });
   }
 
-  static createSelectStrategy(strategy: DelegationStrategy): WSEvent {
+  static createSelectStrategy(strategy: DelegationStrategy, autoAccept = false): WSEvent {
     return create(WSEventSchema, {
-      payload: { case: 'selectStrategy', value: { strategyId: strategy as unknown as ProtoDelegationStrategy } }
+      payload: {
+        case: 'selectStrategy',
+        value: {
+          strategyId: strategy as unknown as ProtoDelegationStrategy,
+          autoAccept
+        }
+      }
     });
   }
 
-  static createReviewDecision(branch: string, accepted: boolean): WSEvent {
+  static createReviewDecision(branch: string, accepted: boolean, reason = ''): WSEvent {
     return create(WSEventSchema, {
-      payload: { case: 'reviewDecision', value: { branch, accepted } }
+      payload: {
+        case: 'reviewDecision',
+        value: {
+          branch,
+          accepted,
+          reason
+        }
+      }
     });
   }
 

@@ -1,9 +1,15 @@
 package session
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 
 	"uuid"
@@ -83,7 +89,7 @@ func NewChatSession(
 		reviewPolicy:     NewTokenThresholdPolicy(),
 	}
 
-	address := session.getActiveAddress()
+	address := session.GetActiveAddress()
 	if err := workspaceService.InitializeChat(ctx, address); err != nil {
 		return nil, fmt.Errorf("initializing chat boundaries: %w", err)
 	}
@@ -134,7 +140,63 @@ func (s *ChatSession) flushMetaLocked() error {
 	})
 }
 
-func (s *ChatSession) getActiveAddress() *thinkgraph.ChatAddress {
+func (s *ChatSession) resolvePersistedGraphID(branch string) (thinkgraph.GraphID, bool) {
+	if s.workspaceService == nil {
+		return thinkgraph.GraphID{}, false
+	}
+
+	dirName := thinkgraph.ResolveLogDirName(branch)
+	logsDir := filepath.Join(s.workspaceService.WorkspaceRoot(), s.SpaceID, "chats", s.ChatID, "ledger", "logs", dirName)
+	entries, err := os.ReadDir(logsDir)
+	if err != nil {
+		return thinkgraph.GraphID{}, false
+	}
+
+	var shards []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
+			shards = append(shards, e.Name())
+		}
+	}
+	if len(shards) == 0 {
+		return thinkgraph.GraphID{}, false
+	}
+	sort.Strings(shards)
+
+	for _, shard := range shards {
+		file, err := os.Open(filepath.Join(logsDir, shard))
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var ev thinkgraph.Event
+			if json.Unmarshal(line, &ev) == nil && !ev.GraphID.IsZero() {
+				file.Close()
+				return ev.GraphID, true
+			}
+		}
+
+		scanErr := scanner.Err()
+		if scanErr != nil {
+			slog.Debug("scanner fault", "err", scanErr)
+			continue
+		}
+
+		file.Close()
+
+	}
+
+	return thinkgraph.GraphID{}, false
+}
+
+// GetActiveAddress returns the canonical ChatAddress (including its resolved GraphID)
+// for the session's currently active branch.
+func (s *ChatSession) GetActiveAddress() *thinkgraph.ChatAddress {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -145,7 +207,11 @@ func (s *ChatSession) getActiveAddress() *thinkgraph.ChatAddress {
 
 	gID, exists := s.graphIDs[activeBranch]
 	if !exists {
-		gID = thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+		if persistedID, ok := s.resolvePersistedGraphID(activeBranch); ok {
+			gID = persistedID
+		} else {
+			gID = thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+		}
 		s.graphIDs[activeBranch] = gID
 	}
 
@@ -165,7 +231,11 @@ func (s *ChatSession) GetSystemAddress() *thinkgraph.ChatAddress {
 
 	gID, exists := s.graphIDs[thinkgraph.SystemSubGraphName]
 	if !exists {
-		gID = thinkgraph.NewGraphID(thinkgraph.PrefixSystem)
+		if persistedID, ok := s.resolvePersistedGraphID(thinkgraph.SystemSubGraphName); ok {
+			gID = persistedID
+		} else {
+			gID = thinkgraph.NewGraphID(thinkgraph.PrefixSystem)
+		}
 		s.graphIDs[thinkgraph.SystemSubGraphName] = gID
 	}
 
@@ -180,7 +250,7 @@ func (s *ChatSession) GetSystemAddress() *thinkgraph.ChatAddress {
 }
 
 func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, error) {
-	address := s.getActiveAddress()
+	address := s.GetActiveAddress()
 
 	s.mu.RLock()
 	activeThinkState := s.Meta.ActiveThinkState
@@ -197,7 +267,7 @@ func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, 
 }
 
 func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInterface, emitter telemetry.Emitter) error {
-	address := s.getActiveAddress()
+	address := s.GetActiveAddress()
 
 	if err := s.workspaceService.AppendUserPrompt(ctx, address, promptText); err != nil {
 		s.logger.ErrorContext(ctx, "failed appending user prompt to ledger", "chat_id", s.ChatID, "error", err)

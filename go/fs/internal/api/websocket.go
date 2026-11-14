@@ -12,14 +12,24 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
+type strategySelection struct {
+	strategy   flows.FlowStrategy
+	autoAccept bool
+}
+
+type reviewSelection struct {
+	accepted bool
+	reason   string
+}
+
 // ConnectionManager maintains the long-lived WebSocket connection and routes bytes.
 type ConnectionManager struct {
 	ctx            context.Context
 	conn           *websocket.Conn
 	writeMu        sync.Mutex
 	logger         *slog.Logger
-	strategyChan   chan flows.FlowStrategy
-	reviewChan     chan bool
+	strategyChan   chan strategySelection
+	reviewChan     chan reviewSelection
 	approveChan    chan session.ContextApprovalDecision
 	transitionChan chan bool
 	chunkChan      chan<- workspace.NodeChunk
@@ -33,8 +43,8 @@ func NewConnectionManager(ctx context.Context, conn *websocket.Conn, chunkChan c
 		ctx:            ctx,
 		conn:           conn,
 		logger:         logger,
-		strategyChan:   make(chan flows.FlowStrategy),
-		reviewChan:     make(chan bool),
+		strategyChan:   make(chan strategySelection),
+		reviewChan:     make(chan reviewSelection),
 		approveChan:    make(chan session.ContextApprovalDecision),
 		transitionChan: make(chan bool),
 		chunkChan:      chunkChan,
@@ -79,32 +89,34 @@ func (cm *ConnectionManager) ReviewContext(ctxData session.TurnContext) session.
 	return <-cm.approveChan
 }
 
-func (cm *ConnectionManager) ChooseNextStep() flows.FlowStrategy {
+func (cm *ConnectionManager) ChooseNextStep() (flows.FlowStrategy, bool) {
 	data, err := MarshalRequestStrategy()
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request strategy", "error", err)
 	} else {
 		cm.SendBytes(data)
 	}
-	return <-cm.strategyChan
+	sel := <-cm.strategyChan
+	return sel.strategy, sel.autoAccept
 }
 
-func (cm *ConnectionManager) ReviewCandidate(branch string) bool {
+func (cm *ConnectionManager) ReviewCandidate(branch string) (bool, string) {
 	data, err := MarshalRequestReview(branch)
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request review", "error", err)
 	} else {
 		cm.SendBytes(data)
 	}
-	return <-cm.reviewChan
+	sel := <-cm.reviewChan
+	return sel.accepted, sel.reason
 }
 
-func (cm *ConnectionManager) PushStrategy(strategy flows.FlowStrategy) {
-	cm.strategyChan <- strategy
+func (cm *ConnectionManager) PushStrategy(strategy flows.FlowStrategy, autoAccept bool) {
+	cm.strategyChan <- strategySelection{strategy: strategy, autoAccept: autoAccept}
 }
 
-func (cm *ConnectionManager) PushReviewDecision(accepted bool) {
-	cm.reviewChan <- accepted
+func (cm *ConnectionManager) PushReviewDecision(accepted bool, reason string) {
+	cm.reviewChan <- reviewSelection{accepted: accepted, reason: reason}
 }
 
 func (cm *ConnectionManager) PushContextApproval(decision session.ContextApprovalDecision) {

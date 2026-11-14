@@ -42,8 +42,8 @@ type ContextApprovalDecision struct {
 type UserInterface interface {
 	tools.UI
 	ReviewContext(turnContext TurnContext) ContextApprovalDecision
-	ChooseNextStep() flows.FlowStrategy
-	ReviewCandidate(branch string) (accepted bool)
+	ChooseNextStep() (flows.FlowStrategy, bool)
+	ReviewCandidate(branch string) (accepted bool, reason string)
 
 	GetChunkChannel() chan<- workspace.NodeChunk
 

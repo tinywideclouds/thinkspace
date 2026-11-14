@@ -150,10 +150,11 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 			}
 
 			optionsNodeID = yieldEv.ID
-			strategy := ui.ChooseNextStep()
+			strategy, autoAccept := ui.ChooseNextStep()
 			state.UserStrategy = strategy
+			state.AutoAccept = autoAccept
 
-			stratEv := thinkgraph.NewEvent(thinkgraph.EventSystem, fmt.Sprintf("Strategy selected: %s", strategy))
+			stratEv := thinkgraph.NewEvent(thinkgraph.EventSystem, fmt.Sprintf("Strategy selected: %s (auto_accept=%v)", strategy, autoAccept))
 			stratEv.Edges = map[string]string{"parent_id": optionsNodeID.String()}
 
 			if err := engine.dispatcher.AppendEvent(ctx, chatSession, stratEv); err != nil {
@@ -183,6 +184,7 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 				Candidates:          state.Candidates,
 				FlowAddress:         flowAddress,
 				ParentNodeID:        optionsNodeID,
+				AutoAccept:          directive.AutoAccept,
 			}
 
 			if len(state.InitialTasks) > 0 {
@@ -205,13 +207,18 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 
 			for _, cand := range state.Candidates {
 				accepted := false
+				var userReason string
 				if ui != nil {
-					accepted = ui.ReviewCandidate(cand.CandidateID)
+					accepted, userReason = ui.ReviewCandidate(cand.CandidateID)
 				}
 				branchName := strings.TrimPrefix(cand.CandidateID, "candidate/")
-				reason := "Rejected via manual review"
-				if accepted {
-					reason = "Accepted by user"
+				reason := strings.TrimSpace(userReason)
+				if reason == "" {
+					if accepted {
+						reason = "Accepted by user"
+					} else {
+						reason = "Rejected via manual review"
+					}
 				}
 				if err := engine.service.ResolveCandidate(ctx, chatSession, branchName, accepted, reason); err != nil {
 					engine.logger.ErrorContext(ctx, "failed to resolve candidate manually", "error", err, "candidate", branchName)
@@ -690,7 +697,7 @@ func (engine *WorkerEngine) attemptLoop(
 		}
 
 		if applyErr := sandbox.ApplyDraft(ctx, fmt.Sprintf("attempt %d", attempt)); applyErr != nil {
-			engine.logger.ErrorContext(ctx, "failed to apply sandbox draft", "error", applyErr)
+			engine.logger.ErrorContext(ctx, "failed to apply sandbox draft", "error", err)
 		}
 
 		if emitter != nil {

@@ -38,12 +38,16 @@ func UnmarshalInbound(data []byte) (*InboundEvent, error) {
 		default:
 			strategy = flows.StrategyManual
 		}
-		domainEvent.SelectStrategy = &SelectStrategy{StrategyID: strategy}
+		domainEvent.SelectStrategy = &SelectStrategy{
+			StrategyID: strategy,
+			AutoAccept: payload.SelectStrategy.AutoAccept,
+		}
 	case *pb.WSEvent_ReviewDecision:
 		domainEvent.Type = "review_decision"
 		domainEvent.ReviewDecision = &ReviewDecision{
 			Branch:   payload.ReviewDecision.Branch,
 			Accepted: payload.ReviewDecision.Accepted,
+			Reason:   payload.ReviewDecision.Reason,
 		}
 	case *pb.WSEvent_ApproveContext:
 		domainEvent.Type = "approve_context"

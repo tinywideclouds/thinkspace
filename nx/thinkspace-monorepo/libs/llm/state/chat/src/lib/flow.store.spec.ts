@@ -35,7 +35,7 @@ describe('FlowStore', () => {
       id: '2',
       eventType: 'agent_status',
       timestamp: Temporal.Now.instant(),
-      message: 'Executing...',
+      message: 'Executing instructions...',
       summary: '',
       payload: {
         type: 'agent',
@@ -51,6 +51,7 @@ describe('FlowStore', () => {
     });
 
     expect(store.flowStates().get('f1')?.agents.has('agent-1')).toBe(true);
+    expect(store.flowStates().get('f1')?.agents.get('agent-1')?.status).toBe('Executing instructions...');
 
     store.processTelemetry({
       type: 'telemetry_event',

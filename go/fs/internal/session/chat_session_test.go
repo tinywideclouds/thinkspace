@@ -11,6 +11,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/db"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -92,6 +93,35 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 	mu := chatSession.Mu()
 	if mu == nil {
 		t.Errorf("Expected Mu() to return a valid RWMutex pointer")
+	}
+
+	// Verify GetActiveAddress recovers the exact same persisted GraphID on a fresh ChatSession instance
+	originalGraphID := chatSession.GetActiveAddress().GraphID
+	reloadedSession, err := session.NewChatSession(
+		ctx,
+		logger,
+		registry,
+		svcManager,
+		nil,
+		nil,
+		nil,
+		spaceID,
+		chatID,
+	)
+	if err != nil {
+		t.Fatalf("Failed to reload ChatSession: %v", err)
+	}
+	if reloadedSession.GetActiveAddress().GraphID != originalGraphID {
+		t.Errorf("Expected reloaded ChatSession to recover GraphID %s, got %s", originalGraphID, reloadedSession.GetActiveAddress().GraphID)
+	}
+
+	traversal := thinkgraph.NewTraversalEngine(svcManager.GraphRepository())
+	events, err := traversal.GetFullTimeline(ctx, reloadedSession.GetActiveAddress())
+	if err != nil {
+		t.Fatalf("Failed to query full timeline on reloaded session: %v", err)
+	}
+	if len(events) == 0 {
+		t.Errorf("Expected reloaded session address to resolve initialized timeline events, got 0")
 	}
 }
 

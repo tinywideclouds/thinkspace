@@ -256,11 +256,13 @@ message SubmitPrompt {
 
 message SelectStrategy {
   DelegationStrategy strategy_id = 1;
+  bool auto_accept = 2;
 }
 
 message ReviewDecision {
   string branch = 1;
   bool accepted = 2;
+  string reason = 3;
 }
 
 message ApproveContext {

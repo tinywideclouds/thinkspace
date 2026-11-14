@@ -45,7 +45,7 @@ describe('LlmFacade', () => {
           }
         }
       });
-
+      
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'streamed_graph_event',
@@ -53,7 +53,7 @@ describe('LlmFacade', () => {
         event: {
           id: 'event-1',
           type: 'file_delta',
-          timestamp: expect.anything(),
+          timestamp: expect.anything(), 
           tags: ['ui'],
           content: 'test content',
           path: 'src/main.ts',
@@ -103,7 +103,7 @@ describe('LlmFacade', () => {
           }
         }
       });
-
+      
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'streamed_graph_event',
@@ -158,7 +158,7 @@ describe('LlmFacade', () => {
           }
         }
       });
-
+      
       const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
       expect(domainEvent).toEqual({
         type: 'streamed_graph_event',
@@ -166,7 +166,7 @@ describe('LlmFacade', () => {
         event: {
           id: 'event-2',
           type: 'model',
-          timestamp: expect.anything(),
+          timestamp: expect.anything(), 
           tags: [],
           content: 'Here is the response',
           tombstoned: false,
@@ -244,7 +244,7 @@ describe('LlmFacade', () => {
           {
             id: 'event-valid',
             type: 'prompt',
-            timestamp: expect.anything(),
+            timestamp: expect.anything(), 
             tags: [],
             content: 'Valid prompt',
             tombstoned: false,
@@ -313,13 +313,14 @@ describe('LlmFacade', () => {
       });
     });
 
-    it('should map a preview context event correctly', () => {
+    it('should map a preview context event correctly including previewId', () => {
       const protocolBufferEvent = create(WSEventSchema, {
         payload: {
           case: 'previewContext',
           value: {
             spaceId: 'golang',
             chatId: 'chat-1',
+            previewId: 'prev-123',
             managerSystemPrompt: 'Test rules',
             stickyDigests: ['Sticky memory'],
             fileContexts: [
@@ -340,6 +341,7 @@ describe('LlmFacade', () => {
         context: {
           spaceId: 'golang',
           chatId: 'chat-1',
+          previewId: 'prev-123',
           managerSystemPrompt: 'Test rules',
           stickyDigests: ['Sticky memory'],
           recentHistory: [],
@@ -410,7 +412,7 @@ describe('LlmFacade', () => {
         channel: 'agent-1',
         id: 'uuid-123',
         eventType: 'flow_status',
-        timestamp: expect.anything(),
+        timestamp: expect.anything(), 
         message: 'Compiling Go AST...',
         summary: 'Testing AST',
         payload: {
@@ -436,7 +438,7 @@ describe('LlmFacade', () => {
   describe('Outbound Builders', () => {
     it('should create a valid SubmitPrompt WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createSubmitPrompt('Write a test', 'golang', 'test-chat');
-
+      
       expect(protocolBufferEvent.payload.case).toBe('submitPrompt');
       if (protocolBufferEvent.payload.case === 'submitPrompt') {
         expect(protocolBufferEvent.payload.value.text).toBe('Write a test');
@@ -447,7 +449,7 @@ describe('LlmFacade', () => {
 
     it('should create a valid LoadHistory WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createLoadHistory('golang', 'chat-1', 'cursor-123', 20);
-
+      
       expect(protocolBufferEvent.payload.case).toBe('loadHistory');
       if (protocolBufferEvent.payload.case === 'loadHistory') {
         expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
@@ -459,7 +461,7 @@ describe('LlmFacade', () => {
 
     it('should create a valid ApproveContext WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createApproveContext(true, ['src/main.go'], [0, 2]);
-
+      
       expect(protocolBufferEvent.payload.case).toBe('approveContext');
       if (protocolBufferEvent.payload.case === 'approveContext') {
         expect(protocolBufferEvent.payload.value.approved).toBe(true);
@@ -468,28 +470,30 @@ describe('LlmFacade', () => {
       }
     });
 
-    it('should create a valid SelectStrategy WSEvent', () => {
-      const protocolBufferEvent = LlmFacade.createSelectStrategy(DelegationStrategy.REFINE);
-
+    it('should create a valid SelectStrategy WSEvent with autoAccept', () => {
+      const protocolBufferEvent = LlmFacade.createSelectStrategy(DelegationStrategy.REFINE, true);
+      
       expect(protocolBufferEvent.payload.case).toBe('selectStrategy');
       if (protocolBufferEvent.payload.case === 'selectStrategy') {
         expect(protocolBufferEvent.payload.value.strategyId).toBe(ProtoDelegationStrategy.REFINE);
+        expect(protocolBufferEvent.payload.value.autoAccept).toBe(true);
       }
     });
 
-    it('should create a valid ReviewDecision WSEvent', () => {
-      const protocolBufferEvent = LlmFacade.createReviewDecision('candidate/123', true);
-
+    it('should create a valid ReviewDecision WSEvent with reason', () => {
+      const protocolBufferEvent = LlmFacade.createReviewDecision('candidate/123', true, 'looks clean');
+      
       expect(protocolBufferEvent.payload.case).toBe('reviewDecision');
       if (protocolBufferEvent.payload.case === 'reviewDecision') {
         expect(protocolBufferEvent.payload.value.branch).toBe('candidate/123');
         expect(protocolBufferEvent.payload.value.accepted).toBe(true);
+        expect(protocolBufferEvent.payload.value.reason).toBe('looks clean');
       }
     });
 
     it('should create a valid LoadSubGraph WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createLoadSubGraph('golang', 'chat-1', 'flow-123');
-
+      
       expect(protocolBufferEvent.payload.case).toBe('loadSubGraph');
       if (protocolBufferEvent.payload.case === 'loadSubGraph') {
         expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
@@ -500,7 +504,7 @@ describe('LlmFacade', () => {
 
     it('should create a valid TransitionDecision WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createTransitionDecision(false);
-
+      
       expect(protocolBufferEvent.payload.case).toBe('transitionDecision');
       if (protocolBufferEvent.payload.case === 'transitionDecision') {
         expect(protocolBufferEvent.payload.value.approved).toBe(false);
@@ -509,7 +513,7 @@ describe('LlmFacade', () => {
 
     it('should create a valid ForkChat WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createForkChat('golang', 'chat-1', 'event-456');
-
+      
       expect(protocolBufferEvent.payload.case).toBe('forkChat');
       if (protocolBufferEvent.payload.case === 'forkChat') {
         expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
@@ -520,7 +524,7 @@ describe('LlmFacade', () => {
 
     it('should create a valid InlineEdit WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createInlineEdit('golang', 'chat-1', 'event-456', 'New text');
-
+      
       expect(protocolBufferEvent.payload.case).toBe('inlineEdit');
       if (protocolBufferEvent.payload.case === 'inlineEdit') {
         expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');
@@ -532,7 +536,7 @@ describe('LlmFacade', () => {
 
     it('should create a valid SwitchBranch WSEvent', () => {
       const protocolBufferEvent = LlmFacade.createSwitchBranch('golang', 'chat-1', 'feature-branch');
-
+      
       expect(protocolBufferEvent.payload.case).toBe('switchBranch');
       if (protocolBufferEvent.payload.case === 'switchBranch') {
         expect(protocolBufferEvent.payload.value.spaceId).toBe('golang');

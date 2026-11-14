@@ -36,13 +36,15 @@ type FlowState struct {
 	InitialTasks []SubAgentTask
 	Candidates   []BranchResult
 	UserStrategy FlowStrategy
+	AutoAccept   bool
 }
 
 // FlowDirective is the command the Flow returns to direct the FlowEngine.
 type FlowDirective struct {
-	Action FlowAction
-	Tasks  []SubAgentTask
-	Error  error
+	Action     FlowAction
+	Tasks      []SubAgentTask
+	AutoAccept bool
+	Error      error
 }
 
 // SubAgentTask defines a single isolated work unit for a sub-agent.

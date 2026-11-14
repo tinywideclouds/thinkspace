@@ -91,13 +91,13 @@ export class FlowStore {
         };
 
         if (event.eventType === 'agent_status' || event.eventType === 'flow_status') {
-          agent.status = 'running_tests'; 
+          agent.status = event.message || 'running';
         } else if (event.eventType === 'agent_complete' || event.eventType === 'flow_complete') {
-          agent.status = 'completed';
+          agent.status = payload.passed ? 'completed' : 'failed';
           agent.passed = payload.passed;
           agent.trace = payload.trace;
         } else if (event.eventType === 'agent_error' || event.eventType === 'flow_error') {
-          agent.status = 'error';
+          agent.status = event.message || 'verification failed';
           agent.passed = false;
           agent.trace = payload.trace;
         }

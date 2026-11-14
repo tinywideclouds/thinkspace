@@ -186,17 +186,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			chatSession.Mu().RLock()
-			activeBranch := chatSession.Meta.ActiveBranch
-			chatSession.Mu().RUnlock()
-
-			chatAddress := &thinkgraph.ChatAddress{
-				ChatID:    payload.ChatID,
-				ProjectID: payload.SpaceID,
-				SubGraph: thinkgraph.SubGraph{
-					Name: activeBranch,
-				},
-			}
+			chatAddress := chatSession.GetActiveAddress()
 
 			service := server.manager.GetService(payload.SpaceID)
 			if err := service.SyncGraphContext(ctx, chatAddress); err != nil {
@@ -227,7 +217,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			coordinate := ProjectionCoordinate{SpaceID: payload.SpaceID, ChatID: payload.ChatID, ProjectionID: activeBranch}
+			coordinate := ProjectionCoordinate{SpaceID: payload.SpaceID, ChatID: payload.ChatID, ProjectionID: chatAddress.Name}
 			syncData, err := MarshalSyncHistory(events, digests, focus, nextCursor, hasMore, coordinate)
 			if err != nil {
 				server.logger.Error("Failed to marshal history sync payload", "error", err)
@@ -306,14 +296,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed to update chat meta on fork", "error", err)
 			}
 
-			chatAddress := &thinkgraph.ChatAddress{
-				ChatID:    payload.ChatID,
-				ProjectID: payload.SpaceID,
-				SubGraph: thinkgraph.SubGraph{
-					Name:    newBranchID,
-					GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
-				},
-			}
+			chatAddress := chatSession.GetActiveAddress()
 
 			service := server.manager.GetService(payload.SpaceID)
 			if err := service.AppendBranchAnchor(ctx, chatAddress, parentBranch, targetID); err != nil {
@@ -345,17 +328,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			chatSession.Mu().RLock()
-			activeBranch := chatSession.Meta.ActiveBranch
-			chatSession.Mu().RUnlock()
-
-			chatAddress := &thinkgraph.ChatAddress{
-				ChatID:    payload.ChatID,
-				ProjectID: payload.SpaceID,
-				SubGraph: thinkgraph.SubGraph{
-					Name: activeBranch,
-				},
-			}
+			chatAddress := chatSession.GetActiveAddress()
 
 			if err := server.manager.GetService(payload.SpaceID).AppendUserPrompt(ctx, chatAddress, payload.NewText); err != nil {
 				server.logger.Error("Failed logging amended prompt", "error", err)
@@ -396,13 +369,7 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed updating meta on switch branch", "error", err)
 			}
 
-			chatAddress := &thinkgraph.ChatAddress{
-				ChatID:    payload.ChatID,
-				ProjectID: payload.SpaceID,
-				SubGraph: thinkgraph.SubGraph{
-					Name: payload.TargetBranch,
-				},
-			}
+			chatAddress := chatSession.GetActiveAddress()
 
 			service := server.manager.GetService(payload.SpaceID)
 			if err := service.SyncGraphContext(ctx, chatAddress); err != nil {
@@ -423,10 +390,10 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "select_strategy":
-			connectionManager.PushStrategy(inbound.SelectStrategy.StrategyID)
+			connectionManager.PushStrategy(inbound.SelectStrategy.StrategyID, inbound.SelectStrategy.AutoAccept)
 
 		case "review_decision":
-			connectionManager.PushReviewDecision(inbound.ReviewDecision.Accepted)
+			connectionManager.PushReviewDecision(inbound.ReviewDecision.Accepted, inbound.ReviewDecision.Reason)
 
 		case "approve_context":
 			decision := session.ContextApprovalDecision{

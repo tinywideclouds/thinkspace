@@ -122,9 +122,14 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	}
 
 	// Test 3: ChooseNextStep Blocking and Channel Push via embedded struct
-	strategyChosen := make(chan flows.FlowStrategy)
+	type stratRes struct {
+		strategy   flows.FlowStrategy
+		autoAccept bool
+	}
+	strategyChosen := make(chan stratRes)
 	go func() {
-		strategyChosen <- ui.ChooseNextStep()
+		s, a := ui.ChooseNextStep()
+		strategyChosen <- stratRes{strategy: s, autoAccept: a}
 	}()
 
 	_, data, err = conn.Read(ctx)
@@ -145,12 +150,15 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		t.Errorf("expected active true, got false")
 	}
 
-	connectionManager.PushStrategy(flows.StrategyRefine)
+	connectionManager.PushStrategy(flows.StrategyRefine, true)
 
 	select {
-	case strategy := <-strategyChosen:
-		if strategy != flows.StrategyRefine {
-			t.Errorf("expected StrategyRefine, got %v", strategy)
+	case res := <-strategyChosen:
+		if res.strategy != flows.StrategyRefine {
+			t.Errorf("expected StrategyRefine, got %v", res.strategy)
+		}
+		if !res.autoAccept {
+			t.Errorf("expected autoAccept true, got false")
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for strategy channel to unblock")

@@ -2,9 +2,8 @@ import {
   Component,
   input,
   output,
-  signal,
   computed,
-  effect,
+  linkedSignal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PreviewContext } from '@org/llm-core-facade';
@@ -16,7 +15,7 @@ import { PreviewContext } from '@org/llm-core-facade';
   templateUrl: './context-inspector.component.html',
 })
 export class ContextInspectorComponent {
-  context = input.required<PreviewContext & { previewId?: string }>();
+  context = input.required<PreviewContext>();
 
   approve = output<{
     retainedFilePaths: string[];
@@ -25,22 +24,15 @@ export class ContextInspectorComponent {
   reviewCancelled = output<void>();
   copyFull = output<string>();
 
-  retainedFiles = signal<Set<string>>(new Set());
-  retainedHistory = signal<Set<number>>(new Set());
+  retainedFiles = linkedSignal<Set<string>>(() => {
+    const files = this.context()?.fileContexts || [];
+    return new Set(files.map((f) => f.path));
+  });
 
-  constructor() {
-    effect(() => {
-      const ctx = this.context();
-      if (ctx) {
-        this.retainedFiles.set(
-          new Set(ctx.fileContexts?.map((f) => f.path) || []),
-        );
-        this.retainedHistory.set(
-          new Set(ctx.recentHistory?.map((_, i) => i) || []),
-        );
-      }
-    });
-  }
+  retainedHistory = linkedSignal<Set<number>>(() => {
+    const history = this.context()?.recentHistory || [];
+    return new Set(history.map((_, i) => i));
+  });
 
   toggleFile(path: string): void {
     const current = new Set(this.retainedFiles());
@@ -64,7 +56,8 @@ export class ContextInspectorComponent {
 
   totalFileTokens = computed(() => {
     const retained = this.retainedFiles();
-    return this.context().fileContexts.reduce((sum, file) => {
+    const files = this.context()?.fileContexts || [];
+    return files.reduce((sum, file) => {
       return retained.has(file.path) ? sum + file.tokenCount : sum;
     }, 0);
   });

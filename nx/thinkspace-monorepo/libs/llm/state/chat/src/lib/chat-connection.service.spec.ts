@@ -85,7 +85,7 @@ describe('ChatConnectionService', () => {
       isLoadingHistory: signal(false),
       activeProjectionId: signal('main'),
       nextCursor: signal(''),
-      hasMore: signal(true),
+      hasMore: signal(false),
       coreChat: computed(() => []),
       setHistoryMetadata: vi.fn(),
       isActiveView: vi.fn(() => true)
@@ -136,6 +136,37 @@ describe('ChatConnectionService', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('should automatically request initial loadHistory when connected with an active space and chat', () => {
+    service.connect('ws://localhost:8080/ws');
+    TestBed.flushEffects();
+
+    expect(transportMock.send).toHaveBeenCalledTimes(1);
+    const sentEvent = transportMock.send.mock.calls[0][0];
+    expect(sentEvent.payload.case).toBe('loadHistory');
+    if (sentEvent.payload.case === 'loadHistory') {
+      expect(sentEvent.payload.value.spaceId).toBe('space-1');
+      expect(sentEvent.payload.value.chatId).toBe('chat-1');
+      expect(sentEvent.payload.value.cursor).toBe('');
+      expect(sentEvent.payload.value.limit).toBe(50);
+    }
+  });
+
+  it('should re-trigger loadHistory when activeChatId changes', () => {
+    service.connect('ws://localhost:8080/ws');
+    TestBed.flushEffects();
+    transportMock.send.mockClear();
+
+    workspaceMock.activeChatId.set('chat-2');
+    TestBed.flushEffects();
+
+    expect(transportMock.send).toHaveBeenCalledTimes(1);
+    const sentEvent = transportMock.send.mock.calls[0][0];
+    expect(sentEvent.payload.case).toBe('loadHistory');
+    if (sentEvent.payload.case === 'loadHistory') {
+      expect(sentEvent.payload.value.chatId).toBe('chat-2');
+    }
   });
 
   it('should route sync_history into GraphStore projection logic', () => {
