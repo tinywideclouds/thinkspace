@@ -1,6 +1,12 @@
 import { AgentRecord } from '@org/llm-core-facade';
 
-export type ChatItemType = 'prompt' | 'model' | 'system' | 'file_delta' | 'flow_execution';
+export type ChatItemType =
+  | 'prompt'
+  | 'model'
+  | 'system'
+  | 'file_delta'
+  | 'flow_execution'
+  | 'candidate_resolution';
 
 export interface BaseChatItem {
   id: string;
@@ -37,10 +43,19 @@ export interface FileDeltaChatItem extends BaseChatItem {
   parentId?: string;
 }
 
-export type ChatItem = 
-  | MessageChatItem 
-  | FlowExecutionChatItem 
-  | FileDeltaChatItem;
+export interface CandidateResolutionChatItem extends BaseChatItem {
+  type: 'candidate_resolution';
+  content: string;
+  candidateId: string;
+  accepted: boolean;
+  reason: string;
+}
+
+export type ChatItem =
+  | MessageChatItem
+  | FlowExecutionChatItem
+  | FileDeltaChatItem
+  | CandidateResolutionChatItem;
 
 export interface LogItem {
   id: string;

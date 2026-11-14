@@ -16,16 +16,51 @@ describe('FlowStore', () => {
 
   it('should process telemetry events and update flow states independently', () => {
     store.processTelemetry({
-      type: 'telemetry_event', channel: 'manager', id: '1', eventType: 'flow_start', timestamp: '', message: '', summary: '',
-      payload: { flow_id: 'f1', agent_count: 1 }
+      type: 'telemetry_event',
+      channel: 'manager',
+      id: '1',
+      eventType: 'flow_start',
+      timestamp: Temporal.Now.instant(),
+      message: '',
+      summary: '',
+      payload: { type: 'flow', flowId: 'f1', taskId: 't1', agentCount: 1 }
     });
 
     expect(store.flowStates().has('f1')).toBe(true);
     expect(store.flowStates().get('f1')?.status).toBe('running');
 
     store.processTelemetry({
-      type: 'telemetry_event', channel: 'manager', id: '2', eventType: 'flow_complete', timestamp: '', message: '', summary: '',
-      payload: { flow_id: 'f1', agent_index: 1, passed: true }
+      type: 'telemetry_event',
+      channel: 'agent-1',
+      id: '2',
+      eventType: 'agent_status',
+      timestamp: Temporal.Now.instant(),
+      message: 'Executing...',
+      summary: '',
+      payload: {
+        type: 'agent',
+        flowId: 'f1',
+        agentId: 'agent-1',
+        agentIndex: 1,
+        instruction: 'Do task',
+        attempt: 1,
+        trace: '',
+        candidateId: '',
+        passed: false
+      }
+    });
+
+    expect(store.flowStates().get('f1')?.agents.has('agent-1')).toBe(true);
+
+    store.processTelemetry({
+      type: 'telemetry_event',
+      channel: 'manager',
+      id: '3',
+      eventType: 'flow_complete',
+      timestamp: Temporal.Now.instant(),
+      message: '',
+      summary: '',
+      payload: { type: 'flow', flowId: 'f1', taskId: 't1', agentCount: 1 }
     });
 
     expect(store.flowStates().get('f1')?.status).toBe('completed');

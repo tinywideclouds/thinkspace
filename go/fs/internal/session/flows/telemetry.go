@@ -1,12 +1,13 @@
 package flows
 
 import (
+	"fmt"
 	"time"
 
 	"uuid"
 )
 
-// TelemetryEvent is the universal structured event for all background observability.
+// TelemetryEvent is the universal structured event for local flow observability.
 type TelemetryEvent struct {
 	ID        uuid.UUID
 	Type      string
@@ -29,23 +30,14 @@ type FlowTelemetry struct {
 	AgentCount int
 }
 
-func (f FlowTelemetry) ToMap() map[string]any {
-	m := make(map[string]any)
-	if f.FlowID != "" {
-		m["flow_id"] = f.FlowID
-	}
-	if f.TaskID != "" {
-		m["task_id"] = f.TaskID
-	}
-	if f.AgentCount != 0 {
-		m["agent_count"] = f.AgentCount
-	}
-	return m
+func (f FlowTelemetry) Summary() string {
+	return fmt.Sprintf("Flow %s (%d agents)", f.FlowID, f.AgentCount)
 }
 
 // AgentTelemetry tracks micro-level execution data within the sub-agent loop.
 type AgentTelemetry struct {
 	FlowID      string
+	AgentID     string
 	AgentIndex  int
 	Instruction string
 	Attempt     int
@@ -54,26 +46,22 @@ type AgentTelemetry struct {
 	Passed      bool
 }
 
-func (a AgentTelemetry) ToMap() map[string]any {
-	m := make(map[string]any)
-	if a.FlowID != "" {
-		m["flow_id"] = a.FlowID
+func (a AgentTelemetry) Summary() string {
+	id := a.AgentID
+	if id == "" {
+		id = fmt.Sprintf("agent-%d", a.AgentIndex)
 	}
-	if a.AgentIndex != 0 {
-		m["agent_index"] = a.AgentIndex
+	if a.Attempt > 0 {
+		return fmt.Sprintf("Agent %s [attempt %d]", id, a.Attempt)
 	}
-	if a.Instruction != "" {
-		m["instruction"] = a.Instruction
-	}
-	if a.Attempt != 0 {
-		m["attempt"] = a.Attempt
-	}
-	if a.Trace != "" {
-		m["trace"] = a.Trace
-	}
-	if a.CandidateID != "" {
-		m["candidate_id"] = a.CandidateID
-	}
-	m["passed"] = a.Passed
-	return m
+	return fmt.Sprintf("Agent %s", id)
+}
+
+// TransitionTelemetry tracks think state domain transitions.
+type TransitionTelemetry struct {
+	TargetThinkState string
+}
+
+func (t TransitionTelemetry) Summary() string {
+	return fmt.Sprintf("Transition to %s", t.TargetThinkState)
 }

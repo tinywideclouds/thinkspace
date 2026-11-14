@@ -15,7 +15,6 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -160,10 +159,7 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 	// Test 4: ConfirmTransition Blocking and Channel Push via embedded struct
 	transitionChosen := make(chan bool)
 	go func() {
-		transitionChosen <- ui.ConfirmTransition(signals.SignalTransition{
-			TargetThinkState: "golang",
-			Reasoning:        "need code",
-		})
+		transitionChosen <- ui.ConfirmTransition("golang", "need code")
 	}()
 
 	_, data, err = conn.Read(ctx)

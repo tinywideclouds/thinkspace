@@ -330,6 +330,6 @@ func (m *streamMultiplexer) OnTextChunk(chunk workspace.NodeChunk) {
 	}
 }
 
-func (m *streamMultiplexer) ConfirmTransition(req signals.SignalTransition) bool {
+func (m *streamMultiplexer) ConfirmTransition(targetThinkState string, reasoning string) bool {
 	return false
 }

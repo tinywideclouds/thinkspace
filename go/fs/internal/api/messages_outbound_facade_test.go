@@ -2,7 +2,6 @@ package api_test
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -126,7 +126,7 @@ func TestMarshalPreviewContext(t *testing.T) {
 	}
 }
 
-func TestMarshalTelemetryEvent(t *testing.T) {
+func TestMarshalTelemetryEvent_AgentPayload(t *testing.T) {
 	testTime := time.Date(2026, 8, 28, 10, 47, 45, 0, time.UTC)
 	eventID := uuid.NewV7()
 
@@ -134,11 +134,10 @@ func TestMarshalTelemetryEvent(t *testing.T) {
 		ID:        eventID,
 		Type:      "flow_error",
 		Message:   "verification failed",
-		Summary:   "Flow summary",
 		Timestamp: testTime,
-		Payload: map[string]any{
-			"agent_id": "agent-1",
-			"attempt":  2,
+		Payload: flows.AgentTelemetry{
+			AgentID: "agent-1",
+			Attempt: 2,
 		},
 	}
 
@@ -172,8 +171,9 @@ func TestMarshalTelemetryEvent(t *testing.T) {
 	if eventRaw["type"] != "flow_error" {
 		t.Errorf("expected type 'flow_error', got %v", eventRaw["type"])
 	}
-	if eventRaw["summary"] != "Flow summary" {
-		t.Errorf("expected summary, got %v", eventRaw["summary"])
+	// Verify behavioral Summary() fallback populated the event summary automatically
+	if eventRaw["summary"] != "Agent agent-1 [attempt 2]" {
+		t.Errorf("expected derived summary 'Agent agent-1 [attempt 2]', got %v", eventRaw["summary"])
 	}
 
 	expectedTime := testTime.Format(time.RFC3339)
@@ -181,12 +181,64 @@ func TestMarshalTelemetryEvent(t *testing.T) {
 		t.Errorf("expected timestamp %s, got %v", expectedTime, eventRaw["timestamp"])
 	}
 
-	payloadJSON, ok := eventRaw["payloadJson"].(string)
+	agentPayload, ok := eventRaw["agentPayload"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected payloadJson string, got %v", eventRaw["payloadJson"])
+		t.Fatalf("expected agentPayload oneof wrapper")
 	}
-	if !strings.Contains(payloadJSON, `"agent_id":"agent-1"`) {
-		t.Errorf("expected JSON payload to contain nested agent_id, got %s", payloadJSON)
+	if agentPayload["agentId"] != "agent-1" {
+		t.Errorf("expected agentId 'agent-1', got %v", agentPayload["agentId"])
+	}
+}
+
+func TestMarshalTelemetryEvent_FlowPayload(t *testing.T) {
+	testTime := time.Date(2026, 8, 28, 10, 47, 45, 0, time.UTC)
+	eventID := uuid.NewV7()
+
+	domainEvent := telemetry.Event{
+		ID:        eventID,
+		Type:      "flow_start",
+		Message:   "Starting Flow",
+		Summary:   "Explicit Flow Summary",
+		Timestamp: testTime,
+		Payload: flows.FlowTelemetry{
+			FlowID:     "flow-123",
+			AgentCount: 4,
+		},
+	}
+
+	data, err := api.MarshalTelemetryEvent("manager", domainEvent)
+	if err != nil {
+		t.Fatalf("failed to marshal telemetry event: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+
+	payloadRaw, ok := result["telemetryEvent"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected 'telemetryEvent' wrapper")
+	}
+
+	eventRaw, ok := payloadRaw["event"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested 'event' struct")
+	}
+
+	if eventRaw["summary"] != "Explicit Flow Summary" {
+		t.Errorf("expected explicit summary 'Explicit Flow Summary', got %v", eventRaw["summary"])
+	}
+
+	flowPayload, ok := eventRaw["flowPayload"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected flowPayload oneof wrapper")
+	}
+	if flowPayload["flowId"] != "flow-123" {
+		t.Errorf("expected flowId 'flow-123', got %v", flowPayload["flowId"])
+	}
+	if float64(flowPayload["agentCount"].(float64)) != float64(4) {
+		t.Errorf("expected agentCount 4, got %v", flowPayload["agentCount"])
 	}
 }
 

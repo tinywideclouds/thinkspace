@@ -9,7 +9,6 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
@@ -60,8 +59,8 @@ func (cm *ConnectionManager) GetChunkChannel() chan<- workspace.NodeChunk {
 	return cm.chunkChan
 }
 
-func (cm *ConnectionManager) ConfirmTransition(req signals.SignalTransition) bool {
-	data, err := MarshalRequestTransition(req.TargetThinkState, req.Reasoning)
+func (cm *ConnectionManager) ConfirmTransition(targetThinkState string, reasoning string) bool {
+	data, err := MarshalRequestTransition(targetThinkState, reasoning)
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request transition", "error", err)
 	} else {

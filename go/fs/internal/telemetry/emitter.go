@@ -7,6 +7,12 @@ import (
 	"uuid"
 )
 
+// Payload defines a domain-specific telemetry payload that can summarize itself
+// for structured logging and UI fallback displays.
+type Payload interface {
+	Summary() string
+}
+
 // Event is the universal structured event for all background observability.
 type Event struct {
 	ID        uuid.UUID
@@ -14,7 +20,7 @@ type Event struct {
 	Timestamp time.Time
 	Message   string
 	Summary   string
-	Payload   map[string]any
+	Payload   Payload
 }
 
 // Emitter provides a decoupled Pub/Sub pipeline for orchestrators
@@ -48,12 +54,13 @@ func (s *SlogEmitter) Emit(channel string, event Event) {
 		"event_type", event.Type,
 	)
 
-	for k, v := range event.Payload {
-		log = log.With(k, v)
+	summary := event.Summary
+	if summary == "" && event.Payload != nil {
+		summary = event.Payload.Summary()
 	}
 
-	if event.Summary != "" {
-		log = log.With("summary", event.Summary)
+	if summary != "" {
+		log = log.With("summary", summary)
 	}
 
 	if event.Type == "error" || event.Type == "flow_error" {

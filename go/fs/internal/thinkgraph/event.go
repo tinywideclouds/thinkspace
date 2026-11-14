@@ -18,6 +18,12 @@ const (
 	EventSystem       EventType = "system"
 )
 
+// GraphPayload ensures that any domain struct attached to a node
+// explicitly implements its own JSON serialization for BadgerDB.
+type GraphPayload interface {
+	GraphData() (json.RawMessage, error)
+}
+
 // Event is the storage envelope for the append-only ledger.
 type Event struct {
 	ID        uuid.UUID         `json:"id"`

@@ -112,7 +112,7 @@ func (e *TurnExecutor) Execute(
 			}
 		}
 
-		e.logger.DebugContext(ctx, "raw LLM generation complete", "output", fullModelResponse.String())
+		e.logger.InfoContext(ctx, "TurnExecutor LLM generation complete", "text_length", fullModelResponse.Len(), "tool_count", len(interceptedTools), "response_id", responseID)
 
 		if fullModelResponse.Len() > 0 {
 			var usage *telemetry.TokenUsage
@@ -152,7 +152,6 @@ func (e *TurnExecutor) Execute(
 		var yieldedSignal signals.EngineSignal
 		var mergedDispatch *signals.SignalDispatchFlow
 
-		// Iterate over all tools instead of blindly dropping index 1+
 		for _, call := range interceptedTools {
 			e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name)
 
@@ -170,18 +169,68 @@ func (e *TurnExecutor) Execute(
 				RawArguments: call.Args,
 			}
 
-			signal, err := tool.Execute(timeoutCtx, ec)
+			tr, err := tool.Execute(timeoutCtx, ec)
 			if err != nil {
 				return nil, err
 			}
 
-			if signal != nil {
-				e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", signal))
-				if dispatchSig, ok := signal.(*signals.SignalDispatchFlow); ok {
+			if tr.Content != "" {
+				bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+					Role:    "model",
+					Content: tr.Content,
+				})
+			}
+
+			// ONLY write to the graph if the tool explicitly provided content or payload
+			if tr.Payload != nil || tr.Content != "" {
+				toolNodeID := responseID
+				if fullModelResponse.Len() > 0 {
+					toolNodeID = uuid.NewV7()
+				}
+
+				ev := thinkgraph.NewEvent(thinkgraph.EventModel, tr.Content)
+				ev.ID = toolNodeID
+
+				if tr.Payload != nil {
+					data, err := tr.Payload.GraphData()
+					if err != nil {
+						return nil, fmt.Errorf("failed to serialize tool payload: %w", err)
+					}
+					ev.Data = data
+				}
+
+				if toolNodeID != responseID {
+					ev.Edges = map[string]string{"parent_id": responseID.String()}
+				} else if parentID != uuid.Nil() {
+					ev.Edges = map[string]string{"parent_id": parentID.String()}
+				}
+
+				if address != nil && !address.GraphID.IsZero() {
+					ev.GraphID = address.GraphID
+				}
+
+				_ = e.workspaceService.Dispatcher().AppendEvent(ctx, address, ev)
+
+				if ui != nil {
+					if fullModelResponse.Len() == 0 && tr.Content != "" {
+						ui.OnTextChunk(workspace.NodeChunk{NodeID: responseID, Text: tr.Content})
+					}
+
+					if sessionUI, ok := ui.(UserInterface); ok {
+						sessionUI.StreamGraphEvent(address, thinkgraph.Node{Event: ev})
+					} else if castUI, ok := ui.(interface {
+						StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
+					}); ok {
+						castUI.StreamGraphEvent(address, thinkgraph.Node{Event: ev})
+					}
+				}
+			}
+
+			if tr.Signal != nil {
+				e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", tr.Signal))
+				if dispatchSig, ok := tr.Signal.(*signals.SignalDispatchFlow); ok {
 					if mergedDispatch == nil {
-						mergedDispatch = &signals.SignalDispatchFlow{
-							Summary: dispatchSig.Summary,
-						}
+						mergedDispatch = &signals.SignalDispatchFlow{}
 					}
 					for _, task := range dispatchSig.Tasks {
 						task.AgentID = fmt.Sprintf("agent-%d", len(mergedDispatch.Tasks)+1)
@@ -189,7 +238,7 @@ func (e *TurnExecutor) Execute(
 					}
 					yieldedSignal = mergedDispatch
 				} else if yieldedSignal == nil {
-					yieldedSignal = signal
+					yieldedSignal = tr.Signal
 				}
 			}
 		}

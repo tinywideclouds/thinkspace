@@ -48,14 +48,14 @@ func (t *CreateDigestTool) DefaultDescription() string {
 	return "Compress a concluded discussion or major architectural decision into durable memory."
 }
 
-func (t *CreateDigestTool) Execute(ctx context.Context, executionContext ExecutionContext) (signals.EngineSignal, error) {
+func (t *CreateDigestTool) Execute(ctx context.Context, executionContext ExecutionContext) (ToolResponse, error) {
 	var request CreateDigestRequest
 	argumentBytes, err := json.Marshal(executionContext.RawArguments)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling create_digest arguments: %w", err)
+		return ToolResponse{}, fmt.Errorf("marshaling create_digest arguments: %w", err)
 	}
 	if err := json.Unmarshal(argumentBytes, &request); err != nil {
-		return nil, fmt.Errorf("invalid create_digest schema: %w", err)
+		return ToolResponse{}, fmt.Errorf("invalid create_digest schema: %w", err)
 	}
 
 	if request.TopicName == "" || request.Instruction == "" {
@@ -67,7 +67,7 @@ func (t *CreateDigestTool) Execute(ctx context.Context, executionContext Executi
 				Message:   "Manager provided incomplete digest parameters. Aborting.",
 			})
 		}
-		return nil, fmt.Errorf("manager provided empty topic or instruction")
+		return ToolResponse{}, fmt.Errorf("manager provided empty topic or instruction")
 	}
 
 	var sb strings.Builder
@@ -86,8 +86,8 @@ func (t *CreateDigestTool) Execute(ctx context.Context, executionContext Executi
 		sb.String(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("manual digest creation failed: %w", err)
+		return ToolResponse{}, fmt.Errorf("manual digest creation failed: %w", err)
 	}
 
-	return &signals.SignalTerminal{}, nil
+	return ToolResponse{Signal: &signals.SignalTerminal{}}, nil
 }

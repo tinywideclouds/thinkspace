@@ -10,7 +10,6 @@ export class FlowStore {
   
   public inspectedFlow = signal<FlowExecutionChatItem | null>(null);
   
-  // ADDED: The signal driving the full-screen DAG overlay
   public inspectedGraphId = signal<string | null>(null);
 
   public appendSystemLog(level: string, message: string): void {
@@ -30,23 +29,18 @@ export class FlowStore {
   }
 
   public processTelemetry(event: TelemetryEvent): void {
-    const payload = event.payload || {};
-
     if (event.channel === 'manager') {
       this.appendSystemLog('INFO', event.message || event.summary || event.eventType);
       
-      const flowId = typeof payload['flow_id'] === 'string' ? payload['flow_id'] : '';
-      if (flowId) {
+      if (event.payload?.type === 'flow') {
+        const payload = event.payload;
         if (event.eventType === 'flow_start') {
-           const taskId = typeof payload['task_id'] === 'string' ? payload['task_id'] : 'unknown';
-           const agentCount = typeof payload['agent_count'] === 'number' ? payload['agent_count'] : 0;
-           
            this.flowStates.update(map => {
              const newMap = new Map(map);
-             newMap.set(flowId, {
-               flowId,
-               taskId,
-               agentCount,
+             newMap.set(payload.flowId, {
+               flowId: payload.flowId,
+               taskId: payload.taskId,
+               agentCount: payload.agentCount,
                completedCount: 0,
                status: 'running',
                agents: new Map<string, FlowAgentState>()
@@ -56,9 +50,9 @@ export class FlowStore {
         } else if (event.eventType === 'flow_complete') {
            this.flowStates.update(map => {
              const newMap = new Map(map);
-             const flow = newMap.get(flowId);
+             const flow = newMap.get(payload.flowId);
              if (flow) {
-               newMap.set(flowId, { ...flow, status: 'completed' });
+               newMap.set(payload.flowId, { ...flow, status: 'completed' });
              }
              return newMap;
            });
@@ -67,58 +61,54 @@ export class FlowStore {
       return;
     }
 
-    // Agent channel telemetry
-    const flowId = typeof payload['flow_id'] === 'string' ? payload['flow_id'] : '';
-    const agentId = typeof payload['agent_id'] === 'string' ? payload['agent_id'] : '';
-    if (!flowId || !agentId) return;
+    if (event.payload?.type === 'agent') {
+      const payload = event.payload;
+      
+      this.flowStates.update(map => {
+        const newMap = new Map(map);
+        const flow = newMap.get(payload.flowId);
+        if (!flow) return newMap;
 
-    this.flowStates.update(map => {
-      const newMap = new Map(map);
-      const flow = newMap.get(flowId);
-      if (!flow) return newMap;
+        const agents = new Map(flow.agents);
+        const existingAgent = agents.get(payload.agentId);
 
-      const agents = new Map(flow.agents);
-      const existingAgent = agents.get(agentId);
+        const agent: FlowAgentState = existingAgent || {
+          agentId: payload.agentId,
+          agentIndex: payload.agentIndex,
+          instruction: payload.instruction,
+          status: 'running',
+          attempt: 1,
+          trace: '',
+          passed: false,
+          timeline: []
+        };
 
-      const agentIndex = typeof payload['agent_index'] === 'number' ? payload['agent_index'] : 0;
-      const instruction = typeof payload['instruction'] === 'string' ? payload['instruction'] : '';
+        const timelineEntry: TimelineEntry = {
+          id: event.id || crypto.randomUUID(),
+          timestamp: Date.now(), 
+          message: event.message || event.eventType,
+          isError: event.eventType.includes('error') || event.eventType.includes('failed')
+        };
 
-      const agent: FlowAgentState = existingAgent || {
-        agentId,
-        agentIndex,
-        instruction,
-        status: 'running',
-        attempt: 1,
-        trace: '',
-        passed: false,
-        timeline: []
-      };
+        if (event.eventType === 'agent_status' || event.eventType === 'flow_status') {
+          agent.status = 'running_tests'; 
+        } else if (event.eventType === 'agent_complete' || event.eventType === 'flow_complete') {
+          agent.status = 'completed';
+          agent.passed = payload.passed;
+          agent.trace = payload.trace;
+        } else if (event.eventType === 'agent_error' || event.eventType === 'flow_error') {
+          agent.status = 'error';
+          agent.passed = false;
+          agent.trace = payload.trace;
+        }
 
-      const timelineEntry: TimelineEntry = {
-        id: event.id || crypto.randomUUID(),
-        timestamp: Date.now(), 
-        message: event.message || event.eventType,
-        isError: event.eventType.includes('error') || event.eventType.includes('failed')
-      };
+        agent.timeline = [...agent.timeline, timelineEntry];
+        agents.set(payload.agentId, agent);
+        newMap.set(payload.flowId, { ...flow, agents });
 
-      if (event.eventType === 'agent_status') {
-         agent.status = typeof payload['status'] === 'string' ? payload['status'] : agent.status;
-      } else if (event.eventType === 'agent_complete') {
-         agent.status = 'completed';
-         agent.passed = Boolean(payload['passed']);
-         agent.trace = typeof payload['trace'] === 'string' ? payload['trace'] : '';
-      } else if (event.eventType === 'agent_error') {
-         agent.status = 'error';
-         agent.passed = false;
-         agent.trace = typeof payload['trace'] === 'string' ? payload['trace'] : '';
-      }
-
-      agent.timeline = [...agent.timeline, timelineEntry];
-      agents.set(agentId, agent);
-      newMap.set(flowId, { ...flow, agents });
-
-      return newMap;
-    });
+        return newMap;
+      });
+    }
   }
 
   public inspectFlow(item: FlowExecutionChatItem): void {

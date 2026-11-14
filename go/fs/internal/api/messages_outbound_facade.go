@@ -7,6 +7,7 @@ import (
 
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -209,27 +210,56 @@ func MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
 }
 
 func MarshalTelemetryEvent(channel string, event telemetry.Event) ([]byte, error) {
-	var payloadJSON string
-	if len(event.Payload) > 0 {
-		b, err := json.Marshal(event.Payload)
-		if err != nil {
-			return nil, err
+	summary := event.Summary
+	if summary == "" && event.Payload != nil {
+		summary = event.Payload.Summary()
+	}
+
+	protoEvent := &pb.TelemetryData{
+		Id:        event.ID.String(),
+		Type:      event.Type,
+		Timestamp: event.Timestamp.Format(time.RFC3339),
+		Message:   event.Message,
+		Summary:   summary,
+	}
+
+	if event.Payload != nil {
+		switch p := event.Payload.(type) {
+		case flows.FlowTelemetry:
+			protoEvent.Payload = &pb.TelemetryData_FlowPayload{
+				FlowPayload: &pb.FlowTelemetryPayload{
+					FlowId:     p.FlowID,
+					TaskId:     p.TaskID,
+					AgentCount: int32(p.AgentCount),
+				},
+			}
+		case flows.AgentTelemetry:
+			protoEvent.Payload = &pb.TelemetryData_AgentPayload{
+				AgentPayload: &pb.AgentTelemetryPayload{
+					FlowId:      p.FlowID,
+					AgentId:     p.AgentID,
+					AgentIndex:  int32(p.AgentIndex),
+					Instruction: p.Instruction,
+					Attempt:     int32(p.Attempt),
+					Trace:       p.Trace,
+					CandidateId: p.CandidateID,
+					Passed:      p.Passed,
+				},
+			}
+		case flows.TransitionTelemetry:
+			protoEvent.Payload = &pb.TelemetryData_TransitionPayload{
+				TransitionPayload: &pb.TransitionTelemetryPayload{
+					TargetThinkState: p.TargetThinkState,
+				},
+			}
 		}
-		payloadJSON = string(b)
 	}
 
 	pbEvent := &pb.WSEvent{
 		Payload: &pb.WSEvent_TelemetryEvent{
 			TelemetryEvent: &pb.TelemetryEvent{
 				Channel: channel,
-				Event: &pb.TelemetryData{
-					Id:          event.ID.String(),
-					Type:        event.Type,
-					Timestamp:   event.Timestamp.Format(time.RFC3339),
-					Message:     event.Message,
-					Summary:     event.Summary,
-					PayloadJson: payloadJSON,
-				},
+				Event:   protoEvent,
 			},
 		},
 	}

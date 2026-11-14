@@ -10,6 +10,7 @@ import (
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
@@ -81,7 +82,9 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 			Type:      "thinkstate_transition",
 			Timestamp: time.Now(),
 			Message:   fmt.Sprintf("Workspace transitioned to %s domain.", targetThinkState),
-			Payload:   map[string]any{"target_think_state": targetThinkState},
+			Payload: flows.TransitionTelemetry{
+				TargetThinkState: targetThinkState,
+			},
 		})
 	}
 
@@ -94,14 +97,15 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 
 	if graph := e.workspaceService.Graph(); graph != nil && catalystID != uuid.Nil() {
 		mut := thinkgraph.MetadataMutation{
-			BaseMutation: thinkgraph.BaseMutation{
-				TargetID:  catalystID,
-				Type:      thinkgraph.MutationMetadata,
-				Timestamp: time.Now().UTC(),
-			},
 			Metadata: map[string]string{"transitioned_to": targetThinkState},
 		}
-		_ = e.workspaceService.SaveMutation(ctx, address, mut)
+		mut.TargetID = catalystID
+		mut.Type = thinkgraph.MutationMetadata
+		mut.Timestamp = time.Now().UTC()
+
+		if err := e.workspaceService.SaveMutation(ctx, address, mut); err != nil {
+			e.logger.ErrorContext(ctx, "failed saving transition metadata mutation", "error", err, "catalyst_id", catalystID)
+		}
 
 		nodes, err := graph.GetNodes(ctx, address, []string{catalystID.String()})
 		if err == nil && len(nodes) > 0 {

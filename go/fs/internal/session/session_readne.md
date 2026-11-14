@@ -32,50 +32,6 @@ A single execution turn executed by the `TurnCoordinator` follows a recursive lo
 5. **Resolution:** The user previews the final candidates and explicitly accepts or rejects them.
 6. **Checkpoint:** The `TurnCoordinator` commands the workspace service to permanently snapshot the thread state in the Git layer.
 
-
-```python
-import os
-
-def find_files(filename, search_path):
-    result = []
-    for root, dir, files in os.walk(search_path):
-        for file in files:
-            if filename.lower() in file.lower():
-                result.append(os.path.join(root, file))
-    return result
-
-print(find_files("readme", "go/fs"))
-print(find_files("session", "go/fs"))
-
-
-```
-
-```text
-[]
-[]
-
-
-```
-
-```python
-import os
-print(os.listdir('go/fs/internal/session') if os.path.exists('go/fs/internal/session') else "Path not found")
-
-
-```
-
-```text
-['tools', 'turn_executor.go', 'worker_engine.go', 'synthesize_engine.go', 'chat_engine.go', 'turn_executor_test.go']
-
-
-```
-
-```python
-import glob
-print(glob.glob('go/**/*.md', recursive=True))
-
-```
-
 ## The Manager Subgraph: Fan-Out Diamond Topology
 
 The `WorkerEngine` executes parallel agent workflows (fan-out) using a strict "Diamond" DAG topology. This ensures that multi-agent delegation remains mathematically unbroken, visually encapsulated, and capable of yielding control back to the user without fracturing timeline rehydration.

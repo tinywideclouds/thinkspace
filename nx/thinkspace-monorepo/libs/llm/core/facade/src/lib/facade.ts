@@ -1,21 +1,22 @@
 import { create } from '@bufbuild/protobuf';
-import { 
-  WSEvent, 
+import {
+  WSEvent,
   WSEventSchema,
   MessageType,
   FlowStatus,
   DelegationStrategy as ProtoDelegationStrategy,
   GraphEvent as ProtoGraphEvent
 } from '@org/llm-core-protos';
-import { 
-  AppEvent, 
-  DelegationStrategy, 
-  DigestMeta, 
-  GraphEvent 
+import {
+  AppEvent,
+  DelegationStrategy,
+  DigestMeta,
+  GraphEvent,
+  TelemetryPayload
 } from './domain-models';
 
 export class LlmFacade {
-  
+
   private static mapFlowStatus(status: FlowStatus): 'UNSPECIFIED' | 'RUNNING' | 'COMPLETED' | 'FAILED' {
     switch (status) {
       case FlowStatus.RUNNING: return 'RUNNING';
@@ -43,21 +44,21 @@ export class LlmFacade {
     switch (protoEvent.payload.case) {
       case 'message': {
         const msgType = protoEvent.payload.value.type;
-        let domainType: 'prompt' | 'model' | 'system' = 'prompt'; 
-        
+        let domainType: 'prompt' | 'model' | 'system' = 'prompt';
+
         if (msgType === MessageType.MODEL) {
           domainType = 'model';
         } else if (msgType === MessageType.SYSTEM) {
           domainType = 'system';
         }
-        
+
         return {
           ...base,
           type: domainType,
           content: protoEvent.payload.value.text
         };
       }
-      
+
       case 'fileDelta':
         return {
           ...base,
@@ -68,7 +69,24 @@ export class LlmFacade {
           fileRef: protoEvent.payload.value.fileRef,
           parentId: protoEvent.payload.value.parentId || undefined
         };
-      
+
+      case 'candidateResolution': {
+        const statusLabel = protoEvent.payload.value.accepted ? 'ACCEPTED' : 'REJECTED';
+        const reason = protoEvent.payload.value.reason || '';
+        const summary = reason
+          ? `Proposal ${statusLabel}: ${reason}`
+          : `Proposal ${statusLabel}`;
+
+        return {
+          ...base,
+          type: 'candidate_resolution',
+          content: summary,
+          candidateId: protoEvent.payload.value.candidateId,
+          accepted: protoEvent.payload.value.accepted,
+          reason
+        };
+      }
+
       case 'flowExecution':
         return {
           ...base,
@@ -102,28 +120,28 @@ export class LlmFacade {
 
     switch (protocolBufferEvent.payload.case) {
       case 'chatStream':
-        return { 
-          type: 'chat_stream', 
-          nodeId: protocolBufferEvent.payload.value.nodeId, 
-          text: protocolBufferEvent.payload.value.text 
+        return {
+          type: 'chat_stream',
+          nodeId: protocolBufferEvent.payload.value.nodeId,
+          text: protocolBufferEvent.payload.value.text
         };
-        
+
       case 'requestStrategy':
         return { type: 'request_strategy', active: protocolBufferEvent.payload.value.active };
-      
+
       case 'requestReview':
         return { type: 'request_review', branch: protocolBufferEvent.payload.value.branch };
 
       case 'requestTransition':
-        return { 
-          type: 'request_transition', 
-          targetThinkState: protocolBufferEvent.payload.value.targetThinkState, 
-          reasoning: protocolBufferEvent.payload.value.reasoning 
+        return {
+          type: 'request_transition',
+          targetThinkState: protocolBufferEvent.payload.value.targetThinkState,
+          reasoning: protocolBufferEvent.payload.value.reasoning
         };
-      
+
       case 'availableSpaces':
         return { type: 'available_spaces', spaces: protocolBufferEvent.payload.value.spaces.map(space => ({ id: space.id, name: space.name })) };
-      
+
       case 'syncHistory': {
         const validEvents = protocolBufferEvent.payload.value.recentEvents
           .map(e => this.mapGraphEvent(e))
@@ -191,14 +209,40 @@ export class LlmFacade {
 
       case 'telemetryEvent': {
         const telemetry = protocolBufferEvent.payload.value;
-        let parsedPayload = {};
-        if (telemetry.event?.payloadJson) {
-          try {
-            parsedPayload = JSON.parse(telemetry.event.payloadJson);
-          } catch (error) {
-            console.warn(`[LlmFacade] Failed to parse telemetry payload_json:`, error);
+
+        let domainPayload: TelemetryPayload | undefined = undefined;
+        if (telemetry.event?.payload) {
+          switch (telemetry.event.payload.case) {
+            case 'flowPayload':
+              domainPayload = {
+                type: 'flow',
+                flowId: telemetry.event.payload.value.flowId,
+                taskId: telemetry.event.payload.value.taskId,
+                agentCount: telemetry.event.payload.value.agentCount
+              };
+              break;
+            case 'agentPayload':
+              domainPayload = {
+                type: 'agent',
+                flowId: telemetry.event.payload.value.flowId,
+                agentId: telemetry.event.payload.value.agentId,
+                agentIndex: telemetry.event.payload.value.agentIndex,
+                instruction: telemetry.event.payload.value.instruction,
+                attempt: telemetry.event.payload.value.attempt,
+                trace: telemetry.event.payload.value.trace,
+                candidateId: telemetry.event.payload.value.candidateId,
+                passed: telemetry.event.payload.value.passed
+              };
+              break;
+            case 'transitionPayload':
+              domainPayload = {
+                type: 'transition',
+                targetThinkState: telemetry.event.payload.value.targetThinkState
+              };
+              break;
           }
         }
+
         return {
           type: 'telemetry_event',
           channel: telemetry.channel,
@@ -207,14 +251,14 @@ export class LlmFacade {
           timestamp: telemetry.event?.timestamp ? Temporal.Instant.from(telemetry.event.timestamp) : Temporal.Now.instant(),
           message: telemetry.event?.message || '',
           summary: telemetry.event?.summary || '',
-          payload: parsedPayload
+          payload: domainPayload
         };
       }
 
       case 'streamedGraphEvent': {
         const protoGraphEvent = protocolBufferEvent.payload.value.event;
         if (!protoGraphEvent) return null;
-        
+
         const mappedDomainEvent = this.mapGraphEvent(protoGraphEvent);
         if (!mappedDomainEvent) return null;
 
@@ -228,14 +272,13 @@ export class LlmFacade {
           }
         };
       }
-      
+
       default:
         console.warn(`[LlmFacade] Unhandled inbound protocol buffer case: ${protocolBufferEvent.payload.case}`);
         return null;
     }
   }
 
-  // ... (Outbound builders remain unchanged)
   static createSubmitPrompt(text: string, spaceId: string, chatId: string): WSEvent {
     return create(WSEventSchema, {
       payload: { case: 'submitPrompt', value: { text, spaceId, chatId } }

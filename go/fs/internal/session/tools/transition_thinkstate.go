@@ -40,27 +40,30 @@ func (t *TransitionThinkStateTool) ValidStates() []string {
 	return t.validStates
 }
 
-func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext ExecutionContext) (signals.EngineSignal, error) {
+func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext ExecutionContext) (ToolResponse, error) {
 	var request TransitionThinkStateRequest
 	argumentBytes, err := json.Marshal(executionContext.RawArguments)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling transition arguments: %w", err)
+		return ToolResponse{}, fmt.Errorf("marshaling transition arguments: %w", err)
 	}
 	if err := json.Unmarshal(argumentBytes, &request); err != nil {
-		return nil, fmt.Errorf("invalid transition arguments schema: %w", err)
+		return ToolResponse{}, fmt.Errorf("invalid transition arguments schema: %w", err)
 	}
 
 	if request.TargetThinkState == "" {
-		return nil, fmt.Errorf("target_think_state cannot be empty")
+		return ToolResponse{}, fmt.Errorf("target_think_state cannot be empty")
 	}
 
 	sig := signals.SignalTransition{
 		TargetThinkState: request.TargetThinkState,
-		Reasoning:        request.Reasoning,
 	}
 
-	if executionContext.UI.ConfirmTransition(sig) {
-		return &sig, nil
+	if executionContext.UI.ConfirmTransition(request.TargetThinkState, request.Reasoning) {
+		return ToolResponse{
+			Signal:  &sig,
+			Content: "", // Left entirely blank. Do not pollute the main timeline with a node!
+			Payload: nil,
+		}, nil
 	}
 
 	if executionContext.Emitter != nil {
@@ -77,5 +80,5 @@ func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext
 		Content: fmt.Sprintf("[System: Transition to '%s' was denied by user. Continue in current state.]", request.TargetThinkState),
 	})
 
-	return nil, nil
+	return ToolResponse{}, nil
 }

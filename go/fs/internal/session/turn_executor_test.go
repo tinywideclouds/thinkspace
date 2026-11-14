@@ -105,9 +105,9 @@ func (ui *teTestUI) OnTextChunk(chunk workspace.NodeChunk) {
 func (ui *teTestUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {
 	ui.streamedNodes = append(ui.streamedNodes, node)
 }
-func (ui *teTestUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
-func (ui *teTestUI) ChooseNextStep() flows.FlowStrategy                  { return flows.StrategyManual }
-func (ui *teTestUI) ReviewCandidate(branch string) bool                  { return true }
+func (ui *teTestUI) ConfirmTransition(targetThinkState string, reasoning string) bool { return true }
+func (ui *teTestUI) ChooseNextStep() flows.FlowStrategy                               { return flows.StrategyManual }
+func (ui *teTestUI) ReviewCandidate(branch string) bool                               { return true }
 func (ui *teTestUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{}
 }
@@ -121,8 +121,8 @@ type teMockSynthesisTool struct{}
 
 func (t *teMockSynthesisTool) Name() tools.ToolName       { return "mock_synth_tool" }
 func (t *teMockSynthesisTool) DefaultDescription() string { return "" }
-func (t *teMockSynthesisTool) Execute(ctx context.Context, ec tools.ExecutionContext) (signals.EngineSignal, error) {
-	return &signals.SignalSynthesize{OriginalInstruction: "Dossier output"}, nil
+func (t *teMockSynthesisTool) Execute(ctx context.Context, ec tools.ExecutionContext) (tools.ToolResponse, error) {
+	return tools.ToolResponse{Signal: &signals.SignalSynthesize{OriginalInstruction: "Dossier output"}}, nil
 }
 
 func setupExecutorTest(t *testing.T, spaceID, chatID string) (*session.TurnExecutor, *workspace.Service, *teTestModelClient) {
@@ -261,6 +261,7 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 		t.Errorf("Expected transition to concept, got %s", tr.TargetThinkState)
 	}
 
+	// This tool is intentionally completely silent on the main timeline
 	timeline, _ := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
 	if len(timeline) != 0 {
 		t.Errorf("Expected zero persisted nodes in main timeline on direct tool intercept, got %d", len(timeline))
@@ -286,9 +287,6 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 	client.responses = []llm.StreamChunk{
 		{
 			ToolCalls: []llm.ToolCall{{Name: "mock_synth_tool"}},
-		},
-		{
-			Text: "Synthesized golden output",
 		},
 	}
 

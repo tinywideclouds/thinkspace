@@ -74,9 +74,9 @@ export class ChatConnectionService {
 
     this.timeline.isLoadingHistory.set(true);
     this.transport.send(LlmFacade.createLoadHistory(
-      spaceId, 
-      chatId, 
-      this.timeline.nextCursor(), 
+      spaceId,
+      chatId,
+      this.timeline.nextCursor(),
       this.uiSettings.pagination().size
     ));
   }
@@ -85,7 +85,7 @@ export class ChatConnectionService {
     const spaceId = this.workspace.activeSpaceId();
     const chatId = this.workspace.activeChatId();
     if (!spaceId || !chatId) return;
-    
+
     this.transport.send(LlmFacade.createLoadSubGraph(spaceId, chatId, graphId));
   }
 
@@ -178,6 +178,16 @@ export class ChatConnectionService {
           parentId: ev.parentId,
         };
 
+      case 'candidate_resolution':
+        return {
+          ...base,
+          type: 'candidate_resolution',
+          content: ev.content,
+          candidateId: ev.candidateId,
+          accepted: ev.accepted,
+          reason: ev.reason,
+        };
+
       case 'flow_execution':
         return {
           ...base,
@@ -197,11 +207,11 @@ export class ChatConnectionService {
     switch (event.type) {
       case 'sync_history':
         this.graphStore.upsert(event.recentEvents.map(e => this.mapGraphEventToChatItem(e)));
-        
+
         if (event.coordinate) {
           const historyIds = event.recentEvents.map(e => e.id);
           this.graphStore.resetProjection(event.coordinate, historyIds);
-          
+
           if (this.timeline.isActiveView(event.coordinate)) {
             this.timeline.setHistoryMetadata(event.nextCursor, event.hasMore, event.coordinate.projectionId);
             this.cognitive.activeFocus.set(event.focus);
@@ -215,7 +225,7 @@ export class ChatConnectionService {
 
       case 'sync_subgraph':
         this.graphStore.upsert(event.events.map(e => this.mapGraphEventToChatItem(e)));
-        
+
         if (event.coordinate) {
           const subGraphIds = event.events.map(e => e.id);
           this.graphStore.resetProjection(event.coordinate, subGraphIds);
@@ -224,7 +234,7 @@ export class ChatConnectionService {
 
       case 'streamed_graph_event':
         this.graphStore.upsert([this.mapGraphEventToChatItem(event.event)]);
-        
+
         if (event.coordinate) {
           this.graphStore.appendToProjection(event.coordinate, [event.event.id]);
         }
@@ -246,11 +256,11 @@ export class ChatConnectionService {
         this.graphStore.nodes.update(map => {
           const next = new Map(map);
           const node = next.get(event.nodeId);
-          
+
           if (node) {
-            next.set(event.nodeId, { 
-              ...node, 
-              content: (node.content || '') + event.text 
+            next.set(event.nodeId, {
+              ...node,
+              content: (node.content || '') + event.text
             });
           }
           return next;
@@ -268,9 +278,9 @@ export class ChatConnectionService {
         this.cognitive.pendingReviewBranch.set(event.branch);
         break;
       case 'request_transition':
-        this.cognitive.pendingTransition.set({ 
-          targetThinkState: event.targetThinkState, 
-          reasoning: event.reasoning 
+        this.cognitive.pendingTransition.set({
+          targetThinkState: event.targetThinkState,
+          reasoning: event.reasoning
         });
         break;
     }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"uuid"
@@ -51,14 +52,25 @@ func (t *ProposeChangeTool) DefaultDescription() string {
 	return "Delegate a task to sub-agents."
 }
 
-func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (signals.EngineSignal, error) {
-	var request ProposeChangeRequest
+func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (ToolResponse, error) {
 	argumentBytes, err := json.Marshal(ec.RawArguments)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling propose_change arguments: %w", err)
+		return ToolResponse{}, fmt.Errorf("marshaling propose_change arguments: %w", err)
 	}
+
+	// 1. RAW VISIBILITY: Log exactly what the LLM provided before we touch anything
+	if ec.Emitter != nil {
+		ec.Emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "log",
+			Timestamp: time.Now(),
+			Message:   fmt.Sprintf("Raw propose_change payload: %s", string(argumentBytes)),
+		})
+	}
+
+	var request ProposeChangeRequest
 	if err := json.Unmarshal(argumentBytes, &request); err != nil {
-		return nil, fmt.Errorf("invalid propose_change schema: %w", err)
+		return ToolResponse{}, fmt.Errorf("invalid propose_change schema: %w", err)
 	}
 
 	if request.Instruction == "" && len(request.AgentInstructions) == 0 {
@@ -70,40 +82,40 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (s
 				Message:   "Manager provided an empty instruction. Aborting proposal.",
 			})
 		}
-		return nil, fmt.Errorf("manager provided empty instruction")
+		return ToolResponse{}, fmt.Errorf("manager provided empty instruction")
 	}
 
 	var tasks []flows.SubAgentTask
 
-	// Use distinct instructions if provided by the LLM
+	// 2. Map Instructions cleanly without destroying the distinct approaches
 	if len(request.AgentInstructions) > 0 {
-		count := len(request.AgentInstructions)
-		if count > 5 {
-			count = 5
-		}
-		for i := 0; i < count; i++ {
-			item := request.AgentInstructions[i]
-			inst := item.Instruction
-			if inst == "" {
-				inst = request.Instruction
-			}
+		for i, item := range request.AgentInstructions {
+			var finalInst strings.Builder
+
 			if item.Approach != "" {
-				inst = fmt.Sprintf("[Approach: %s]\n%s", item.Approach, inst)
+				finalInst.WriteString(fmt.Sprintf("[Approach: %s]\n", item.Approach))
+			}
+
+			if item.Instruction != "" {
+				finalInst.WriteString(item.Instruction)
+			} else if request.Instruction != "" {
+				finalInst.WriteString(request.Instruction)
 			}
 
 			tasks = append(tasks, flows.SubAgentTask{
 				AgentID:       fmt.Sprintf("agent-%d", i+1),
 				ContextDigest: request.ContextDigest,
-				Instruction:   inst,
+				Instruction:   finalInst.String(),
 				TargetFiles:   request.TargetFiles,
 			})
 		}
 	} else {
-		// Fallback for LLMs that miss the array but provide an agent_count
-		if request.AgentCount < 1 || request.AgentCount > 5 {
-			request.AgentCount = 1
+		// Fallback: If LLM truly omitted the array, spawn identical clones based on AgentCount
+		count := request.AgentCount
+		if count < 1 || count > 5 {
+			count = 1
 		}
-		for i := 0; i < request.AgentCount; i++ {
+		for i := 0; i < count; i++ {
 			tasks = append(tasks, flows.SubAgentTask{
 				AgentID:       fmt.Sprintf("agent-%d", i+1),
 				ContextDigest: request.ContextDigest,
@@ -117,9 +129,9 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (s
 	if leadSummary == "" && len(request.AgentInstructions) > 0 {
 		leadSummary = request.AgentInstructions[0].Instruction
 	}
-	summary := fmt.Sprintf("Executing %d agent(s): %s", len(tasks), leadSummary)
-	if len(summary) > 80 {
-		summary = summary[:77] + "..."
+	content := fmt.Sprintf("Executing %d agent(s): %s", len(tasks), leadSummary)
+	if len(content) > 80 {
+		content = content[:77] + "..."
 	}
 
 	if ec.Emitter != nil {
@@ -127,12 +139,18 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (s
 			ID:        uuid.NewV7(),
 			Type:      "flow_dispatch",
 			Timestamp: time.Now(),
-			Message:   fmt.Sprintf("Dispatching Flow: %s", summary),
+			Message:   fmt.Sprintf("Dispatching Flow: %s", content),
 		})
 	}
 
-	return &signals.SignalDispatchFlow{
-		Tasks:   tasks,
-		Summary: summary,
+	payload := flows.FileProposalPayload{
+		AgentCount: len(tasks),
+		Tasks:      tasks,
+	}
+
+	return ToolResponse{
+		Signal:  &signals.SignalDispatchFlow{Tasks: tasks},
+		Content: content,
+		Payload: payload,
 	}, nil
 }

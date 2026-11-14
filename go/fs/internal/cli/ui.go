@@ -8,7 +8,6 @@ import (
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
@@ -28,9 +27,10 @@ func (ui *TerminalUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thi
 	// and does not explicitly render structural graph nodes.
 }
 
-func (ui *TerminalUI) ConfirmTransition(req signals.SignalTransition) bool {
-	fmt.Printf("\n\n⚠️  [SYSTEM] The agent has requested a transition to the '%s' domain.\n", req.TargetThinkState)
-	fmt.Printf("💡 Reasoning: %s\n", req.Reasoning)
+func (ui *TerminalUI) ConfirmTransition(targetThinkState string, reasoning string) bool {
+
+	fmt.Printf("\n\n⚠️  [SYSTEM] The agent has requested a transition to the '%s' domain.\n", targetThinkState)
+	fmt.Printf("💡 Reasoning: %s\n", reasoning)
 	fmt.Print("Allow transition? [Y/n]: ")
 
 	reader := bufio.NewReader(os.Stdin)

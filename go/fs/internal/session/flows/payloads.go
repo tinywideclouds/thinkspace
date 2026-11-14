@@ -1,6 +1,10 @@
 package flows
 
-import "github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+import (
+	"encoding/json"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+)
 
 const (
 	EventFlowLifecycle thinkgraph.EventType = "flow_lifecycle"
@@ -21,6 +25,16 @@ type FlowData struct {
 	FlowID     string `json:"flow_id"`
 	TaskID     string `json:"task_id"`
 	TaskPrompt string `json:"task_prompt"`
+}
+
+// FileProposalPayload acts as the structured manifest for the Manager Node.
+type FileProposalPayload struct {
+	AgentCount int            `json:"agent_count"`
+	Tasks      []SubAgentTask `json:"tasks"`
+}
+
+func (p FileProposalPayload) GraphData() (json.RawMessage, error) {
+	return json.Marshal(p)
 }
 
 // FlowExecutionState represents the mutable, materialized state of an active flow.

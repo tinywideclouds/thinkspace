@@ -23,7 +23,7 @@ func (n ToolName) String() string {
 
 type UI interface {
 	OnTextChunk(chunk workspace.NodeChunk)
-	ConfirmTransition(req signals.SignalTransition) bool
+	ConfirmTransition(targetThinkState string, reasoning string) bool
 }
 
 type Workspace interface {
@@ -39,8 +39,16 @@ type ExecutionContext struct {
 	RawArguments map[string]any
 }
 
+// ToolResponse explicitly separates the semantic graph payload
+// from the engine routing signal.
+type ToolResponse struct {
+	Signal  signals.EngineSignal
+	Content string
+	Payload thinkgraph.GraphPayload
+}
+
 type Tool interface {
 	Name() ToolName
 	DefaultDescription() string
-	Execute(ctx context.Context, executionContext ExecutionContext) (signals.EngineSignal, error)
+	Execute(ctx context.Context, executionContext ExecutionContext) (ToolResponse, error)
 }

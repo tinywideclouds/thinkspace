@@ -172,14 +172,16 @@ func TestRehydrator_PrefixRouting(t *testing.T) {
 		ProjectID: spaceID,
 		ChatID:    chatID,
 		SubGraph: thinkgraph.SubGraph{
-			Name: "flow-123/agent-1",
+			Name:    "flow-123/agent-1",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixFlow),
 		},
 	}
 	chatFlowAgent2 := &thinkgraph.ChatAddress{
 		ProjectID: spaceID,
 		ChatID:    chatID,
 		SubGraph: thinkgraph.SubGraph{
-			Name: "flow-123/agent-2",
+			Name:    "flow-123/agent-2",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixFlow),
 		},
 	}
 

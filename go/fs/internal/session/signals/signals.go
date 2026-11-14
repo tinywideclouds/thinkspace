@@ -23,9 +23,9 @@ type SignalExecuteChat struct{}
 func (s *SignalExecuteChat) IsTerminal() bool { return false }
 
 // SignalDispatchFlow indicates the ChatEngine wants to fan-out to sub-agents.
+// Note: Purely for routing. Display metadata is handled by ToolResponse.
 type SignalDispatchFlow struct {
-	Tasks   []flows.SubAgentTask
-	Summary string
+	Tasks []flows.SubAgentTask
 }
 
 func (s *SignalDispatchFlow) IsTerminal() bool { return false }
@@ -42,9 +42,9 @@ type SignalSynthesize struct {
 func (s *SignalSynthesize) IsTerminal() bool { return false }
 
 // SignalTransition indicates the LLM wants to reboot the workspace into a new ThinkState.
+// Note: Purely for routing. Display metadata is handled by ToolResponse.
 type SignalTransition struct {
 	TargetThinkState string
-	Reasoning        string
 }
 
 func (s *SignalTransition) IsTerminal() bool { return false }

@@ -111,10 +111,10 @@ func (ui *mockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgr
 func (ui *mockUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: true}
 }
-func (ui *mockUI) ChooseNextStep() flows.FlowStrategy                  { return flows.StrategyRefine }
-func (ui *mockUI) ReviewCandidate(branch string) bool                  { return true }
-func (ui *mockUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
-func (ui *mockUI) GetChunkChannel() chan<- workspace.NodeChunk         { return nil }
+func (ui *mockUI) ChooseNextStep() flows.FlowStrategy                               { return flows.StrategyRefine }
+func (ui *mockUI) ReviewCandidate(branch string) bool                               { return true }
+func (ui *mockUI) ConfirmTransition(targetThinkState string, reasoning string) bool { return true }
+func (ui *mockUI) GetChunkChannel() chan<- workspace.NodeChunk                      { return nil }
 
 type mockFlow struct{ step int }
 
@@ -276,11 +276,20 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 							"context_digest": "Testing context",
 							"target_files":   []any{},
 							"agent_count":    1,
+							"agent_instructions": []any{
+								map[string]any{
+									"approach":    "standard",
+									"instruction": "Write tests",
+								},
+							},
 						},
 					}},
 				},
 				{
-					Text: "Golden Synthesis Candidate",
+					Text: `{"thought":"Golden Synthesis Patch","patches":[]}`,
+				},
+				{
+					Text: "Manager review: The synthesized solution combines the best test patterns.",
 				},
 			},
 		}
@@ -313,7 +322,6 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		workerEngine := session.NewWorkerEngine(logger, integrationChatSession, registry, svc, turnExecutor, svc.Dispatcher(), &mockFlow{})
 		synthEngine := session.NewSynthesizeEngine(logger, registry, svc, turnExecutor, integrationChatSession)
 
-		// 1. WorkerEngine executes the flow and yields Synthesize
 		workerSig, err := workerEngine.Execute(ctx, chatAddress, responseID, uuid.NewV7(), dispatchSig, ui, emitter)
 		if err != nil {
 			t.Fatalf("WorkerEngine failed: %v", err)
@@ -324,7 +332,6 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 			t.Fatalf("Expected WorkerEngine to yield a SignalSynthesize, got %T", workerSig)
 		}
 
-		// 2. SynthesizeEngine concludes the turn
 		finalSig, err := synthEngine.Execute(ctx, chatAddress, responseID, uuid.NewV7(), synthSig, ui, emitter)
 		if err != nil {
 			t.Fatalf("SynthesizeEngine failed: %v", err)
@@ -334,7 +341,6 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 			t.Fatalf("Expected SynthesizeEngine to yield a Terminal signal")
 		}
 
-		// 3. Graph Integrity Validation
 		flowAddr := synthSig.FlowAddress
 		_ = svc.SyncGraphContext(context.Background(), flowAddr)
 		flowTimeline, _ := svc.Graph().GetSubGraphTimeline(ctx, flowAddr, flowAddr.GraphID)
@@ -356,9 +362,25 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		if !hasSynthRes {
 			t.Errorf("Expected candidate resolution ACCEPTED node at the tail of the flow subgraph")
 		}
+
+		mainTimeline, _ := svc.Graph().GetSubGraphTimeline(ctx, chatAddress, chatAddress.GraphID)
+		hasManagerReview := false
+		for _, n := range mainTimeline {
+			if n.Type == thinkgraph.EventModel && strings.Contains(n.Content, "Manager review:") {
+				hasManagerReview = true
+				break
+			}
+		}
+		if !hasManagerReview {
+			t.Errorf("Expected Manager review EventModel node on the main timeline")
+		}
 	})
 
 	t.Run("Act V: System Transition & Turn Reboot", func(t *testing.T) {
+		if integrationChatSession == nil {
+			t.Skip("Skipping Act V because integrationChatSession failed to initialize in Act IV")
+		}
+
 		registry.RegisterThinkState("concept", mockSpace)
 		registry.RegisterConfig("concept", mockSpace.Config())
 
@@ -366,7 +388,6 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 
 		transitionSig := &signals.SignalTransition{
 			TargetThinkState: "concept",
-			Reasoning:        "Moving to ideation phase",
 		}
 
 		turnID := uuid.NewV7()

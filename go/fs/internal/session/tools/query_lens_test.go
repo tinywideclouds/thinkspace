@@ -59,7 +59,7 @@ func TestQueryLensTool_Execute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != nil {
+	if result.Signal != nil {
 		t.Errorf("expected tool to return a nil signal (continue turn)")
 	}
 

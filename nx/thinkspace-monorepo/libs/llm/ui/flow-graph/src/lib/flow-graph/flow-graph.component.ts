@@ -54,7 +54,7 @@ export class FlowGraphComponent {
     const pointers = this.graphStore.projections().get(key) || [];
     const cache = this.graphStore.nodes();
 
-    // 1. Initial mapping of local subgraph nodes
+    // 1. Initial mapping of local subgraph nodes[cite: 5]
     const localNodes = pointers
       .map(id => cache.get(id))
       .filter((n): n is ChatItem => n !== undefined && !n.tombstoned);
@@ -65,12 +65,12 @@ export class FlowGraphComponent {
 
     const flowNodesMap = new Map<string, ChatItem>(localNodes.map(n => [n.id, n]));
 
-    // 2. Cross-Boundary Resolution: Pull immediate cross-boundary parents and children from global cache
+    // 2. Cross-Boundary Resolution: Pull immediate cross-boundary parents and children from global cache[cite: 5]
     let added = true;
     while (added) {
       added = false;
 
-      // Resolve parents referenced by nodes already in the graph (e.g., Manager Node or Flow Options Node)
+      // Resolve parents referenced by nodes already in the graph (e.g., Manager Node or Flow Options Node)[cite: 5]
       for (const node of Array.from(flowNodesMap.values())) {
         const edges = node.edges || {};
         for (const k of Object.keys(edges)) {
@@ -87,7 +87,7 @@ export class FlowGraphComponent {
         }
       }
 
-      // Resolve bridge children pointing into local subgraph nodes (e.g., Flow Options Node pointing to Join Node)
+      // Resolve bridge children pointing into local subgraph nodes (e.g., Flow Options Node pointing to Join Node)[cite: 5]
       for (const node of cache.values()) {
         if (node.tombstoned || flowNodesMap.has(node.id)) continue;
         const edges = node.edges || {};
@@ -103,7 +103,7 @@ export class FlowGraphComponent {
 
     const flowNodes = Array.from(flowNodesMap.values());
 
-    // 3. Build Adjacency & Parent Maps
+    // 3. Build Adjacency & Parent Maps[cite: 5]
     const childrenMap = new Map<string, string[]>();
     const parentsMap = new Map<string, string[]>();
 
@@ -121,13 +121,13 @@ export class FlowGraphComponent {
       }
     }
 
-    // 4. Compute Longest-Path Depth (ensures diamond join nodes always render below their deepest branch)
+    // 4. Compute Longest-Path Depth (ensures diamond join nodes always render below their deepest branch)[cite: 5]
     const depthMap = new Map<string, number>();
     const computing = new Set<string>();
 
     const getDepth = (nodeId: string): number => {
       if (depthMap.has(nodeId)) return depthMap.get(nodeId)!;
-      if (computing.has(nodeId)) return 0; // Cycle guard
+      if (computing.has(nodeId)) return 0; // Cycle guard[cite: 5]
 
       computing.add(nodeId);
       const parents = parentsMap.get(nodeId) || [];
@@ -144,59 +144,106 @@ export class FlowGraphComponent {
       getDepth(node.id);
     }
 
-    // 5. Assign X Coordinates via DFS Leaf-Spread & Center Parents Over Children
+    // 5. Assign X Coordinates via Depth-Layered DAG Layout
     const NODE_WIDTH = 280;
     const NODE_HEIGHT = 100;
     const GAP_X = 50;
     const GAP_Y = 80;
+    const STEP_X = NODE_WIDTH + GAP_X;
+
+    const layers = new Map<number, ChatItem[]>();
+    let maxDepth = 0;
+    for (const node of flowNodes) {
+      const d = depthMap.get(node.id) ?? 0;
+      if (d > maxDepth) maxDepth = d;
+      if (!layers.has(d)) layers.set(d, []);
+      layers.get(d)!.push(node);
+    }
 
     const xMap = new Map<string, number>();
-    const visited = new Set<string>();
-    let currentX = 0;
 
-    const assignX = (nodeId: string): number => {
-      if (visited.has(nodeId)) {
-        return xMap.get(nodeId) ?? currentX;
+    // Pass A (Top-Down): Position nodes using parent barycenter, resolving horizontal collisions per layer
+    for (let d = 0; d <= maxDepth; d++) {
+      const layerNodes = layers.get(d) || [];
+
+      const desired = layerNodes.map((node, index) => {
+        const parents = parentsMap.get(node.id) || [];
+        const parentXs = parents
+          .map(pid => xMap.get(pid))
+          .filter((x): x is number => x !== undefined);
+
+        const targetX = parentXs.length > 0
+          ? parentXs.reduce((sum, x) => sum + x, 0) / parentXs.length
+          : index * STEP_X;
+
+        const agentTag = node.metadata?.['agent_id'] || '';
+        return { node, targetX, agentTag, index };
+      });
+
+      // Preserve deterministic branch ordering (agent-1 left, agent-2 right, etc.)
+      desired.sort((a, b) => {
+        if (Math.abs(a.targetX - b.targetX) > 1) {
+          return a.targetX - b.targetX;
+        }
+        if (a.agentTag !== b.agentTag) {
+          return a.agentTag.localeCompare(b.agentTag);
+        }
+        return a.index - b.index;
+      });
+
+      // Spread siblings cleanly without overlap, then center the group around their average desired X
+      const positioned: { id: string; x: number }[] = [];
+      let nextMinX = -Infinity;
+      for (const item of desired) {
+        const x = Math.max(item.targetX, nextMinX);
+        positioned.push({ id: item.node.id, x });
+        nextMinX = x + STEP_X;
       }
-      visited.add(nodeId);
 
-      const children = childrenMap.get(nodeId) || [];
-      if (children.length === 0) {
-        const x = currentX;
-        currentX += NODE_WIDTH + GAP_X;
-        xMap.set(nodeId, x);
-        return x;
+      if (positioned.length > 0) {
+        const avgDesired = desired.reduce((s, i) => s + i.targetX, 0) / desired.length;
+        const avgActual = positioned.reduce((s, p) => s + p.x, 0) / positioned.length;
+        const shift = avgDesired - avgActual;
+        for (const p of positioned) {
+          xMap.set(p.id, p.x + shift);
+        }
       }
-
-      const childXs = children.map(cid => assignX(cid));
-      const minX = Math.min(...childXs);
-      const maxX = Math.max(...childXs);
-      const centerX = (minX + maxX) / 2;
-      xMap.set(nodeId, centerX);
-      return centerX;
-    };
-
-    const roots = flowNodes.filter(n => (parentsMap.get(n.id) || []).length === 0);
-    for (const root of roots) {
-      assignX(root.id);
     }
-    // Catch any disconnected nodes
-    for (const node of flowNodes) {
-      if (!visited.has(node.id)) {
-        assignX(node.id);
+
+    // Pass B (Bottom-Up): Center fork parents (with multiple children) over their spread children
+    for (let d = maxDepth - 1; d >= 0; d--) {
+      const layerNodes = layers.get(d) || [];
+      if (layerNodes.length === 1) {
+        const onlyNode = layerNodes[0];
+        const children = childrenMap.get(onlyNode.id) || [];
+        if (children.length > 1) {
+          const childXs = children
+            .map(cid => xMap.get(cid))
+            .filter((x): x is number => x !== undefined);
+
+          if (childXs.length > 1) {
+            const minX = Math.min(...childXs);
+            const maxX = Math.max(...childXs);
+            xMap.set(onlyNode.id, (minX + maxX) / 2);
+          }
+        }
       }
     }
+
+    // Normalize X coordinates so the leftmost node starts at x = 0
+    const allXs = Array.from(xMap.values());
+    const minCanvasX = allXs.length > 0 ? Math.min(...allXs) : 0;
 
     const layoutNodes: LayoutNode[] = flowNodes.map(node => ({
       id: node.id,
-      x: xMap.get(node.id) ?? 0,
+      x: (xMap.get(node.id) ?? 0) - minCanvasX,
       y: (depthMap.get(node.id) ?? 0) * (NODE_HEIGHT + GAP_Y),
       data: node
     }));
 
     const layoutNodeMap = new Map<string, LayoutNode>(layoutNodes.map(n => [n.id, n]));
 
-    // 6. Generate Bezier Edge Paths
+    // 6. Generate Bezier Edge Paths[cite: 5]
     const layoutEdges: LayoutEdge[] = [];
     for (const node of layoutNodes) {
       const parents = parentsMap.get(node.id) || [];

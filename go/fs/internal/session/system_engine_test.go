@@ -72,10 +72,10 @@ func (ui *seMockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node think
 func (ui *seMockUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: true}
 }
-func (ui *seMockUI) ChooseNextStep() flows.FlowStrategy                  { return flows.StrategyManual }
-func (ui *seMockUI) ReviewCandidate(branch string) bool                  { return true }
-func (ui *seMockUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
-func (ui *seMockUI) GetChunkChannel() chan<- workspace.NodeChunk         { return nil }
+func (ui *seMockUI) ChooseNextStep() flows.FlowStrategy                               { return flows.StrategyManual }
+func (ui *seMockUI) ReviewCandidate(branch string) bool                               { return true }
+func (ui *seMockUI) ConfirmTransition(targetThinkState string, reasoning string) bool { return true }
+func (ui *seMockUI) GetChunkChannel() chan<- workspace.NodeChunk                      { return nil }
 
 type seMockEmitter struct {
 	events []telemetry.Event
@@ -148,7 +148,6 @@ func TestSystemEngine_Execute_SuccessfulTransition(t *testing.T) {
 
 	signal := &signals.SignalTransition{
 		TargetThinkState: "golang",
-		Reasoning:        "Moving to implementation",
 	}
 
 	resultSig, err := systemEngine.Execute(ctx, address, turnID, catalystID, signal, ui, emitter)
@@ -225,7 +224,6 @@ func TestSystemEngine_Execute_InvalidTarget(t *testing.T) {
 	ui := &seMockUI{}
 	signal := &signals.SignalTransition{
 		TargetThinkState: "non-existent-domain",
-		Reasoning:        "Hallucinated by LLM",
 	}
 
 	resultSig, err := systemEngine.Execute(ctx, address, uuid.NewV7(), uuid.NewV7(), signal, ui, nil)

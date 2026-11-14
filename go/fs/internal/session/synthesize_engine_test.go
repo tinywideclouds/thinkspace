@@ -27,6 +27,7 @@ import (
 
 type seTestModelClient struct {
 	responses []llm.StreamChunk
+	callIdx   int
 }
 
 func (client *seTestModelClient) GenerateContentStream(
@@ -37,7 +38,9 @@ func (client *seTestModelClient) GenerateContentStream(
 	config spaces.ThinkStateConfig,
 ) iter.Seq2[llm.StreamChunk, error] {
 	return func(yield func(llm.StreamChunk, error) bool) {
-		for _, resp := range client.responses {
+		if client.callIdx < len(client.responses) {
+			resp := client.responses[client.callIdx]
+			client.callIdx++
 			yield(resp, nil)
 		}
 	}
@@ -115,8 +118,8 @@ func (u *seTestUI) ChooseNextStep() flows.FlowStrategy { return flows.StrategyRe
 func (u *seTestUI) ReviewCandidate(branch string) bool {
 	return u.reviewToReturn
 }
-func (u *seTestUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
-func (u *seTestUI) GetChunkChannel() chan<- workspace.NodeChunk         { return nil }
+func (u *seTestUI) ConfirmTransition(targetThinkState string, reasoning string) bool { return true }
+func (u *seTestUI) GetChunkChannel() chan<- workspace.NodeChunk                      { return nil }
 
 type seTestEmitter struct{}
 
@@ -157,7 +160,10 @@ func TestSynthesizeEngine_TopologyAndEdges(t *testing.T) {
 	scaffoldChat(workspaceRoot, "golang", "chat-1")
 
 	modelClient := &seTestModelClient{
-		responses: []llm.StreamChunk{{Text: "Synthesized golden output."}},
+		responses: []llm.StreamChunk{
+			{Text: `{"thought":"Merged patch","patches":[]}`},
+			{Text: "Manager review: Synthesized both approaches cleanly."},
+		},
 	}
 	turnExecutor := session.NewTurnExecutor(logger, modelClient, service, emitter)
 
@@ -197,6 +203,7 @@ func TestSynthesizeEngine_TopologyAndEdges(t *testing.T) {
 		t.Errorf("Expected SignalTerminal from synthesis, got %T", signal)
 	}
 
+	// Verify subgraph nodes
 	_ = service.SyncGraphContext(context.Background(), flowAddress)
 	timeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), flowAddress, flowAddress.GraphID)
 
@@ -226,5 +233,20 @@ func TestSynthesizeEngine_TopologyAndEdges(t *testing.T) {
 	}
 	if synthRes.Edges["parent_id"] != synthModel.ID.String() {
 		t.Errorf("Expected Synthesis Resolution to point to Synthesis Model")
+	}
+
+	// Verify Manager review node on Main Timeline
+	mainTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), chatSession, chatSession.GraphID)
+	if len(mainTimeline) != 1 {
+		t.Fatalf("Expected 1 Manager review node on main timeline, got %d", len(mainTimeline))
+	}
+	if mainTimeline[0].Type != thinkgraph.EventModel {
+		t.Errorf("Expected main timeline node to be EventModel, got %s", mainTimeline[0].Type)
+	}
+	if mainTimeline[0].Content != "Manager review: Synthesized both approaches cleanly." {
+		t.Errorf("Expected human-readable Manager review on main timeline, got %q", mainTimeline[0].Content)
+	}
+	if mainTimeline[0].Edges["parent_id"] != optionsNodeID.String() {
+		t.Errorf("Expected Manager review node to point to OptionsNodeID (%s), got %v", optionsNodeID.String(), mainTimeline[0].Edges)
 	}
 }

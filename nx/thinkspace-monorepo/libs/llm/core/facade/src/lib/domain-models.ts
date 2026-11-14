@@ -3,7 +3,13 @@ export interface SpaceInfo {
   name: string;
 }
 
-export type GraphEventType = 'prompt' | 'model' | 'system' | 'file_delta' | 'flow_execution';
+export type GraphEventType =
+  | 'prompt'
+  | 'model'
+  | 'system'
+  | 'file_delta'
+  | 'flow_execution'
+  | 'candidate_resolution';
 
 export interface BaseGraphEvent {
   id: string;
@@ -16,16 +22,24 @@ export interface BaseGraphEvent {
 
 export interface MessageGraphEvent extends BaseGraphEvent {
   type: 'prompt' | 'model' | 'system';
-  content: string; 
+  content: string;
 }
 
 export interface FileDeltaGraphEvent extends BaseGraphEvent {
   type: 'file_delta';
-  content: string; 
+  content: string;
   path: string;
   previewSnippet: string;
   fileRef: string;
   parentId?: string;
+}
+
+export interface CandidateResolutionGraphEvent extends BaseGraphEvent {
+  type: 'candidate_resolution';
+  content: string;
+  candidateId: string;
+  accepted: boolean;
+  reason: string;
 }
 
 export interface AgentRecord {
@@ -39,7 +53,7 @@ export interface AgentRecord {
 
 export interface FlowExecutionGraphEvent extends BaseGraphEvent {
   type: 'flow_execution';
-  content: string; 
+  content: string;
   flowId: string;
   taskId: string;
   task: string;
@@ -48,9 +62,10 @@ export interface FlowExecutionGraphEvent extends BaseGraphEvent {
   agents: AgentRecord[];
 }
 
-export type GraphEvent = 
-  | MessageGraphEvent 
-  | FileDeltaGraphEvent 
+export type GraphEvent =
+  | MessageGraphEvent
+  | FileDeltaGraphEvent
+  | CandidateResolutionGraphEvent
   | FlowExecutionGraphEvent;
 
 export interface ProjectionCoordinate {
@@ -87,15 +102,44 @@ export interface PreviewContext {
   focus: AttentionFocus;
 }
 
+export interface FlowTelemetryPayload {
+  type: 'flow';
+  flowId: string;
+  taskId: string;
+  agentCount: number;
+}
+
+export interface AgentTelemetryPayload {
+  type: 'agent';
+  flowId: string;
+  agentId: string;
+  agentIndex: number;
+  instruction: string;
+  attempt: number;
+  trace: string;
+  candidateId: string;
+  passed: boolean;
+}
+
+export interface TransitionTelemetryPayload {
+  type: 'transition';
+  targetThinkState: string;
+}
+
+export type TelemetryPayload =
+  | FlowTelemetryPayload
+  | AgentTelemetryPayload
+  | TransitionTelemetryPayload;
+
 export interface TelemetryEvent {
   type: 'telemetry_event';
   channel: string;
   id: string;
   eventType: string;
-  timestamp: Temporal.Instant; 
+  timestamp: Temporal.Instant;
   message: string;
   summary: string;
-  payload: Record<string, unknown>;
+  payload?: TelemetryPayload;
 }
 
 export type AppEvent =
@@ -104,12 +148,12 @@ export type AppEvent =
   | { type: 'request_review'; branch: string }
   | { type: 'request_transition'; targetThinkState: string; reasoning: string }
   | { type: 'available_spaces'; spaces: SpaceInfo[] }
-  | { 
-      type: 'sync_history'; 
-      recentEvents: GraphEvent[]; 
-      digests: Record<string, DigestMeta>; 
-      focus: AttentionFocus; 
-      nextCursor: string; 
+  | {
+      type: 'sync_history';
+      recentEvents: GraphEvent[];
+      digests: Record<string, DigestMeta>;
+      focus: AttentionFocus;
+      nextCursor: string;
       hasMore: boolean;
       coordinate: ProjectionCoordinate;
     }

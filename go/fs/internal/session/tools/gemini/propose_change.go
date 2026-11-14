@@ -77,7 +77,7 @@ func CompileProposeChange(tool *tools.ProposeChangeTool, config spaces.ThinkStat
 					},
 				},
 			},
-			Required: []string{tools.ContextDigest, tools.AgentCount},
+			Required: []string{tools.ContextDigest, tools.AgentCount, tools.AgentInstructions},
 		},
 	}
 }

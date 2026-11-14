@@ -18,7 +18,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
@@ -116,7 +115,7 @@ func (ui *ceTestUI) ReviewContext(turnContext session.TurnContext) session.Conte
 }
 func (ui *ceTestUI) ChooseNextStep() flows.FlowStrategy { return flows.StrategyManual }
 func (ui *ceTestUI) ReviewCandidate(branch string) bool { return true }
-func (ui *ceTestUI) ConfirmTransition(req signals.SignalTransition) bool {
+func (ui *ceTestUI) ConfirmTransition(targetThinkState string, reasoning string) bool {
 	return ui.transitionApproved
 }
 func (ui *ceTestUI) GetChunkChannel() chan<- workspace.NodeChunk { return nil }

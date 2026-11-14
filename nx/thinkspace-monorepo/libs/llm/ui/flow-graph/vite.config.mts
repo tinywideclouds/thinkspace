@@ -5,6 +5,9 @@ import angular from '@analogjs/vite-plugin-angular';
 export default defineConfig(() => ({
   root: __dirname,
   cacheDir: '../../../../node_modules/.vite/libs/llm/ui/flow-graph',
+  resolve: {
+    tsconfigPaths: true,
+  },
   plugins: [angular()],
   // Uncomment this if you are using workers.
   // worker: {

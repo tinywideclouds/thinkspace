@@ -83,7 +83,6 @@ message GraphEvent {
   string timestamp = 2;
   repeated string tags = 3;
   bool tombstoned = 4;
-  // Field 5 (branch_id) removed to ensure pure, context-agnostic nodes
   map<string, string> edges = 6; 
   map<string, string> metadata = 7;
 
@@ -190,13 +189,39 @@ message FileContextMetaData {
   int32 token_count = 3;
 }
 
+message FlowTelemetryPayload {
+  string flow_id = 1;
+  string task_id = 2;
+  int32 agent_count = 3;
+}
+
+message AgentTelemetryPayload {
+  string flow_id = 1;
+  string agent_id = 2;
+  int32 agent_index = 3;
+  string instruction = 4;
+  int32 attempt = 5;
+  string trace = 6;
+  string candidate_id = 7;
+  bool passed = 8;
+}
+
+message TransitionTelemetryPayload {
+  string target_think_state = 1;
+}
+
 message TelemetryData {
   string id = 1;            
   string type = 2;          
   string timestamp = 3;     
   string message = 4;       
   string summary = 5;       
-  string payload_json = 6;  
+  
+  oneof payload {
+    FlowTelemetryPayload flow_payload = 6;
+    AgentTelemetryPayload agent_payload = 7;
+    TransitionTelemetryPayload transition_payload = 8;
+  }
 }
 
 message TelemetryEvent {

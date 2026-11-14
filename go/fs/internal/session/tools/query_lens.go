@@ -10,7 +10,6 @@ import (
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
-	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/telemetry"
 )
 
@@ -38,14 +37,14 @@ func (t *QueryLensTool) DefaultDescription() string {
 	return "Query historical events indexed under a specific semantic tag."
 }
 
-func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionContext) (signals.EngineSignal, error) {
+func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionContext) (ToolResponse, error) {
 	var request QueryLensRequest
 	argumentBytes, err := json.Marshal(executionContext.RawArguments)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling query_lens arguments: %w", err)
+		return ToolResponse{}, fmt.Errorf("marshaling query_lens arguments: %w", err)
 	}
 	if err := json.Unmarshal(argumentBytes, &request); err != nil {
-		return nil, fmt.Errorf("invalid query_lens schema: %w", err)
+		return ToolResponse{}, fmt.Errorf("invalid query_lens schema: %w", err)
 	}
 
 	if executionContext.Emitter != nil {
@@ -82,5 +81,5 @@ func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionC
 		Content: toolResponse.String(),
 	})
 
-	return nil, nil
+	return ToolResponse{}, nil
 }

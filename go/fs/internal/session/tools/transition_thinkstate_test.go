@@ -15,7 +15,7 @@ type mockTransitionUI struct {
 	confirmResult bool
 }
 
-func (m *mockTransitionUI) ConfirmTransition(req signals.SignalTransition) bool {
+func (m *mockTransitionUI) ConfirmTransition(targetThinkState string, reasoning string) bool {
 	return m.confirmResult
 }
 
@@ -37,12 +37,15 @@ func TestTransitionThinkStateTool_Execute_Approved(t *testing.T) {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	signal, ok := result.(*signals.SignalTransition)
+	signal, ok := result.Signal.(*signals.SignalTransition)
 	if !ok {
-		t.Fatalf("expected SignalTransition, got %T", result)
+		t.Fatalf("expected SignalTransition, got %T", result.Signal)
 	}
 	if signal.TargetThinkState != "golang" {
 		t.Errorf("expected 'golang', got %q", signal.TargetThinkState)
+	}
+	if result.Content != "" {
+		t.Errorf("expected completely silent transition content on the main timeline, got %q", result.Content)
 	}
 }
 
@@ -69,7 +72,7 @@ func TestTransitionThinkStateTool_Execute_Denied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != nil {
+	if result.Signal != nil {
 		t.Errorf("expected nil signal on denied transition (LLM must self-correct)")
 	}
 
@@ -113,7 +116,7 @@ func TestTransitionThinkStateTool_EmptyTarget(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on empty target")
 	}
-	if result != nil {
+	if result.Signal != nil {
 		t.Errorf("expected nil signal on error")
 	}
 }

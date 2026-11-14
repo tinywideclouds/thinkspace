@@ -152,8 +152,8 @@ func (u *weMockUI) ReviewCandidate(branch string) bool {
 	u.reviewedBranch = branch
 	return u.reviewToReturn
 }
-func (u *weMockUI) ConfirmTransition(req signals.SignalTransition) bool {
-	u.capturedReasoning = req.Reasoning
+func (u *weMockUI) ConfirmTransition(targetThinkState string, reasoning string) bool {
+	u.capturedReasoning = reasoning
 	return u.transitionToReturn
 }
 func (u *weMockUI) GetChunkChannel() chan<- workspace.NodeChunk { return nil }
@@ -223,12 +223,12 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	}
 
 	dispatchSignal := &signals.SignalDispatchFlow{
-		Tasks:   tasks,
-		Summary: "Executing parallel flow",
+		Tasks: tasks,
 	}
 
-	turnID := uuid.NewV7()     // Represents the Manager Node ID on main timeline
-	catalystID := uuid.NewV7() // Represents the Manager Prompt ID
+	turnID := uuid.NewV7()
+	catalystID := uuid.NewV7()
+
 	signal, err := workerEngine.Execute(context.Background(), chatSession, turnID, catalystID, dispatchSignal, ui, emitter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -243,7 +243,6 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 		t.Errorf("Expected synthesise signal to carry active FlowAddress for cross-boundary routing")
 	}
 
-	// 1. Verify Main Timeline Edges (Flow Card and Flow Options Node)
 	mainTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), chatSession, chatSession.GraphID)
 	var flowCard *thinkgraph.Node
 	var optionsNode *thinkgraph.Node
@@ -272,7 +271,6 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 		t.Errorf("Expected yielded signal ParentNodeID to match the Flow Options node ID")
 	}
 
-	// 2. Verify Subgraph Timeline Edges
 	subGraphAddr := synthSig.FlowAddress
 	_ = service.SyncGraphContext(context.Background(), subGraphAddr)
 	flowTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), subGraphAddr, subGraphAddr.GraphID)
@@ -351,7 +349,7 @@ func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
 			TargetFiles: []string{"does/not/exist.go"},
 		},
 	}
-	dispatchSignal := &signals.SignalDispatchFlow{Tasks: tasks, Summary: "test flow"}
+	dispatchSignal := &signals.SignalDispatchFlow{Tasks: tasks}
 
 	_, err = workerEngine.Execute(context.Background(), chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, &weMockUI{}, emitter)
 

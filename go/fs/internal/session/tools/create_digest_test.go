@@ -16,8 +16,8 @@ type mockUI struct {
 	tools.UI
 }
 
-func (m *mockUI) OnTextChunk(chunk workspace.NodeChunk)               {}
-func (m *mockUI) ConfirmTransition(req signals.SignalTransition) bool { return true }
+func (m *mockUI) OnTextChunk(chunk workspace.NodeChunk)                            {}
+func (m *mockUI) ConfirmTransition(targetThinkState string, reasoning string) bool { return true }
 
 type mockToolEmitter struct {
 	events []telemetry.Event
@@ -68,13 +68,13 @@ func TestCreateDigestTool_Execute(t *testing.T) {
 		UI:           &mockUI{},
 	}
 
-	signal, err := tool.Execute(context.Background(), ec)
+	result, err := tool.Execute(context.Background(), ec)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, ok := signal.(*signals.SignalTerminal); !ok {
-		t.Errorf("expected tool to yield SignalTerminal, got %T", signal)
+	if _, ok := result.Signal.(*signals.SignalTerminal); !ok {
+		t.Errorf("expected tool to yield SignalTerminal, got %T", result.Signal)
 	}
 
 	if committer.lastTopic != "Architecture Decision" {
@@ -106,11 +106,11 @@ func TestCreateDigestTool_InvalidSchema(t *testing.T) {
 		Emitter:      emitter,
 	}
 
-	signal, err := tool.Execute(context.Background(), ec)
+	result, err := tool.Execute(context.Background(), ec)
 	if err == nil {
 		t.Fatalf("expected error on missing required fields")
 	}
-	if signal != nil {
+	if result.Signal != nil {
 		t.Errorf("expected nil signal on error")
 	}
 
