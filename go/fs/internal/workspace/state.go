@@ -31,6 +31,9 @@ type ChatVersioner interface {
 // CandidateSandbox represents a short-lived, isolated workspace for an agent to draft changes.
 // It acts as a pure virtual environment, decoupling the domain from physical file paths.
 type CandidateSandbox interface {
+	// ResolvePath maps a sandbox-relative path (e.g., "src/main.go") to its physical location inside the sandbox.
+	ResolvePath(path string) string
+
 	// WriteFile writes a file to the sandbox's virtual workspace.
 	WriteFile(ctx context.Context, path string, data []byte) error
 

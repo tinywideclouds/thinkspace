@@ -1,4 +1,4 @@
-import { Component, output, signal } from '@angular/core';
+import { Component, input, output, signal } from '@angular/core';
 import { DelegationStrategy } from '@org/llm-core-facade';
 
 export interface StrategySelectionEvent {
@@ -14,7 +14,12 @@ export interface StrategySelectionEvent {
       style="background: #fff3cd; padding: 16px; border: 1px solid #ffe69c; border-radius: 4px; margin-top: 16px;"
     >
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-        <strong>Select Next Step:</strong>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <strong>Select Next Step:</strong>
+          @if (hasVerificationFailure()) {
+            <span style="font-size: 11px; color: #b91c1c; font-weight: bold;">⚠️ Sub-agent verification failed. Review required.</span>
+          }
+        </div>
         <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #664d03; cursor: pointer;">
           <input
             type="checkbox"
@@ -56,6 +61,7 @@ export interface StrategySelectionEvent {
 export class ChatStrategyPromptComponent {
   DelegationStrategy = DelegationStrategy;
   autoAccept = signal<boolean>(false);
+  hasVerificationFailure = input<boolean>(false);
   strategySelected = output<StrategySelectionEvent>();
 
   toggleAutoAccept(event: Event): void {

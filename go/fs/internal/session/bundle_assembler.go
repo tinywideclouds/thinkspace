@@ -165,6 +165,60 @@ func (a *BundleAssembler) Assemble(
 	return bundle, graphData, nil
 }
 
+// AssembleWorkerBundle builds an isolated ThinkBundle for a sub-agent execution,
+// including workspace Mapbook layers, patcher formatting rules, and materialized workbench files.
+func (a *BundleAssembler) AssembleWorkerBundle(
+	ctx context.Context,
+	projectID string,
+	space spaces.ThinkState,
+	baseAgentRules string,
+	contextDigest string,
+	instruction string,
+	workbenchItems []cognition.WorkbenchItem,
+) cognition.ThinkBundle {
+	projectWorkspaceDir := filepath.Join(a.workspaceRoot, projectID, "workspace")
+	stringMaps := make(map[string]string)
+
+	if space != nil && space.Mapbook() != nil {
+		rawMapbook, err := space.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
+		if err != nil {
+			if a.logger != nil {
+				a.logger.WarnContext(ctx, "failed to generate mapbook layers", "error", err)
+			}
+		} else {
+			for k, v := range rawMapbook {
+				stringMaps[string(k)] = v
+			}
+		}
+	}
+
+	formattingConstraints := ""
+	if space != nil && space.Patcher() != nil {
+		formattingConstraints = space.Patcher().SystemInstructions()
+	}
+
+	var longTermMemory []string
+	if contextDigest != "" {
+		longTermMemory = []string{contextDigest}
+	}
+
+	return cognition.ThinkBundle{
+		Rules: cognition.SystemRules{
+			Persona:               baseAgentRules,
+			FormattingConstraints: formattingConstraints,
+		},
+		Mapbook: cognition.Mapbook{Maps: stringMaps},
+		Trajectory: cognition.Trajectory{
+			LongTermMemory: longTermMemory,
+			Catalyst: cognition.TrajectoryEvent{
+				Role:    "user",
+				Content: instruction,
+			},
+		},
+		Workbench: workbenchItems,
+	}
+}
+
 func (a *BundleAssembler) gatherTimeline(
 	ctx context.Context,
 	chatObj *thinkgraph.ChatAddress,

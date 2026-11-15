@@ -14,19 +14,43 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
+// Options holds Go-domain-specific settings extracted from ThinkStateConfig.Options.
+type Options struct {
+	FormatImports bool
+}
+
+func parseOptions(raw map[string]any) Options {
+	opts := Options{
+		FormatImports: true, // Enabled by default in Go ThinkSpaces
+	}
+	if raw == nil {
+		return opts
+	}
+	if v, ok := raw["format_imports"].(bool); ok {
+		opts.FormatImports = v
+	}
+	return opts
+}
+
 // GoThinkState implements spaces.ThinkSpace for the Go programming language.
 type GoThinkState struct {
-	config spaces.ThinkStateConfig
+	config  spaces.ThinkStateConfig
+	options Options
 }
 
 func NewGoThinkState(cfg spaces.ThinkStateConfig) *GoThinkState {
 	return &GoThinkState{
-		config: cfg,
+		config:  cfg,
+		options: parseOptions(cfg.Options),
 	}
 }
 
 func (s *GoThinkState) Config() spaces.ThinkStateConfig {
 	return s.config
+}
+
+func (s *GoThinkState) Options() Options {
+	return s.options
 }
 
 func (s *GoThinkState) Verifier() spaces.Verifier {
@@ -38,7 +62,7 @@ func (s *GoThinkState) Mapbook() spaces.Mapbook {
 }
 
 func (s *GoThinkState) Patcher() workspace.Patcher {
-	return NewGoASTPatcher(s.config.Roles.Worker.PatcherInstructions)
+	return NewGoASTPatcher(s.config.Roles.Worker.PatcherInstructions, s.options.FormatImports)
 }
 
 func (s *GoThinkState) Initialize(ctx context.Context, directory string) error {

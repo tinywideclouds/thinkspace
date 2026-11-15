@@ -26,10 +26,12 @@ const DEBUG_PREFETCH_CLASSES = [
   selector: 'llm-scroll-viewport',
   standalone: true,
   imports: [CommonModule],
+  host: { class: 'block h-full w-full' },
   templateUrl: './scroll-viewport.component.html'
 })
 export class ScrollViewportComponent {
   public containerRef = viewChild.required<ElementRef<HTMLDivElement>>('scrollContainer');
+  public contentWrapperRef = viewChild.required<ElementRef<HTMLDivElement>>('contentWrapper');
   public bottomSentinelRef = viewChild.required<ElementRef<HTMLDivElement>>('bottomSentinel');
 
   public topContentAnchor = input<Element | null>(null);
@@ -38,6 +40,8 @@ export class ScrollViewportComponent {
   
   public loadPreviousPage = output<void>();
   public scrolledToBottom = output<void>();
+  public contentGrowth = output<void>();
+  public userScrolled = output<void>();
 
   public topContentVisible = signal<boolean>(false);
   public scrollState = signal<ScrollState>('auto');
@@ -45,9 +49,9 @@ export class ScrollViewportComponent {
   private destroyRef = inject(DestroyRef);
   private debugObserver: IntersectionObserver | null = null;
   private prefetchObserver: IntersectionObserver | null = null;
+  private resizeObserver: ResizeObserver | null = null;
   private observedPrefetchElement: Element | null = null;
   private previousDebugPrefetchElement: Element | null = null;
-  private tailLockRafId: number | null = null;
 
   constructor() {
     // Dynamic top content debug observer
@@ -126,20 +130,14 @@ export class ScrollViewportComponent {
     this.scrollState.set('auto');
   }
 
-  private enforceTailLock(): void {
-    if (this.scrollState() !== 'auto' || this.tailLockRafId !== null) return;
-
-    this.tailLockRafId = requestAnimationFrame(() => {
-      this.tailLockRafId = null;
-      if (this.scrollState() === 'auto') {
-        const container = this.containerRef().nativeElement;
-        container.scrollTop = container.scrollHeight;
-      }
-    });
+  public scrollElementToTop(element: HTMLElement, behavior: ScrollBehavior = 'smooth'): void {
+    const container = this.containerRef().nativeElement;
+    container.scrollTo({ top: element.offsetTop, behavior });
   }
 
   private setupObservers(): void {
     const container = this.containerRef().nativeElement;
+    const wrapper = this.contentWrapperRef().nativeElement;
 
     const bottomObserver = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting) {
@@ -151,30 +149,31 @@ export class ScrollViewportComponent {
     }, { root: container, threshold: 0.1 });
     bottomObserver.observe(this.bottomSentinelRef().nativeElement);
 
-    const mutationObserver = new MutationObserver((mutations) => {
-      const domChanged = mutations.some(m => m.addedNodes.length > 0 || m.type === 'characterData');
-      if (domChanged) {
-        this.enforceTailLock();
-      }
-    });
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.contentGrowth.emit();
+      });
+      this.resizeObserver.observe(wrapper);
+    }
 
-    mutationObserver.observe(container.firstElementChild as Node, {
-      childList: true,
-      subtree: true,
-      characterData: true
-    });
+    const onUserScrollIntent = () => {
+      this.userScrolled.emit();
+    };
+    container.addEventListener('wheel', onUserScrollIntent, { passive: true });
+    container.addEventListener('touchmove', onUserScrollIntent, { passive: true });
+    container.addEventListener('pointerdown', onUserScrollIntent, { passive: true });
 
     this.destroyRef.onDestroy(() => {
-      if (this.tailLockRafId !== null) {
-        cancelAnimationFrame(this.tailLockRafId);
-      }
       if (this.previousDebugPrefetchElement) {
         this.previousDebugPrefetchElement.classList.remove(...DEBUG_PREFETCH_CLASSES);
       }
       bottomObserver.disconnect();
+      if (this.resizeObserver) this.resizeObserver.disconnect();
       if (this.debugObserver) this.debugObserver.disconnect();
       if (this.prefetchObserver) this.prefetchObserver.disconnect();
-      mutationObserver.disconnect();
+      container.removeEventListener('wheel', onUserScrollIntent);
+      container.removeEventListener('touchmove', onUserScrollIntent);
+      container.removeEventListener('pointerdown', onUserScrollIntent);
     });
   }
 }

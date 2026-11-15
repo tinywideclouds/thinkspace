@@ -10,10 +10,11 @@ type ThinkStateConfig struct {
 	Type         string          `yaml:"type"`
 	Name         string          `yaml:"name"`
 	SystemPrompt string          `yaml:"system_prompt"`
-	Toolchain    ToolchainConfig `yaml:"toolchain"`
 	Timeouts     TimeoutsConfig  `yaml:"timeouts"`
 	Roles        RolesConfig     `yaml:"roles"`
 	Memory       MemoryConfig    `yaml:"memory"`
+	Options      map[string]any  `yaml:"options,omitempty"`
+	Toolchain    ToolchainConfig `yaml:"toolchain"`
 }
 
 type ToolchainConfig struct {

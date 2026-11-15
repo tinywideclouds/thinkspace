@@ -43,4 +43,17 @@ describe('ChatStrategyPromptComponent', () => {
       autoAccept: true,
     });
   });
+
+  it('should display a verification warning when hasVerificationFailure is true', () => {
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain(
+      'Sub-agent verification failed',
+    );
+
+    fixture.componentRef.setInput('hasVerificationFailure', true);
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      'Sub-agent verification failed. Review required.',
+    );
+  });
 });

@@ -6,7 +6,7 @@ import {
   linkedSignal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { PreviewContext } from '@org/llm-core-facade';
+import { PreviewContext, FileContextMetaData } from '@org/llm-core-facade';
 
 const CATALYST_PREFIX = '[catalyst] ';
 
@@ -44,9 +44,20 @@ export class ContextInspectorComponent {
       .filter((entry) => !entry.text.startsWith(CATALYST_PREFIX));
   });
 
-  retainedFiles = linkedSignal<Set<string>>(() => {
+  // Split fileContexts into Injected (Workbench) vs Skeleton/Structural (Mapbook)
+  injectedFiles = computed<FileContextMetaData[]>(() => {
     const files = this.context()?.fileContexts || [];
-    return new Set(files.map((f) => f.path));
+    return files.filter((f) => f.level === 'injected');
+  });
+
+  mapbookFiles = computed<FileContextMetaData[]>(() => {
+    const files = this.context()?.fileContexts || [];
+    return files.filter((f) => f.level === 'skeleton' || f.level === 'structural');
+  });
+
+  // Retention state only tracks actionable injected files
+  retainedFiles = linkedSignal<Set<string>>(() => {
+    return new Set(this.injectedFiles().map((f) => f.path));
   });
 
   retainedHistory = linkedSignal<Set<number>>(() => {
@@ -75,8 +86,7 @@ export class ContextInspectorComponent {
 
   totalFileTokens = computed(() => {
     const retained = this.retainedFiles();
-    const files = this.context()?.fileContexts || [];
-    return files.reduce((sum, file) => {
+    return this.injectedFiles().reduce((sum, file) => {
       return retained.has(file.path) ? sum + file.tokenCount : sum;
     }, 0);
   });
@@ -93,6 +103,7 @@ export class ContextInspectorComponent {
     });
 
     this.approve.emit({
+      // Only emit checked injected workbench file paths
       retainedFilePaths: Array.from(this.retainedFiles()),
       retainedHistoryIndices: Array.from(retained).sort((a, b) => a - b),
     });

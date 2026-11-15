@@ -9,10 +9,10 @@ golang:
     - Structure: Place main files in a cmd structure and logic files in separate packages
     - Constraints: Use the native `uuid` package, never `github.com/google/uuid`.
 
+  options:
+    format_imports: true
+
   toolchain:
-    pre_verify:
-      - "goimports -w src/"
-      - "go fmt -C src ./..."
     verify:
       - "go build -C src ./..."
       - "go test -C src  ./..."
@@ -28,7 +28,7 @@ golang:
 
   roles:
     manager:
-      model: "gemini-3.6-flash"
+      model: "gemini-3.8-flash"
       system_prompt: |
         You are the Lead Software Architect.
         You do NOT write code directly. Your job is to understand the user's requirements, architect a solution, and delegate the implementation to sub-agents.

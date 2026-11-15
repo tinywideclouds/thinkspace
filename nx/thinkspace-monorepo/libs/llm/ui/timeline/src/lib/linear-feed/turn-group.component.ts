@@ -6,6 +6,7 @@ import { TagRibbonComponent } from '../tag-ribbon.component';
   selector: 'llm-turn-group',
   standalone: true,
   imports: [CommonModule, TagRibbonComponent],
+  host: { class: 'block w-full' },
   template: `
     <div 
       class="relative flex w-full transition-all duration-300 rounded-xl"

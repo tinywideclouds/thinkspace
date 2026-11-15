@@ -2,6 +2,7 @@ package golang_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,10 @@ func newMockSandbox() *mockSandbox {
 	return &mockSandbox{
 		files: make(map[string][]byte),
 	}
+}
+
+func (m *mockSandbox) ResolvePath(path string) string {
+	return path
 }
 
 func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
@@ -74,7 +79,7 @@ func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args .
 		return "ok", nil
 	}
 
-	if strings.Contains(cmdStr, "goimports") || strings.Contains(cmdStr, "go clean") {
+	if strings.Contains(cmdStr, "go clean") {
 		return "", nil
 	}
 
@@ -88,9 +93,11 @@ func (m *mockSandbox) TearDown(ctx context.Context) error                   { re
 func setupGoThinkState(t *testing.T, verifyTimeout int) *golang.GoThinkState {
 	config := spaces.ThinkStateConfig{
 		Name: "golang",
+		Options: map[string]any{
+			"format_imports": true,
+		},
 		Toolchain: spaces.ToolchainConfig{
-			PreVerify: []string{"goimports -w src/"},
-			Verify:    []string{"go build -C src ./...", "go test -C src ./..."},
+			Verify: []string{"go build -C src ./...", "go test -C src ./..."},
 		},
 		Timeouts: spaces.TimeoutsConfig{
 			VerifySeconds: verifyTimeout,
@@ -252,8 +259,8 @@ func TestGolangMapbook_GenerateLayers_NoSrcDirectory(t *testing.T) {
 	}
 }
 
-// --- Interface Contract Tests ---
-func TestGoThinkState_InterfaceContracts(t *testing.T) {
+// --- Interface Contract & Domain Option Tests ---
+func TestGoThinkState_InterfaceContractsAndOptions(t *testing.T) {
 	space := setupGoThinkState(t, 15)
 
 	if space.Config().Name != "golang" {
@@ -265,7 +272,34 @@ func TestGoThinkState_InterfaceContracts(t *testing.T) {
 	if space.Mapbook() == nil {
 		t.Errorf("Mapbook() returned nil")
 	}
+	if !space.Options().FormatImports {
+		t.Errorf("expected FormatImports to be true")
+	}
 
+	// Verify disabling format_imports via domain options stops patcher from rewriting source
+	disabledSpace := golang.NewGoThinkState(spaces.ThinkStateConfig{
+		Name: "golang",
+		Options: map[string]any{
+			"format_imports": false,
+		},
+	})
+	if disabledSpace.Options().FormatImports {
+		t.Errorf("expected FormatImports to be false when disabled in Options")
+	}
+
+	sandbox := newMockSandbox()
+	rawCode := "package main\nfunc main(){fmt.Println(\"hello\")}"
+	payload, _ := json.Marshal(map[string]any{
+		"patches": []map[string]string{
+			{"file": "src/main.go", "action": "full_replace", "code": rawCode},
+		},
+	})
+	if err := disabledSpace.Patcher().Apply(context.Background(), sandbox, string(payload)); err != nil {
+		t.Fatalf("patcher failed: %v", err)
+	}
+	if string(sandbox.files["src/main.go"]) != rawCode {
+		t.Errorf("expected raw code untouched when format_imports=false, got %q", string(sandbox.files["src/main.go"]))
+	}
 }
 
 // --- Cognitive Hook Tests ---

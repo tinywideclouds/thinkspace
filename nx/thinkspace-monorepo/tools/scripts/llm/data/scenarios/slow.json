@@ -1,5 +1,23 @@
 [
   {
+    "offsetMs": 50,
+    "payload": {
+      "streamedGraphEvent": {
+        "spaceId": "project-alpha",
+        "chatId": "chat-1",
+        "projectionId": "main",
+        "event": {
+          "id": "slow-prompt-1",
+          "timestamp": "2026-10-20T10:05:59Z",
+          "tags": [],
+          "tombstoned": false,
+          "metadata": {},
+          "message": { "type": "PROMPT", "text": "Explain how the scroll viewport anchors my prompt while streaming a long response." }
+        }
+      }
+    }
+  },
+  {
     "offsetMs": 100,
     "payload": {
       "streamedGraphEvent": {
@@ -38,7 +56,7 @@
     "payload": {
       "chatStream": {
         "nodeId": "slow-node-1",
-        "text": "Here is a massive simulated response designed to test the scroll physics of the timeline component. When you scroll up, this text should continue generating below the fold without violently hijacking your viewport or pushing the content you are currently reading off the screen.\n\n"
+        "text": "Here is a massive simulated response designed to test the scroll physics of the timeline component. Your prompt should stay pinned at the top of the viewport while this response streams downward below it.\n\n"
       }
     }
   },

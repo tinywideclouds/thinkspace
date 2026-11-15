@@ -183,6 +183,10 @@ func (s *execSandbox) normalizePath(targetPath string) string {
 	return filepath.Join(s.chatDirectory, filepath.FromSlash(slashPath))
 }
 
+func (s *execSandbox) ResolvePath(path string) string {
+	return s.normalizePath(path)
+}
+
 func (s *execSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
 	fullPath := s.normalizePath(path)
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {

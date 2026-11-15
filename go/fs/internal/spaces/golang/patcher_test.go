@@ -2,6 +2,9 @@ package golang_test
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,15 +12,31 @@ import (
 )
 
 type mockPatcherSandbox struct {
-	files map[string][]byte
+	rootDir string
+	files   map[string][]byte
 }
 
-func newMockPatcherSandbox() *mockPatcherSandbox {
-	return &mockPatcherSandbox{files: make(map[string][]byte)}
+func newMockPatcherSandbox(rootDir string) *mockPatcherSandbox {
+	return &mockPatcherSandbox{
+		rootDir: rootDir,
+		files:   make(map[string][]byte),
+	}
+}
+
+func (m *mockPatcherSandbox) ResolvePath(path string) string {
+	if m.rootDir == "" {
+		return path
+	}
+	return filepath.Join(m.rootDir, filepath.FromSlash(path))
 }
 
 func (m *mockPatcherSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
 	m.files[path] = data
+	if m.rootDir != "" {
+		full := m.ResolvePath(path)
+		_ = os.MkdirAll(filepath.Dir(full), 0755)
+		return os.WriteFile(full, data, 0644)
+	}
 	return nil
 }
 
@@ -25,7 +44,10 @@ func (m *mockPatcherSandbox) ReadFile(ctx context.Context, path string) ([]byte,
 	if data, ok := m.files[path]; ok {
 		return data, nil
 	}
-	return nil, nil
+	if m.rootDir != "" {
+		return os.ReadFile(m.ResolvePath(path))
+	}
+	return nil, os.ErrNotExist
 }
 
 func (m *mockPatcherSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
@@ -38,8 +60,8 @@ func (m *mockPatcherSandbox) TearDown(ctx context.Context) error                
 
 func TestGoASTPatcher_InvalidJSON(t *testing.T) {
 	ctx := context.Background()
-	sandbox := newMockPatcherSandbox()
-	patcher := golang.NewGoASTPatcher("mock instructions")
+	sandbox := newMockPatcherSandbox("")
+	patcher := golang.NewGoASTPatcher("mock instructions", true)
 
 	invalidPayload := `{"patches": [{"file": "main.go", ` // missing closing brackets/quotes
 
@@ -50,5 +72,121 @@ func TestGoASTPatcher_InvalidJSON(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "invalid patch JSON") {
 		t.Errorf("expected JSON parse error, got: %v", err)
+	}
+}
+
+func TestGoASTPatcher_FormatImports_AddsMissingImportsAndFormats(t *testing.T) {
+	ctx := context.Background()
+	sandboxRoot := t.TempDir()
+	sandbox := newMockPatcherSandbox(sandboxRoot)
+
+	_ = sandbox.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n"))
+
+	patcher := golang.NewGoASTPatcher("mock instructions", true)
+	payloadBytes, _ := json.Marshal(map[string]any{
+		"thought": "Write unformatted main without imports",
+		"patches": []map[string]string{
+			{
+				"file":   "src/main.go",
+				"action": "full_replace",
+				"code":   "package main\nfunc main(){fmt.Println(\"hello\")}",
+			},
+		},
+	})
+
+	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
+		t.Fatalf("unexpected patcher error: %v", err)
+	}
+
+	result := string(sandbox.files["src/main.go"])
+	if !strings.Contains(result, `import "fmt"`) {
+		t.Errorf("expected goimports to inject missing \"fmt\" import, got:\n%s", result)
+	}
+	if !strings.Contains(result, "func main() {\n\tfmt.Println(\"hello\")\n}") {
+		t.Errorf("expected goimports to format function block, got:\n%s", result)
+	}
+}
+
+func TestGoASTPatcher_FormatImports_DisabledLeavesSourceUntouched(t *testing.T) {
+	ctx := context.Background()
+	sandbox := newMockPatcherSandbox(t.TempDir())
+	patcher := golang.NewGoASTPatcher("mock instructions", false)
+
+	rawCode := "package main\nfunc main(){fmt.Println(\"hello\")}"
+	payloadBytes, _ := json.Marshal(map[string]any{
+		"thought": "Write raw code",
+		"patches": []map[string]string{
+			{
+				"file":   "src/main.go",
+				"action": "full_replace",
+				"code":   rawCode,
+			},
+		},
+	})
+
+	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
+		t.Fatalf("unexpected patcher error: %v", err)
+	}
+
+	if string(sandbox.files["src/main.go"]) != rawCode {
+		t.Errorf("expected raw code to remain untouched when formatImports is false, got:\n%s", string(sandbox.files["src/main.go"]))
+	}
+}
+
+func TestGoASTPatcher_FormatImports_SyntaxErrorFallsBackToRaw(t *testing.T) {
+	ctx := context.Background()
+	sandbox := newMockPatcherSandbox(t.TempDir())
+	patcher := golang.NewGoASTPatcher("mock instructions", true)
+
+	brokenCode := "package main\nfunc broken( {\n"
+	payloadBytes, _ := json.Marshal(map[string]any{
+		"thought": "Broken syntax",
+		"patches": []map[string]string{
+			{
+				"file":   "src/main.go",
+				"action": "full_replace",
+				"code":   brokenCode,
+			},
+		},
+	})
+
+	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
+		t.Fatalf("expected patcher to fall back gracefully on syntax error, got: %v", err)
+	}
+
+	if string(sandbox.files["src/main.go"]) != brokenCode {
+		t.Errorf("expected broken code to be written raw for compiler verification, got:\n%s", string(sandbox.files["src/main.go"]))
+	}
+}
+
+func TestGoASTPatcher_ReplaceFunction_UpdatesImports(t *testing.T) {
+	ctx := context.Background()
+	sandbox := newMockPatcherSandbox(t.TempDir())
+	_ = sandbox.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n"))
+	_ = sandbox.WriteFile(ctx, "src/main.go", []byte("package main\n\nimport \"strings\"\n\nfunc greet() string {\n\treturn strings.ToUpper(\"hi\")\n}\n"))
+
+	patcher := golang.NewGoASTPatcher("mock instructions", true)
+	payloadBytes, _ := json.Marshal(map[string]any{
+		"thought": "Switch strings to fmt",
+		"patches": []map[string]string{
+			{
+				"file":   "src/main.go",
+				"action": "replace_function",
+				"name":   "greet",
+				"code":   "func greet() string {\n\treturn fmt.Sprintf(\"hi %d\", 1)\n}",
+			},
+		},
+	})
+
+	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
+		t.Fatalf("unexpected patcher error: %v", err)
+	}
+
+	result := string(sandbox.files["src/main.go"])
+	if !strings.Contains(result, `import "fmt"`) {
+		t.Errorf("expected \"fmt\" import to be added after replace_function, got:\n%s", result)
+	}
+	if strings.Contains(result, `"strings"`) {
+		t.Errorf("expected unused \"strings\" import to be pruned after replace_function, got:\n%s", result)
 	}
 }

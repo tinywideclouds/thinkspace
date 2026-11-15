@@ -22,6 +22,7 @@ type SystemEngine struct {
 	session          *ChatSession
 	registry         *config.Registry
 	workspaceService *workspace.Service
+	broadcaster      *GraphBroadcaster
 }
 
 func NewSystemEngine(
@@ -35,6 +36,7 @@ func NewSystemEngine(
 		session:          session,
 		registry:         registry,
 		workspaceService: workspaceService,
+		broadcaster:      NewGraphBroadcasterFromService(logger, workspaceService),
 	}
 }
 
@@ -89,13 +91,12 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 	}
 
 	sysAddress := e.session.GetSystemAddress()
-
 	sysEv := thinkgraph.NewEvent(thinkgraph.EventSystem, fmt.Sprintf("Workspace transitioned to %s", targetThinkState))
-	if err := e.workspaceService.Dispatcher().AppendEvent(ctx, sysAddress, sysEv); err != nil {
+	if err := e.broadcaster.AppendAndStream(ctx, sysAddress, sysEv, nil); err != nil {
 		e.logger.WarnContext(ctx, "failed appending transition system event", "error", err)
 	}
 
-	if graph := e.workspaceService.Graph(); graph != nil && catalystID != uuid.Nil() {
+	if catalystID != uuid.Nil() {
 		mut := thinkgraph.MetadataMutation{
 			Metadata: map[string]string{"transitioned_to": targetThinkState},
 		}
@@ -103,16 +104,7 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 		mut.Type = thinkgraph.MutationMetadata
 		mut.Timestamp = time.Now().UTC()
 
-		if err := e.workspaceService.SaveMutation(ctx, address, mut); err != nil {
-			e.logger.ErrorContext(ctx, "failed saving transition metadata mutation", "error", err, "catalyst_id", catalystID)
-		}
-
-		nodes, err := graph.GetNodes(ctx, address, []string{catalystID.String()})
-		if err == nil && len(nodes) > 0 {
-			if ui != nil {
-				ui.StreamGraphEvent(address, nodes[0])
-			}
-		}
+		_ = e.broadcaster.MutateAndStream(ctx, address, mut, catalystID, ui)
 	}
 
 	return &signals.SignalExecuteChat{}, nil

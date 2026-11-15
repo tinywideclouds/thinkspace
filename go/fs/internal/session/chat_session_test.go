@@ -95,6 +95,11 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 		t.Errorf("Expected Mu() to return a valid RWMutex pointer")
 	}
 
+	wsSvc := svcManager.GetService(spaceID)
+	if err := wsSvc.AppendUserPrompt(ctx, chatSession.GetActiveAddress(), "Initial hello"); err != nil {
+		t.Fatalf("Failed to append initial prompt: %v", err)
+	}
+
 	// Verify GetActiveAddress recovers the exact same persisted GraphID on a fresh ChatSession instance
 	originalGraphID := chatSession.GetActiveAddress().GraphID
 	reloadedSession, err := session.NewChatSession(
@@ -121,7 +126,7 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 		t.Fatalf("Failed to query full timeline on reloaded session: %v", err)
 	}
 	if len(events) == 0 {
-		t.Errorf("Expected reloaded session address to resolve initialized timeline events, got 0")
+		t.Errorf("Expected reloaded session address to resolve persisted timeline events, got 0")
 	}
 }
 

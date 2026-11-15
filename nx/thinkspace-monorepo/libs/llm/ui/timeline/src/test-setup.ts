@@ -15,6 +15,7 @@ import { vi } from 'vitest';
 setupTestBed({ zoneless: true });
 
 Element.prototype.scrollTo = vi.fn();
+Element.prototype.scrollIntoView = vi.fn();
 
 // Mock IntersectionObserver for JSDOM environment without empty functions
 Object.defineProperty(global, 'IntersectionObserver', {
@@ -28,5 +29,16 @@ Object.defineProperty(global, 'IntersectionObserver', {
     unobserve = vi.fn();
     disconnect = vi.fn();
     takeRecords = vi.fn(() => []);
+  }
+});
+
+// Mock ResizeObserver for JSDOM environment
+Object.defineProperty(global, 'ResizeObserver', {
+  writable: true,
+  configurable: true,
+  value: class ResizeObserver {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
   }
 });

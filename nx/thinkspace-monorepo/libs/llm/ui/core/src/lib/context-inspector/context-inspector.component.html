@@ -95,13 +95,13 @@
         Spatial Reality (Injected Files)
       </div>
 
-      @if ((context().fileContexts || []).length === 0) {
+      @if (injectedFiles().length === 0) {
         <div style="font-size: 11px; color: #adb5bd; font-style: italic;">
           No files requested for this turn.
         </div>
       } @else {
         <div style="display: flex; flex-direction: column; gap: 4px;">
-          @for (file of context().fileContexts; track file.path) {
+          @for (file of injectedFiles(); track file.path) {
             <label style="display: flex; justify-content: space-between; align-items: center; background: #fff; border: 1px solid #dee2e6; padding: 6px 12px; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;"
                    [style.opacity]="retainedFiles().has(file.path) ? '1' : '0.4'">
               <div style="display: flex; gap: 8px; align-items: center;">
@@ -111,9 +111,7 @@
                 <code style="font-size: 12px; color: #212529;">{{ file.path }}</code>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span [style.background]="file.level === 'structural' ? '#e7f5ff' : file.level === 'skeleton' ? '#fff3cd' : '#ebfbee'"
-                      [style.color]="file.level === 'structural' ? '#1971c2' : file.level === 'skeleton' ? '#b19700' : '#2b8a3e'"
-                      style="font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 12px; text-transform: uppercase;">
+                <span style="background: #ebfbee; color: #2b8a3e; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 12px; text-transform: uppercase;">
                   {{ file.level }}
                 </span>
                 <span style="font-size: 11px; color: #868e96; font-family: monospace; width: 60px; text-align: right;">
@@ -123,6 +121,26 @@
             </label>
           }
         </div>
+      }
+
+      @if (mapbookFiles().length > 0) {
+        <details style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; padding: 8px; margin-top: 8px;">
+          <summary style="cursor: pointer; font-size: 12px; font-weight: bold; color: #495057; text-transform: uppercase; display: flex; align-items: center;">
+            <span>Workspace Mapbook Files ({{ mapbookFiles().length }})</span>
+          </summary>
+          <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 8px;">
+            @for (file of mapbookFiles(); track file.path) {
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; border-radius: 4px; background: #fff; border: 1px solid #e9ecef;">
+                <code style="font-size: 11px; color: #495057;">{{ file.path }}</code>
+                <span [style.background]="file.level === 'structural' ? '#e7f5ff' : '#fff3cd'"
+                      [style.color]="file.level === 'structural' ? '#1971c2' : '#b19700'"
+                      style="font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 12px; text-transform: uppercase;">
+                  {{ file.level }}
+                </span>
+              </div>
+            }
+          </div>
+        </details>
       }
     </div>
   </div>

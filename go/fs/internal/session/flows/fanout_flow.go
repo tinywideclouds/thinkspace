@@ -55,19 +55,6 @@ func (f *FanOutFlow) Next(state FlowState) FlowDirective {
 	}
 
 	if len(state.Candidates) > 0 && state.UserStrategy == "" {
-		allFailed := true
-		for _, c := range state.Candidates {
-			if c.Passed {
-				allFailed = false
-				break
-			}
-		}
-		if allFailed {
-			return FlowDirective{
-				Action: ActionError,
-				Error:  fmt.Errorf("all sub-agents failed verification"),
-			}
-		}
 		return FlowDirective{Action: ActionRequestStrategy}
 	}
 

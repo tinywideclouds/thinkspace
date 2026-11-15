@@ -15,6 +15,7 @@ import typescript from 'highlight.js/lib/languages/typescript';
 import json from 'highlight.js/lib/languages/json';
 import bash from 'highlight.js/lib/languages/bash';
 import xml from 'highlight.js/lib/languages/xml';
+import plaintext from 'highlight.js/lib/languages/plaintext';
 
 // Register only the necessary languages to keep the bundle small
 hljs.registerLanguage('go', go);
@@ -23,6 +24,7 @@ hljs.registerLanguage('json', json);
 hljs.registerLanguage('bash', bash);
 hljs.registerLanguage('xml', xml);
 hljs.registerLanguage('html', xml);
+hljs.registerLanguage('plaintext', plaintext);
 
 // Configure marked with a custom renderer to inject the Copy button headers
 marked.use({

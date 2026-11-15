@@ -31,6 +31,10 @@ func newMockSandbox() *mockSandbox {
 	}
 }
 
+func (m *mockSandbox) ResolvePath(path string) string {
+	return path
+}
+
 func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
 	m.writeCalled = true
 	m.files[path] = data
@@ -218,6 +222,10 @@ func TestService_LedgerTags(t *testing.T) {
 				json.Unmarshal(scanner.Bytes(), &event)
 				recoveredEvents = append(recoveredEvents, event)
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			file.Close()
+			t.Fatalf("failed to scan ledger shard %s: %v", shard, err)
 		}
 		file.Close()
 	}

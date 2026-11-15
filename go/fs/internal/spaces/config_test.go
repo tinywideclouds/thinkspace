@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
+	"gopkg.in/yaml.v3"
 )
 
 func TestThinkSpaceConfig_ApplyDefaults(t *testing.T) {
@@ -90,5 +91,25 @@ func TestThinkSpaceConfig_Timeouts(t *testing.T) {
 	}
 	if configuration.VerifyTimeout() != 30*time.Second {
 		t.Errorf("Expected 30s VerifyTimeout, got %v", configuration.VerifyTimeout())
+	}
+}
+
+func TestThinkSpaceConfig_DomainAgnosticOptions(t *testing.T) {
+	rawYAML := `
+name: literary-critique
+options:
+  citation_style: chicago
+  strict_meter_check: true
+`
+	var cfg spaces.ThinkStateConfig
+	if err := yaml.Unmarshal([]byte(rawYAML), &cfg); err != nil {
+		t.Fatalf("failed to unmarshal ThinkStateConfig: %v", err)
+	}
+
+	if cfg.Options["citation_style"] != "chicago" {
+		t.Errorf("expected citation_style 'chicago', got %v", cfg.Options["citation_style"])
+	}
+	if cfg.Options["strict_meter_check"] != true {
+		t.Errorf("expected strict_meter_check true, got %v", cfg.Options["strict_meter_check"])
 	}
 }

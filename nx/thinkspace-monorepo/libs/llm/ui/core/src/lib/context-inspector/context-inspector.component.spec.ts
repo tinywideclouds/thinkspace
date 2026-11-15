@@ -25,14 +25,21 @@ describe('ContextInspectorComponent', () => {
       stickyDigests: ['Sticky rule 1'],
       recentHistory: ['[prompt] user message', '[model] reply', '[catalyst] Build HTTP server'],
       fileContexts: [
-        { path: 'src/main.go', level: 'skeleton', tokenCount: 150 },
-        { path: 'src/utils.go', level: 'structural', tokenCount: 20 },
+        { path: 'src/main.go', level: 'injected', tokenCount: 150 },
+        { path: 'src/utils.go', level: 'injected', tokenCount: 20 },
+        { path: 'internal/handler/hello.go', level: 'skeleton', tokenCount: 0 },
+        { path: 'go.mod', level: 'structural', tokenCount: 0 },
       ],
     });
     fixture.detectChanges();
   });
 
-  it('should render total token calculations accurately', () => {
+  it('should split file contexts correctly into injected and mapbook computed arrays', () => {
+    expect(component.injectedFiles().length).toBe(2);
+    expect(component.mapbookFiles().length).toBe(2);
+  });
+
+  it('should render total token calculations accurately using only injected files', () => {
     expect(component.totalFileTokens()).toBe(170);
   });
 
@@ -43,7 +50,19 @@ describe('ContextInspectorComponent', () => {
     expect(component.historyEntries().length).toBe(2);
   });
 
-  it('should dynamically update tokens when a file is toggled off', () => {
+  it('should render mapbook file names inside a collapsed details block by default', () => {
+    const compiled = fixture.nativeElement as HTMLElement;
+    const detailsEls = Array.from(compiled.querySelectorAll('details'));
+    const mapbookDetails = detailsEls.find((d) =>
+      d.textContent?.includes('Workspace Mapbook Files (2)'),
+    );
+    expect(mapbookDetails).toBeTruthy();
+    expect(mapbookDetails?.open).toBe(false);
+    expect(mapbookDetails?.textContent).toContain('internal/handler/hello.go');
+    expect(mapbookDetails?.textContent).toContain('go.mod');
+  });
+
+  it('should dynamically update tokens when an injected file is toggled off', () => {
     component.toggleFile('src/utils.go');
     fixture.detectChanges();
     expect(component.totalFileTokens()).toBe(150);
@@ -61,7 +80,7 @@ describe('ContextInspectorComponent', () => {
 
     expect(emitSpy).toHaveBeenCalledWith({
       retainedFilePaths: ['src/main.go', 'src/utils.go'],
-      retainedHistoryIndices: [2], // Catalyst index 2 is always retained
+      retainedHistoryIndices: [2],
     });
   });
 

@@ -45,16 +45,16 @@ func TestFanOutFlow_StateTransitions(t *testing.T) {
 		}
 	})
 
-	t.Run("All Agents Failed -> Error", func(t *testing.T) {
+	t.Run("All Agents Failed -> Still Requests Strategy For User Review/Accept", func(t *testing.T) {
 		state := FlowState{
 			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: false},
-				{CandidateID: "cand-2", Passed: false},
+				{CandidateID: "cand-1", Passed: false, Trace: "go.mod version mismatch"},
+				{CandidateID: "cand-2", Passed: false, Trace: "test failed"},
 			},
 		}
 		directive := flow.Next(state)
-		if directive.Action != ActionError {
-			t.Errorf("Expected ActionError because all candidates failed, got %s", directive.Action)
+		if directive.Action != ActionRequestStrategy {
+			t.Errorf("Expected ActionRequestStrategy so user can review/accept failed candidates, got %s", directive.Action)
 		}
 	})
 

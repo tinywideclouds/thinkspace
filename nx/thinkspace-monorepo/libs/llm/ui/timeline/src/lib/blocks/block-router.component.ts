@@ -24,6 +24,7 @@ import { ChatFlowCardComponent } from '@org/llm-ui-core';
     FileDeltaBlockComponent,
     ChatFlowCardComponent
   ],
+  host: { class: 'block w-full' },
   template: `
     <div class="w-full transition-all duration-300">
       @switch (chatItem().type) {

@@ -8,6 +8,7 @@ import { ChatItem, FileDeltaChatItem } from '@org/llm-state-chat';
   selector: 'llm-model-message-block',
   standalone: true,
   imports: [CommonModule, MarkdownComponent, FileDeltaBlockComponent],
+  host: { class: 'block w-full' },
   template: `
     <div 
       class="rounded-xl border shadow-sm transition-all duration-300 overflow-hidden"

@@ -3,6 +3,7 @@ import { Component } from '@angular/core';
 @Component({
   selector: 'llm-skeleton-block',
   standalone: true,
+  host: { class: 'block w-full' },
   template: `
     <div class="flex flex-col gap-6 mb-6 w-full opacity-60">
       <!-- Simulated Model Message Skeleton -->

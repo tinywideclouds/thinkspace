@@ -21,7 +21,8 @@ type ChatMeta struct {
 	InitializedThinkStates []string  `json:"initialized_think_states"`
 
 	// Topology Routing
-	ActiveBranch string `json:"active_branch"`
+	ActiveBranch   string            `json:"active_branch"`
+	BranchGraphIDs map[string]string `json:"branch_graph_ids,omitempty"`
 
 	// Memory Sliding Window State
 	DigestionHorizon  uuid.UUID `json:"digestion_horizon,omitempty"`

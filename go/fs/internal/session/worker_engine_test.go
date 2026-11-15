@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"iter"
 	"log/slog"
@@ -79,6 +80,7 @@ type weMockSandbox struct {
 	delivered   bool
 }
 
+func (m *weMockSandbox) ResolvePath(path string) string                                { return path }
 func (m *weMockSandbox) WriteFile(ctx context.Context, path string, data []byte) error { return nil }
 func (m *weMockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if path == "does/not/exist.go" {
@@ -142,10 +144,15 @@ type weMockUI struct {
 	reviewedBranch     string
 	transitionToReturn bool
 	capturedReasoning  string
+	streamedMainNodes  []thinkgraph.Node
 }
 
-func (u *weMockUI) OnTextChunk(chunk workspace.NodeChunk)                                  {}
-func (u *weMockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {}
+func (u *weMockUI) OnTextChunk(chunk workspace.NodeChunk) {}
+func (u *weMockUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {
+	if address != nil && address.Name == "main" {
+		u.streamedMainNodes = append(u.streamedMainNodes, node)
+	}
+}
 func (u *weMockUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	return session.ContextApprovalDecision{Approved: u.reviewToReturn}
 }
@@ -203,7 +210,7 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	modelClient := &weMockModelClient{
 		responses: []llm.StreamChunk{{Text: "Sub-agent output."}},
 	}
-	turnExecutor := session.NewTurnExecutor(logger, modelClient, service, emitter)
+	turnExecutor := session.NewTurnExecutor(logger, modelClient, service)
 
 	flowCfg := flows.FanOutConfig{MaxSteps: 10, RetryPrompt: "Trace: {{.ErrorTrace}}"}
 	fanOutFlow := flows.NewFanOutFlow(logger, flowCfg)
@@ -271,6 +278,14 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 		t.Errorf("Expected Flow Card to point parent_id to Manager Node (turnID), got %v", flowCard.Edges)
 	}
 
+	var flowExecState flows.FlowExecutionState
+	if err := json.Unmarshal(flowCard.MaterializedState, &flowExecState); err != nil {
+		t.Fatalf("Failed to unmarshal flow card state: %v", err)
+	}
+	if flowExecState.Status != flows.FlowStatusCompleted {
+		t.Errorf("Expected Flow Card on main timeline to be FlowStatusCompleted, got %v", flowExecState.Status)
+	}
+
 	if optionsNode == nil {
 		t.Fatalf("Expected Flow Options Node on main timeline")
 	}
@@ -311,6 +326,109 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	}
 }
 
+func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	engine := &weMockChatEngine{}
+	workspaceRoot := t.TempDir()
+
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	defer graphDB.Close()
+
+	graphStore := thinkgraph.NewGraphStore(graphDB, nil)
+	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
+	dispatcher := thinkgraph.NewDispatcher(graphStore, ledger)
+
+	emitter := &weMockEmitter{}
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return engine }, graphDB, emitter)
+	service := svcManager.GetService("golang")
+
+	chatSession := &thinkgraph.ChatAddress{
+		ChatID:    "chat-fail-accept",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	_ = service.InitializeChat(context.Background(), chatSession)
+
+	registry := config.NewRegistry()
+	mockSpace := &weMockThinkSpace{
+		errsToReturn: []error{
+			errors.New("go.mod requires go 1.27, found 1.22"),
+			errors.New("go.mod requires go 1.27, found 1.22"),
+		},
+	}
+	registry.RegisterThinkState("golang", mockSpace)
+	registry.RegisterConfig("golang", mockSpace.Config())
+	_ = svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" })
+
+	scaffoldChat(workspaceRoot, "golang", "chat-fail-accept")
+
+	modelClient := &weMockModelClient{
+		responses: []llm.StreamChunk{
+			{Text: "Attempt 1 patch"},
+			{Text: "Attempt 2 patch"},
+		},
+	}
+	turnExecutor := session.NewTurnExecutor(logger, modelClient, service)
+	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
+
+	sessionManager := session.NewManager(logger, registry, svcManager, modelClient, fanOutFlow, nil)
+	chatSupervisor, err := sessionManager.GetSession(context.Background(), "golang", "chat-fail-accept")
+	if err != nil {
+		t.Fatalf("failed to get supervisor session: %v", err)
+	}
+
+	workerEngine := session.NewWorkerEngine(logger, chatSupervisor, registry, service, turnExecutor, dispatcher, fanOutFlow)
+	ui := &weMockUI{
+		strategyToReturn: flows.StrategyManual,
+		reviewToReturn:   true,
+		reasonToReturn:   "Accepting despite go.mod version",
+	}
+
+	dispatchSignal := &signals.SignalDispatchFlow{
+		Tasks: []flows.SubAgentTask{
+			{
+				AgentID:     "agent-1",
+				Instruction: "Use native uuid",
+			},
+		},
+	}
+
+	finalSig, err := workerEngine.Execute(context.Background(), chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, ui, emitter)
+	if err != nil {
+		t.Fatalf("expected failed verification flow to allow manual review/accept without returning fatal error, got: %v", err)
+	}
+	if !finalSig.IsTerminal() {
+		t.Errorf("expected terminal signal after manual review accept, got %T", finalSig)
+	}
+
+	// Verify the main timeline streamed a FlowStatusFailed update with the verification error before user override
+	sawFailedCard := false
+	for _, n := range ui.streamedMainNodes {
+		if n.Type == flows.EventFlowLifecycle && len(n.MaterializedState) > 0 {
+			var st flows.FlowExecutionState
+			if json.Unmarshal(n.MaterializedState, &st) == nil && st.Status == flows.FlowStatusFailed {
+				if strings.Contains(st.Error, "go.mod requires go 1.27") {
+					sawFailedCard = true
+				}
+			}
+		}
+	}
+	if !sawFailedCard {
+		t.Errorf("expected main timeline Flow Card to stream FlowStatusFailed with verification error trace")
+	}
+
+	if !engine.acceptCalled {
+		t.Errorf("expected user to be able to accept the failed candidate branch")
+	}
+}
+
 func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &weMockChatEngine{}
@@ -340,7 +458,7 @@ func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
 
 	scaffoldChat(workspaceRoot, "golang", "chat-1")
 
-	turnExecutor := session.NewTurnExecutor(logger, &weMockModelClient{}, service, emitter)
+	turnExecutor := session.NewTurnExecutor(logger, &weMockModelClient{}, service)
 	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
 
 	sessionManager := session.NewManager(logger, registry, svcManager, &weMockModelClient{}, fanOutFlow, nil)

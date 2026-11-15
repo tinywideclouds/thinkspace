@@ -30,6 +30,7 @@ import (
 
 type mockSandbox struct{}
 
+func (m *mockSandbox) ResolvePath(path string) string                                { return path }
 func (m *mockSandbox) WriteFile(ctx context.Context, path string, data []byte) error { return nil }
 func (m *mockSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	return []byte(`{"trace": "ok"}`), nil
@@ -305,11 +306,11 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		toolRegistry := tools.NewRegistry()
 		toolRegistry.Register(tools.NewProposeChangeTool())
 
-		turnExecutor := session.NewTurnExecutor(logger, toolLLM, svc, emitter)
+		turnExecutor := session.NewTurnExecutor(logger, toolLLM, svc)
 
 		responseID := uuid.NewV7()
 
-		signal, err := turnExecutor.Execute(ctx, chatAddress, responseID, uuid.Nil(), false, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui)
+		signal, err := turnExecutor.Execute(ctx, chatAddress, responseID, uuid.Nil(), false, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui, emitter)
 		if err != nil {
 			t.Fatalf("TurnExecutor failed: %v", err)
 		}

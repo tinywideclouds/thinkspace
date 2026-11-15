@@ -29,6 +29,7 @@ import {
     ChatTransitionPromptComponent,
     FlowInspectorComponent
   ],
+  host: { class: 'block h-full w-full' },
   templateUrl: './linear-feed.component.html'
 })
 export class LinearFeedComponent {
@@ -37,6 +38,7 @@ export class LinearFeedComponent {
 
   public viewport = viewChild(ScrollViewportComponent);
   public messageBlocks = viewChildren(BlockRouterComponent, { read: ElementRef });
+  public turnGroups = viewChildren(TurnGroupComponent, { read: ElementRef });
 
   public prefetchAnchorElement = computed(() => {
     const blocks = this.messageBlocks();
@@ -44,10 +46,46 @@ export class LinearFeedComponent {
     return blocks.length > index ? blocks[index].nativeElement : null;
   });
 
+  public latestFlowFailed = computed<boolean>(() => {
+    const turns = this.facade.visibleFeed();
+    if (turns.length === 0) return false;
+    const latestTurn = turns[turns.length - 1];
+    const flowBlock = [...latestTurn.blocks].reverse().find((b) => b.type === 'flow_execution');
+    return flowBlock?.type === 'flow_execution' && flowBlock.status === 'FAILED';
+  });
+
   public hasNewMessages = signal<boolean>(false);
   private lastSeenMessageCount = 0;
+  private lastSeenTurnId: string | null = null;
+  private activeAnchorTurnId: string | null = null;
 
   constructor() {
+    effect(() => {
+      const turns = this.facade.visibleFeed();
+      const groups = this.turnGroups();
+      const vp = this.viewport();
+
+      if (!vp || turns.length === 0 || groups.length !== turns.length) return;
+
+      const latestTurn = turns[turns.length - 1];
+      if (latestTurn.id === this.lastSeenTurnId) return;
+
+      const isInitialHydration = this.lastSeenTurnId === null;
+      this.lastSeenTurnId = latestTurn.id;
+
+      if (isInitialHydration) {
+        this.activeAnchorTurnId = null;
+        requestAnimationFrame(() => vp.scrollToBottom('instant'));
+      } else if (latestTurn.leader.type === 'prompt') {
+        this.activeAnchorTurnId = latestTurn.id;
+        const latestTurnEl = groups[groups.length - 1].nativeElement as HTMLElement;
+        requestAnimationFrame(() => vp.scrollElementToTop(latestTurnEl, 'smooth'));
+      } else if (vp.scrollState() === 'auto') {
+        this.activeAnchorTurnId = null;
+        requestAnimationFrame(() => vp.scrollToBottom('smooth'));
+      }
+    });
+
     effect(() => {
       const feedLength = this.facade.visibleFeed().reduce((acc, turn) => acc + 1 + turn.blocks.length, 0);
       const vp = this.viewport();
@@ -61,6 +99,27 @@ export class LinearFeedComponent {
         this.hasNewMessages.set(true);
       }
     });
+  }
+
+  public onContentGrowth(): void {
+    const vp = this.viewport();
+    if (!vp) return;
+
+    const turns = this.facade.visibleFeed();
+    const groups = this.turnGroups();
+    if (turns.length === 0 || groups.length !== turns.length) return;
+
+    const latestTurn = turns[turns.length - 1];
+    if (this.activeAnchorTurnId && latestTurn.id === this.activeAnchorTurnId) {
+      const latestTurnEl = groups[groups.length - 1].nativeElement as HTMLElement;
+      vp.scrollElementToTop(latestTurnEl, 'instant');
+    } else if (vp.scrollState() === 'auto') {
+      vp.scrollToBottom('instant');
+    }
+  }
+
+  public onUserScrolled(): void {
+    this.activeAnchorTurnId = null;
   }
 
   public handleBulkAction(action: 'tag' | 'tombstone' | 'fork'): void {

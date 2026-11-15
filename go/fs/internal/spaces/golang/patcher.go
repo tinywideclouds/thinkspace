@@ -9,17 +9,21 @@ import (
 	"go/token"
 	"log/slog"
 	"path/filepath"
+	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
+	"golang.org/x/tools/imports"
 )
 
 type GoASTPatcher struct {
-	instructions string
+	instructions  string
+	formatImports bool
 }
 
-func NewGoASTPatcher(instructions string) *GoASTPatcher {
+func NewGoASTPatcher(instructions string, formatImports bool) *GoASTPatcher {
 	return &GoASTPatcher{
-		instructions: instructions,
+		instructions:  instructions,
+		formatImports: formatImports,
 	}
 }
 
@@ -53,7 +57,7 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 		slog.InfoContext(ctx, "applied AST patch", args...)
 
 		if patch.Action == "full_replace" {
-			if err := sandbox.WriteFile(ctx, cleanPath, []byte(patch.Code)); err != nil {
+			if err := p.writeFile(ctx, sandbox, cleanPath, []byte(patch.Code)); err != nil {
 				return err
 			}
 			continue
@@ -66,7 +70,7 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 
 		if patch.Action == "add_code" {
 			src = append(src, []byte("\n\n"+patch.Code)...)
-			if err := sandbox.WriteFile(ctx, cleanPath, src); err != nil {
+			if err := p.writeFile(ctx, sandbox, cleanPath, src); err != nil {
 				return err
 			}
 			continue
@@ -77,13 +81,32 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 			if err != nil {
 				return fmt.Errorf("failed to apply AST patch to %s: %w", cleanPath, err)
 			}
-			if err := sandbox.WriteFile(ctx, cleanPath, newSrc); err != nil {
+			if err := p.writeFile(ctx, sandbox, cleanPath, newSrc); err != nil {
 				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+func (p *GoASTPatcher) writeFile(ctx context.Context, sandbox workspace.CandidateSandbox, cleanPath string, data []byte) error {
+	out := data
+	if p.formatImports && strings.HasSuffix(cleanPath, ".go") {
+		targetPath := cleanPath
+		if resolved := sandbox.ResolvePath(cleanPath); resolved != "" {
+			targetPath = resolved
+		}
+
+		formatted, err := imports.Process(targetPath, data, nil)
+		if err != nil {
+			slog.WarnContext(ctx, "goimports formatting skipped due to parse error; writing raw source", "file", cleanPath, "error", err)
+		} else {
+			out = formatted
+		}
+	}
+
+	return sandbox.WriteFile(ctx, cleanPath, out)
 }
 
 func (p *GoASTPatcher) replaceFunctionAST(src []byte, funcName string, newCode string) ([]byte, error) {

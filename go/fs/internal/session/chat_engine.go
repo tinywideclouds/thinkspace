@@ -73,14 +73,14 @@ func (e *ChatEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddres
 }
 
 func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
-	e.turnExecutor.emitter = emitter
-
-	emitter.Emit("manager", telemetry.Event{
-		ID:        uuid.NewV7(),
-		Type:      "log",
-		Timestamp: time.Now(),
-		Message:   "Initializing workspace turn...",
-	})
+	if emitter != nil {
+		emitter.Emit("manager", telemetry.Event{
+			ID:        uuid.NewV7(),
+			Type:      "log",
+			Timestamp: time.Now(),
+			Message:   "Initializing workspace turn...",
+		})
+	}
 
 	e.session.mu.RLock()
 	activeThinkState := e.session.Meta.ActiveThinkState
@@ -143,7 +143,7 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 		registry.Register(tools.NewCreateDigestTool(committer))
 	}
 
-	signal, err := e.turnExecutor.Execute(ctx, address, turnID, catalystID, true, thinkState, bundle, registry, ui)
+	signal, err := e.turnExecutor.Execute(ctx, address, turnID, catalystID, true, thinkState, bundle, registry, ui, emitter)
 	if err == nil {
 		e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
 	}

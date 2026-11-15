@@ -8,6 +8,7 @@ import { InlineEditComposerComponent } from '../inline-edit-composer.component';
   selector: 'llm-user-message-block',
   standalone: true,
   imports: [CommonModule, InlineEditComposerComponent],
+  host: { class: 'block w-full' },
   template: `
     @if (isEditing()) {
       <llm-inline-edit-composer

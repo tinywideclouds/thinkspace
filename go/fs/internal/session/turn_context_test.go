@@ -20,6 +20,12 @@ func TestProjectTurnContext(t *testing.T) {
 
 	bundle := &cognition.ThinkBundle{
 		Rules: cognition.SystemRules{Persona: "System instructions"},
+		Mapbook: cognition.Mapbook{
+			Maps: map[string]string{
+				"structural": "├── go.mod\n├── main.go\n└── internal/handler/hello.go",
+				"skeleton":   "// File: internal/handler/hello.go\npackage handler\nfunc Hello() {}",
+			},
+		},
 		Trajectory: cognition.Trajectory{
 			LongTermMemory: []string{"Sticky digest entry"},
 			WorkingMemory: []cognition.TrajectoryEvent{
@@ -62,11 +68,19 @@ func TestProjectTurnContext(t *testing.T) {
 	if turnContext.RecentHistory[2] != "[catalyst] Build the server" {
 		t.Errorf("unexpected Catalyst formatting: %v", turnContext.RecentHistory[2])
 	}
-	if len(turnContext.FileContexts) != 1 {
-		t.Fatalf("expected 1 file context, got %d", len(turnContext.FileContexts))
+
+	// Expect main.go (injected, 150t) + internal/handler/hello.go (skeleton, 0t) + go.mod (structural, 0t)
+	if len(turnContext.FileContexts) != 3 {
+		t.Fatalf("expected 3 deduplicated file contexts, got %d: %+v", len(turnContext.FileContexts), turnContext.FileContexts)
 	}
-	if turnContext.FileContexts[0].Path != "main.go" || turnContext.FileContexts[0].TokenCount != 150 {
-		t.Errorf("unexpected FileContexts: %v", turnContext.FileContexts)
+	if turnContext.FileContexts[0].Path != "main.go" || turnContext.FileContexts[0].Level != "injected" || turnContext.FileContexts[0].TokenCount != 150 {
+		t.Errorf("unexpected first FileContext: %+v", turnContext.FileContexts[0])
+	}
+	if turnContext.FileContexts[1].Path != "internal/handler/hello.go" || turnContext.FileContexts[1].Level != "skeleton" {
+		t.Errorf("unexpected second FileContext: %+v", turnContext.FileContexts[1])
+	}
+	if turnContext.FileContexts[2].Path != "go.mod" || turnContext.FileContexts[2].Level != "structural" {
+		t.Errorf("unexpected third FileContext: %+v", turnContext.FileContexts[2])
 	}
 	if len(turnContext.Focus.PrimaryFocus) != 1 || turnContext.Focus.PrimaryFocus[0] != "backend" {
 		t.Errorf("unexpected Focus: %v", turnContext.Focus)

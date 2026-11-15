@@ -124,6 +124,39 @@ describe('LinearFeedComponent', () => {
     expect(component).toBeTruthy();
   });
 
+  it('should continue anchoring the latest prompt turn as model response content grows, until user scrolls', async () => {
+    const vp = component.viewport()!;
+    const scrollToTopSpy = vi.spyOn(vp, 'scrollElementToTop');
+
+    // New prompt turn arrives
+    mockFacade.visibleFeed.set([
+      ...mockFacade.visibleFeed(),
+      {
+        id: 'turn-2',
+        leader: {
+          id: 'prompt-2',
+          type: 'prompt',
+          content: 'Explain streaming',
+          timestamp: Temporal.Now.instant(),
+        } as ChatItem,
+        blocks: [],
+        tags: [],
+      },
+    ]);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    // Model response streams in and grows content height
+    component.onContentGrowth();
+    expect(scrollToTopSpy).toHaveBeenCalledWith(expect.any(HTMLElement), 'instant');
+
+    // Manual user scroll releases active turn anchoring
+    scrollToTopSpy.mockClear();
+    component.onUserScrolled();
+    component.onContentGrowth();
+    expect(scrollToTopSpy).not.toHaveBeenCalled();
+  });
+
   it('should not render the shell-scoped context inspector inside the linear feed', async () => {
     mockFacade.pendingContextReview.set({
       spaceId: 'golang',

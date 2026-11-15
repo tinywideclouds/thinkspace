@@ -89,6 +89,12 @@ func NewChatSession(
 		reviewPolicy:     NewTokenThresholdPolicy(),
 	}
 
+	for branch, rawID := range meta.BranchGraphIDs {
+		if parsed, parseErr := thinkgraph.ParseGraphID(rawID); parseErr == nil && !parsed.IsZero() {
+			session.graphIDs[branch] = parsed
+		}
+	}
+
 	address := session.GetActiveAddress()
 	if err := workspaceService.InitializeChat(ctx, address); err != nil {
 		return nil, fmt.Errorf("initializing chat boundaries: %w", err)
@@ -103,7 +109,7 @@ func NewChatSession(
 	)
 	session.bundleAssembler = assembler
 
-	turnExecutor := NewTurnExecutor(logger, modelClient, workspaceService, nil)
+	turnExecutor := NewTurnExecutor(logger, modelClient, workspaceService)
 
 	session.chatEngine = NewChatEngine(logger, session, registry, workspaceManager, workspaceService, assembler, digestManager, turnExecutor)
 	session.workerEngine = NewWorkerEngine(logger, session, registry, workspaceService, turnExecutor, workspaceService.Dispatcher(), fanOutFlow)
@@ -131,12 +137,17 @@ func (s *ChatSession) flushMetaLocked() error {
 	initializedThinkStates := s.Meta.InitializedThinkStates
 	digestionHorizon := s.Meta.DigestionHorizon
 	evaluationHorizon := s.Meta.EvaluationHorizon
+	branchGraphIDs := make(map[string]string, len(s.Meta.BranchGraphIDs))
+	for k, v := range s.Meta.BranchGraphIDs {
+		branchGraphIDs[k] = v
+	}
 
 	return s.workspaceManager.UpdateChatMeta(s.SpaceID, s.ChatID, func(m *workspace.ChatMeta) {
 		m.ActiveThinkState = activeThinkState
 		m.InitializedThinkStates = initializedThinkStates
 		m.DigestionHorizon = digestionHorizon
 		m.EvaluationHorizon = evaluationHorizon
+		m.BranchGraphIDs = branchGraphIDs
 	})
 }
 
@@ -188,7 +199,6 @@ func (s *ChatSession) resolvePersistedGraphID(branch string) (thinkgraph.GraphID
 		}
 
 		file.Close()
-
 	}
 
 	return thinkgraph.GraphID{}, false
@@ -213,6 +223,11 @@ func (s *ChatSession) GetActiveAddress() *thinkgraph.ChatAddress {
 			gID = thinkgraph.NewGraphID(thinkgraph.PrefixChat)
 		}
 		s.graphIDs[activeBranch] = gID
+		if s.Meta.BranchGraphIDs == nil {
+			s.Meta.BranchGraphIDs = make(map[string]string)
+		}
+		s.Meta.BranchGraphIDs[activeBranch] = gID.String()
+		_ = s.flushMetaLocked()
 	}
 
 	return &thinkgraph.ChatAddress{
@@ -237,6 +252,11 @@ func (s *ChatSession) GetSystemAddress() *thinkgraph.ChatAddress {
 			gID = thinkgraph.NewGraphID(thinkgraph.PrefixSystem)
 		}
 		s.graphIDs[thinkgraph.SystemSubGraphName] = gID
+		if s.Meta.BranchGraphIDs == nil {
+			s.Meta.BranchGraphIDs = make(map[string]string)
+		}
+		s.Meta.BranchGraphIDs[thinkgraph.SystemSubGraphName] = gID.String()
+		_ = s.flushMetaLocked()
 	}
 
 	return &thinkgraph.ChatAddress{

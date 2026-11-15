@@ -140,7 +140,7 @@ func setupExecutorTest(t *testing.T, spaceID, chatID string) (*session.TurnExecu
 	client := &teTestModelClient{}
 	workspaceService := svcManager.GetService(spaceID)
 
-	executor := session.NewTurnExecutor(logger, client, workspaceService, emitter)
+	executor := session.NewTurnExecutor(logger, client, workspaceService)
 
 	return executor, workspaceService, client
 }
@@ -170,7 +170,7 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 	registry := tools.NewRegistry()
 	ui := &teTestUI{}
 
-	signal, err := executor.Execute(ctx, address, responseID, parentID, true, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui)
+	signal, err := executor.Execute(ctx, address, responseID, parentID, true, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui, &teTestEmitter{})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewTransitionThinkStateTool([]string{"concept"}))
 
-	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), false, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{})
+	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), false, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{}, nil)
 	if err != nil {
 		t.Fatalf("Expected nil error, got %v", err)
 	}
@@ -299,7 +299,7 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 		},
 	}
 
-	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), false, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{})
+	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), false, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{}, nil)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}

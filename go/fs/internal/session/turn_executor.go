@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,21 +24,44 @@ type TurnExecutor struct {
 	logger           *slog.Logger
 	modelClient      llm.ModelClient
 	workspaceService *workspace.Service
-	emitter          telemetry.Emitter
+	broadcaster      *GraphBroadcaster
 }
 
 func NewTurnExecutor(
 	logger *slog.Logger,
 	modelClient llm.ModelClient,
 	wsService *workspace.Service,
-	emitter telemetry.Emitter,
 ) *TurnExecutor {
 	return &TurnExecutor{
 		logger:           logger,
 		modelClient:      modelClient,
 		workspaceService: wsService,
-		emitter:          emitter,
+		broadcaster:      NewGraphBroadcasterFromService(logger, wsService),
 	}
+}
+
+func inspectBundleContext(bundle cognition.ThinkBundle) (workbenchFiles []string, mapbookLayers []string, mapbookLayerBytes map[string]int, hasGolangAST bool) {
+	workbenchFiles = make([]string, 0, len(bundle.Workbench))
+	for _, item := range bundle.Workbench {
+		workbenchFiles = append(workbenchFiles, item.Path)
+	}
+
+	mapbookLayerBytes = make(map[string]int, len(bundle.Mapbook.Maps))
+	for layer, content := range bundle.Mapbook.Maps {
+		mapbookLayers = append(mapbookLayers, layer)
+		trimmed := strings.TrimSpace(content)
+		mapbookLayerBytes[layer] = len(content)
+
+		lowerLayer := strings.ToLower(layer)
+		if trimmed != "" && (strings.Contains(lowerLayer, "ast") || strings.Contains(lowerLayer, "skeleton")) {
+			hasGolangAST = true
+		}
+		if trimmed != "" && (strings.Contains(content, "func ") || strings.Contains(content, "type ") || strings.Contains(content, "package ")) {
+			hasGolangAST = true
+		}
+	}
+	sort.Strings(mapbookLayers)
+	return workbenchFiles, mapbookLayers, mapbookLayerBytes, hasGolangAST
 }
 
 func (e *TurnExecutor) Execute(
@@ -50,20 +74,24 @@ func (e *TurnExecutor) Execute(
 	bundle cognition.ThinkBundle,
 	registry *tools.Registry,
 	ui tools.UI,
+	emitter telemetry.Emitter,
 ) (signals.EngineSignal, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, thinkState.Config().TurnTimeout())
 	defer cancel()
 
 	managerModel := thinkState.Config().Roles.Manager.Model
 	maxIterations := 3
+	streamer := asGraphStreamer(ui)
 
 	for iteration := 0; iteration < maxIterations; iteration++ {
-		e.emitter.Emit("manager", telemetry.Event{
-			ID:        uuid.NewV7(),
-			Type:      "log",
-			Timestamp: time.Now(),
-			Message:   "Analyzing context and formulating a plan...",
-		})
+		if emitter != nil {
+			emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "log",
+				Timestamp: time.Now(),
+				Message:   "Analyzing context and formulating a plan...",
+			})
+		}
 
 		if anticipateResponse {
 			shellEvent := thinkgraph.NewEvent(thinkgraph.EventModel, "")
@@ -75,13 +103,24 @@ func (e *TurnExecutor) Execute(
 				shellEvent.Edges = map[string]string{"parent_id": parentID.String()}
 			}
 
-			if sessionUI, ok := ui.(UserInterface); ok {
-				sessionUI.StreamGraphEvent(address, thinkgraph.Node{Event: shellEvent})
-			} else if castUI, ok := ui.(interface {
-				StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
-			}); ok {
-				castUI.StreamGraphEvent(address, thinkgraph.Node{Event: shellEvent})
+			if streamer != nil {
+				streamer.StreamGraphEvent(address, thinkgraph.Node{Event: shellEvent})
 			}
+		}
+
+		if e.logger != nil {
+			wbFiles, mbLayers, mbBytes, hasGoAST := inspectBundleContext(bundle)
+			e.logger.InfoContext(ctx, "TurnExecutor dispatching LLM context bundle",
+				"model", managerModel,
+				"iteration", iteration,
+				"workbench_file_count", len(wbFiles),
+				"workbench_files", wbFiles,
+				"mapbook_layers", mbLayers,
+				"mapbook_layer_bytes", mbBytes,
+				"has_golang_ast", hasGoAST,
+				"working_memory_events", len(bundle.Trajectory.WorkingMemory),
+				"long_term_memory_items", len(bundle.Trajectory.LongTermMemory),
+			)
 		}
 
 		stream := e.modelClient.GenerateContentStream(
@@ -131,18 +170,7 @@ func (e *TurnExecutor) Execute(
 				Content: fullModelResponse.String(),
 			})
 
-			if graph := e.workspaceService.Graph(); graph != nil {
-				timeline, _ := graph.GetNodes(ctx, address, []string{responseID.String()})
-				if len(timeline) > 0 {
-					if sessionUI, ok := ui.(UserInterface); ok {
-						sessionUI.StreamGraphEvent(address, timeline[0])
-					} else if castUI, ok := ui.(interface {
-						StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
-					}); ok {
-						castUI.StreamGraphEvent(address, timeline[0])
-					}
-				}
-			}
+			e.broadcaster.StreamNode(ctx, address, responseID, streamer)
 		}
 
 		if len(interceptedTools) == 0 {
@@ -165,7 +193,7 @@ func (e *TurnExecutor) Execute(
 				Address:      address,
 				Bundle:       &bundle,
 				UI:           ui,
-				Emitter:      e.emitter,
+				Emitter:      emitter,
 				RawArguments: call.Args,
 			}
 
@@ -181,7 +209,6 @@ func (e *TurnExecutor) Execute(
 				})
 			}
 
-			// ONLY write to the graph if the tool explicitly provided content or payload
 			if tr.Payload != nil || tr.Content != "" {
 				toolNodeID := responseID
 				if fullModelResponse.Len() > 0 {
@@ -205,25 +232,11 @@ func (e *TurnExecutor) Execute(
 					ev.Edges = map[string]string{"parent_id": parentID.String()}
 				}
 
-				if address != nil && !address.GraphID.IsZero() {
-					ev.GraphID = address.GraphID
+				if ui != nil && fullModelResponse.Len() == 0 && tr.Content != "" {
+					ui.OnTextChunk(workspace.NodeChunk{NodeID: responseID, Text: tr.Content})
 				}
 
-				_ = e.workspaceService.Dispatcher().AppendEvent(ctx, address, ev)
-
-				if ui != nil {
-					if fullModelResponse.Len() == 0 && tr.Content != "" {
-						ui.OnTextChunk(workspace.NodeChunk{NodeID: responseID, Text: tr.Content})
-					}
-
-					if sessionUI, ok := ui.(UserInterface); ok {
-						sessionUI.StreamGraphEvent(address, thinkgraph.Node{Event: ev})
-					} else if castUI, ok := ui.(interface {
-						StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
-					}); ok {
-						castUI.StreamGraphEvent(address, thinkgraph.Node{Event: ev})
-					}
-				}
+				_ = e.broadcaster.AppendAndStream(ctx, address, ev, streamer)
 			}
 
 			if tr.Signal != nil {

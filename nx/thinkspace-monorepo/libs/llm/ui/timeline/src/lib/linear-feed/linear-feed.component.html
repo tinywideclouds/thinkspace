@@ -23,7 +23,9 @@
     #viewport
     [prefetchAnchor]="prefetchAnchorElement()"
     [isDebugMode]="facade.isDebugMode()"
-    (loadPreviousPage)="connection.loadHistoryPage()">
+    (loadPreviousPage)="connection.loadHistoryPage()"
+    (contentGrowth)="onContentGrowth()"
+    (userScrolled)="onUserScrolled()">
 
     @if (facade.isLoadingHistory()) {
       <llm-skeleton-block></llm-skeleton-block>
@@ -63,6 +65,7 @@
 
     @if (facade.pendingStrategy()) {
       <llm-chat-strategy-prompt
+        [hasVerificationFailure]="latestFlowFailed()"
         (strategySelected)="connection.selectStrategy($event)">
       </llm-chat-strategy-prompt>
     }

@@ -13,6 +13,10 @@ type mockWorkbenchSandbox struct {
 	files map[string][]byte
 }
 
+func (m *mockWorkbenchSandbox) ResolvePath(path string) string {
+	return path
+}
+
 func (m *mockWorkbenchSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
 	return nil
 }
