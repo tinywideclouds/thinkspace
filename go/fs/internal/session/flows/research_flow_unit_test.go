@@ -31,8 +31,8 @@ func TestResearchFlow_StateTransitions(t *testing.T) {
 
 	t.Run("Stage 2 -> Bypass Strategy and Force Manual Review", func(t *testing.T) {
 		state := FlowState{
-			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: true},
+			Candidates: []Candidate{
+				{ID: "cand-1", Passed: true},
 			},
 			// Notice UserStrategy is completely empty/ignored
 		}
@@ -44,8 +44,8 @@ func TestResearchFlow_StateTransitions(t *testing.T) {
 
 	t.Run("All Agents Failed -> Error", func(t *testing.T) {
 		state := FlowState{
-			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: false},
+			Candidates: []Candidate{
+				{ID: "cand-1", Passed: false},
 			},
 		}
 		directive := flow.Next(state)

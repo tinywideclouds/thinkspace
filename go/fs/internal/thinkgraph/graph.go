@@ -62,10 +62,11 @@ type ContentMutation struct {
 	Content string `json:"content"`
 }
 
-// StateMutation explicitly targets the MaterializedState field (e.g., for live flow progress).
+// StateMutation targets the MaterializedState field (and optionally Content) in a single atomic update.
 type StateMutation struct {
 	BaseMutation
-	State json.RawMessage `json:"state"`
+	Content string          `json:"content,omitempty"`
+	State   json.RawMessage `json:"state"`
 }
 
 // MetadataMutation explicitly targets the key-value metadata map (e.g., for transition badges).

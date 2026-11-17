@@ -8,12 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// GoExecEngine implements the workspace.ChatEngine interface using the native Git CLI.
+// GoExecEngine implements the workspace.ChatVersioner interface using the native Git CLI.
 type GoExecEngine struct {
+	mu             sync.Mutex
 	workspaceRoot  string
 	sharedCodebase bool
 }
@@ -41,13 +43,16 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %s failed: %w - %s", strings.Join(args, " "), err, stderr.String())
+		return "", fmt.Errorf("git %s failed: %w - %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 
 	return strings.TrimSpace(stdout.String()), nil
 }
 
 func (c *GoExecEngine) InitChat(ctx context.Context, chatID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if _, err := runGit(ctx, c.workspaceRoot, "rev-parse", "--git-dir"); err != nil {
 		if _, err := runGit(ctx, c.workspaceRoot, "init"); err != nil {
 			return err
@@ -64,7 +69,10 @@ func (c *GoExecEngine) InitChat(ctx context.Context, chatID string) error {
 			return err
 		}
 	} else {
-		currentBranch, _ := runGit(ctx, c.workspaceRoot, "branch", "--show-current")
+		currentBranch, branchErr := runGit(ctx, c.workspaceRoot, "branch", "--show-current")
+		if branchErr != nil {
+			return branchErr
+		}
 		if currentBranch != threadBranch {
 			if _, err := runGit(ctx, c.workspaceRoot, "switch", threadBranch); err != nil {
 				return err
@@ -76,6 +84,9 @@ func (c *GoExecEngine) InitChat(ctx context.Context, chatID string) error {
 }
 
 func (c *GoExecEngine) Snapshot(ctx context.Context, chatID string, message string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if _, err := runGit(ctx, c.workspaceRoot, "add", "--all"); err != nil {
 		return "", err
 	}
@@ -86,6 +97,9 @@ func (c *GoExecEngine) Snapshot(ctx context.Context, chatID string, message stri
 }
 
 func (c *GoExecEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	sandboxDirectory, err := os.MkdirTemp("", fmt.Sprintf("sandbox-%s-*", candidateID))
 	if err != nil {
 		return nil, fmt.Errorf("creating temp sandbox dir: %w", err)
@@ -95,10 +109,12 @@ func (c *GoExecEngine) SpawnCandidateSandbox(ctx context.Context, chatID string,
 	threadBranch := fmt.Sprintf("chat/%s", chatID)
 
 	if _, err := runGit(ctx, c.workspaceRoot, "worktree", "add", "-b", candidateBranch, sandboxDirectory, threadBranch); err != nil {
+		_ = os.RemoveAll(sandboxDirectory)
 		return nil, err
 	}
 
 	return &execSandbox{
+		repoMu:            &c.mu,
 		mainRepoDirectory: c.workspaceRoot,
 		sandboxDirectory:  sandboxDirectory,
 		chatDirectory:     filepath.Join(sandboxDirectory, "chats", chatID),
@@ -108,23 +124,45 @@ func (c *GoExecEngine) SpawnCandidateSandbox(ctx context.Context, chatID string,
 }
 
 func (c *GoExecEngine) PreviewCandidate(ctx context.Context, chatID string, candidateID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	_, err := runGit(ctx, c.workspaceRoot, "switch", candidateBranch)
 	return err
 }
 
 func (c *GoExecEngine) ReadCandidateDiff(ctx context.Context, chatID string, candidateID string) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 
-	diff, err := runGit(ctx, c.workspaceRoot, "diff", threadBranch+"..."+candidateBranch)
-	if err != nil {
-		return "", fmt.Errorf("generating git diff: %w", err)
+	if _, err := runGit(ctx, c.workspaceRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+candidateBranch); err == nil {
+		diff, err := runGit(ctx, c.workspaceRoot, "diff", threadBranch+"..."+candidateBranch)
+		if err != nil {
+			return "", fmt.Errorf("generating git diff: %w", err)
+		}
+		return diff, nil
 	}
-	return diff, nil
+
+	tagName := fmt.Sprintf("proposal-%s", candidateID)
+	if _, err := runGit(ctx, c.workspaceRoot, "show-ref", "--verify", "--quiet", "refs/tags/"+tagName); err == nil {
+		diff, err := runGit(ctx, c.workspaceRoot, "diff", tagName+"^1.."+tagName)
+		if err != nil {
+			return "", fmt.Errorf("generating git diff from proposal tag %s: %w", tagName, err)
+		}
+		return diff, nil
+	}
+
+	return "", fmt.Errorf("candidate %s not found as active branch or proposal tag", candidateID)
 }
 
 func (c *GoExecEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	tagName := fmt.Sprintf("proposal-%s", candidateID)
@@ -144,6 +182,9 @@ func (c *GoExecEngine) Accept(ctx context.Context, chatID string, candidateID st
 }
 
 func (c *GoExecEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	threadBranch := fmt.Sprintf("chat/%s", chatID)
 	candidateBranch := fmt.Sprintf("candidate/%s", candidateID)
 	tagName := fmt.Sprintf("proposal-%s", candidateID)
@@ -160,6 +201,7 @@ func (c *GoExecEngine) Reject(ctx context.Context, chatID string, candidateID st
 }
 
 type execSandbox struct {
+	repoMu            *sync.Mutex
 	mainRepoDirectory string
 	sandboxDirectory  string
 	chatDirectory     string
@@ -167,28 +209,52 @@ type execSandbox struct {
 	sharedCodebase    bool
 }
 
-func (s *execSandbox) normalizePath(targetPath string) string {
-	slashPath := filepath.ToSlash(filepath.Clean(targetPath))
+func (s *execSandbox) resolveSafePath(targetPath string) (string, error) {
+	baseDir := s.chatDirectory
+	if s.sharedCodebase {
+		baseDir = s.sandboxDirectory
+	}
+
+	cleaned := filepath.Clean(targetPath)
+	if filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("absolute path %q is not allowed in sandbox", targetPath)
+	}
+
+	slashPath := filepath.ToSlash(cleaned)
 	chatID := filepath.Base(s.chatDirectory)
 	slashPrefix := fmt.Sprintf("chats/%s", chatID)
 
-	if strings.HasPrefix(slashPath, slashPrefix) {
-		slashPath = strings.TrimPrefix(slashPath, slashPrefix)
-		slashPath = strings.TrimPrefix(slashPath, "/")
+	if slashPath == slashPrefix {
+		slashPath = "."
+	} else if strings.HasPrefix(slashPath, slashPrefix+"/") {
+		slashPath = strings.TrimPrefix(slashPath, slashPrefix+"/")
 	}
 
-	if s.sharedCodebase {
-		return filepath.Join(s.sandboxDirectory, filepath.FromSlash(slashPath))
+	fullPath := filepath.Join(baseDir, filepath.FromSlash(slashPath))
+	rel, err := filepath.Rel(baseDir, fullPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path %q escapes sandbox root", targetPath)
 	}
-	return filepath.Join(s.chatDirectory, filepath.FromSlash(slashPath))
+
+	return fullPath, nil
 }
 
 func (s *execSandbox) ResolvePath(path string) string {
-	return s.normalizePath(path)
+	fullPath, err := s.resolveSafePath(path)
+	if err != nil {
+		if s.sharedCodebase {
+			return s.sandboxDirectory
+		}
+		return s.chatDirectory
+	}
+	return fullPath
 }
 
 func (s *execSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
-	fullPath := s.normalizePath(path)
+	fullPath, err := s.resolveSafePath(path)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return err
 	}
@@ -196,7 +262,11 @@ func (s *execSandbox) WriteFile(ctx context.Context, path string, data []byte) e
 }
 
 func (s *execSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
-	return os.ReadFile(s.normalizePath(path))
+	fullPath, err := s.resolveSafePath(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(fullPath)
 }
 
 func (s *execSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
@@ -230,6 +300,10 @@ func (s *execSandbox) DeliverForReview(ctx context.Context) error {
 }
 
 func (s *execSandbox) TearDown(ctx context.Context) error {
+	if s.repoMu != nil {
+		s.repoMu.Lock()
+		defer s.repoMu.Unlock()
+	}
 	_, err := runGit(ctx, s.mainRepoDirectory, "worktree", "remove", "--force", s.sandboxDirectory)
 	return err
 }

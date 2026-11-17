@@ -2,7 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -64,9 +68,12 @@ func (api *ManagementAPI) handleGetSpaces(w http.ResponseWriter, r *http.Request
 		}
 
 		isConfigured := false
-		state, err := api.manager.GetSpaceState(id)
+		state, stateErr := api.manager.GetSpaceState(id)
+		if stateErr != nil && !errors.Is(stateErr, os.ErrNotExist) {
+			slog.WarnContext(r.Context(), "failed reading space state", "space_id", id, "error", stateErr)
+		}
 
-		if err == nil && state.ThinkState != "" {
+		if stateErr == nil && state.ThinkState != "" {
 			if _, ok := api.registry.GetThinkState(state.ThinkState); ok {
 				isConfigured = true
 			}
@@ -121,7 +128,7 @@ func (api *ManagementAPI) handleCreateChat(w http.ResponseWriter, r *http.Reques
 		Name string `json:"name"`
 	}
 	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
 			http.Error(w, "Invalid payload", http.StatusBadRequest)
 			return
 		}
@@ -155,17 +162,28 @@ func (api *ManagementAPI) handleGetEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	meta, _ := api.manager.GetChatMeta(spaceID, chatID)
 	activeBranch := "main"
-	if meta.ActiveBranch != "" {
-		activeBranch = meta.ActiveBranch
+	var activeGraphID thinkgraph.GraphID
+	meta, metaErr := api.manager.GetChatMeta(spaceID, chatID)
+	if metaErr == nil {
+		if meta.ActiveBranch != "" {
+			activeBranch = meta.ActiveBranch
+		}
+		if rawID, ok := meta.BranchGraphIDs[activeBranch]; ok && strings.TrimSpace(rawID) != "" {
+			if parsed, parseErr := thinkgraph.ParseGraphID(rawID); parseErr == nil {
+				activeGraphID = parsed
+			}
+		}
+	} else if !errors.Is(metaErr, os.ErrNotExist) {
+		slog.WarnContext(r.Context(), "failed reading chat meta for events query", "space_id", spaceID, "chat_id", chatID, "error", metaErr)
 	}
 
 	chat := &thinkgraph.ChatAddress{
 		ChatID:    chatID,
 		ProjectID: spaceID,
 		SubGraph: thinkgraph.SubGraph{
-			Name: activeBranch,
+			Name:    activeBranch,
+			GraphID: activeGraphID,
 		},
 	}
 	var events []thinkgraph.Node
@@ -321,6 +339,11 @@ func (api *ManagementAPI) handleTombstoneEvent(w http.ResponseWriter, r *http.Re
 	chatID := r.PathValue("chat_id")
 	targetIDStr := r.PathValue("id")
 
+	if spaceID == "" || chatID == "" {
+		http.Error(w, "Missing space_id or chat_id parameter", http.StatusBadRequest)
+		return
+	}
+
 	targetID, err := uuid.Parse(targetIDStr)
 	if err != nil {
 		http.Error(w, "Invalid target ID", http.StatusBadRequest)
@@ -351,6 +374,11 @@ func (api *ManagementAPI) handleRestoreEvent(w http.ResponseWriter, r *http.Requ
 	chatID := r.PathValue("chat_id")
 	targetIDStr := r.PathValue("id")
 
+	if spaceID == "" || chatID == "" {
+		http.Error(w, "Missing space_id or chat_id parameter", http.StatusBadRequest)
+		return
+	}
+
 	targetID, err := uuid.Parse(targetIDStr)
 	if err != nil {
 		http.Error(w, "Invalid target ID", http.StatusBadRequest)
@@ -380,6 +408,11 @@ func (api *ManagementAPI) handleUpdateEvent(w http.ResponseWriter, r *http.Reque
 	spaceID := r.PathValue("space_id")
 	chatID := r.PathValue("chat_id")
 	targetIDStr := r.PathValue("id")
+
+	if spaceID == "" || chatID == "" {
+		http.Error(w, "Missing space_id or chat_id parameter", http.StatusBadRequest)
+		return
+	}
 
 	targetID, err := uuid.Parse(targetIDStr)
 	if err != nil {

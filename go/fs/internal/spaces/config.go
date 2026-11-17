@@ -82,25 +82,25 @@ type MemoryConfig struct {
 }
 
 func (c *ThinkStateConfig) ApplyDefaults() {
-	if c.Timeouts.TurnSeconds == 0 {
+	if c.Timeouts.TurnSeconds <= 0 {
 		c.Timeouts.TurnSeconds = 300
 	}
-	if c.Timeouts.AgentSeconds == 0 {
+	if c.Timeouts.AgentSeconds <= 0 {
 		c.Timeouts.AgentSeconds = 60
 	}
-	if c.Timeouts.VerifySeconds == 0 {
+	if c.Timeouts.VerifySeconds <= 0 {
 		c.Timeouts.VerifySeconds = 15
 	}
-	if c.Memory.TriggerThreshold == 0 {
+	if c.Memory.TriggerThreshold <= 0 {
 		c.Memory.TriggerThreshold = 12
 	}
-	if c.Memory.MaxVolatile == 0 {
+	if c.Memory.MaxVolatile <= 0 {
 		c.Memory.MaxVolatile = 20
 	}
-	if c.Memory.ActiveBuffer == 0 {
+	if c.Memory.ActiveBuffer <= 0 {
 		c.Memory.ActiveBuffer = 6
 	}
-	if c.Memory.FocusDepth == 0 {
+	if c.Memory.FocusDepth <= 0 {
 		c.Memory.FocusDepth = 3
 	}
 }

@@ -46,15 +46,18 @@ func (t *TraversalEngine) ResolveSubGraphID(ctx context.Context, c *ChatAddress,
 	return targetGraphID, nil
 }
 
-func (t *TraversalEngine) resolveParentGraphID(ctx context.Context, c *ChatAddress, forkPoint uuid.UUID) GraphID {
+func (t *TraversalEngine) resolveParentGraphID(ctx context.Context, c *ChatAddress, forkPoint uuid.UUID) (GraphID, error) {
 	if forkPoint == uuid.Nil() {
-		return GraphID{}
+		return GraphID{}, nil
 	}
 	nodes, err := t.graph.GetNodes(ctx, c, []string{forkPoint.String()})
-	if err == nil && len(nodes) > 0 {
-		return nodes[0].GraphID
+	if err != nil {
+		return GraphID{}, fmt.Errorf("resolving parent graph ID for fork point %s: %w", forkPoint, err)
 	}
-	return GraphID{}
+	if len(nodes) > 0 {
+		return nodes[0].GraphID, nil
+	}
+	return GraphID{}, nil
 }
 
 func (t *TraversalEngine) GetTimelinePage(
@@ -63,7 +66,6 @@ func (t *TraversalEngine) GetTimelinePage(
 	cursor string,
 	limit int,
 ) ([]Node, string, bool, error) {
-
 	var finalNodes []Node
 	currentName := c.Name
 	if currentName == "" {
@@ -72,6 +74,8 @@ func (t *TraversalEngine) GetTimelinePage(
 	currentGraphID := c.GraphID
 	currentCursor := cursor
 	remainingLimit := limit
+	hasMoreParent := false
+	var nextParentCursor string
 
 	for remainingLimit > 0 {
 		var parentBranch string
@@ -85,10 +89,11 @@ func (t *TraversalEngine) GetTimelinePage(
 		for _, node := range nodes {
 			if node.Type == EventBranchAnchor {
 				var anchor BranchAnchor
-				if err := json.Unmarshal(node.Data, &anchor); err == nil {
-					parentBranch = anchor.ParentBranch
-					forkPoint = anchor.ForkPoint
+				if unmarshalErr := json.Unmarshal(node.Data, &anchor); unmarshalErr != nil {
+					return nil, "", false, fmt.Errorf("unmarshaling branch anchor on node %s: %w", node.ID, unmarshalErr)
 				}
+				parentBranch = anchor.ParentBranch
+				forkPoint = anchor.ForkPoint
 			}
 		}
 
@@ -100,24 +105,31 @@ func (t *TraversalEngine) GetTimelinePage(
 		}
 
 		if parentBranch == "" {
+			hasMoreParent = false
 			break
 		}
 
+		if remainingLimit == 0 {
+			hasMoreParent = true
+			nextParentCursor = forkPoint.String()
+			break
+		}
+
+		parentGraphID, err := t.resolveParentGraphID(ctx, c, forkPoint)
+		if err != nil {
+			return nil, "", false, err
+		}
+
 		currentName = parentBranch
-		currentGraphID = t.resolveParentGraphID(ctx, c, forkPoint)
+		currentGraphID = parentGraphID
 		currentCursor = forkPoint.String()
 	}
 
-	hasMoreTotal := false
-	var finalCursor string
-	if remainingLimit == 0 {
-		hasMoreTotal = true
-		if len(finalNodes) > 0 {
-			finalCursor = finalNodes[0].ID.String()
-		}
+	if hasMoreParent {
+		return finalNodes, nextParentCursor, true, nil
 	}
 
-	return finalNodes, finalCursor, hasMoreTotal, nil
+	return finalNodes, "", false, nil
 }
 
 func (t *TraversalEngine) WalkTimelineReverse(
@@ -136,14 +148,17 @@ func (t *TraversalEngine) WalkTimelineReverse(
 		continueWalk := true
 		var parentBranch string
 		var forkPoint uuid.UUID
+		var walkErr error
 
 		err := t.graph.WalkSubGraphReverse(ctx, &ChatAddress{ChatID: c.ChatID, ProjectID: c.ProjectID, SubGraph: SubGraph{Name: currentName}}, currentGraphID, currentCursor, func(node Node) bool {
 			if node.Type == EventBranchAnchor {
 				var anchor BranchAnchor
-				if err := json.Unmarshal(node.Data, &anchor); err == nil {
-					parentBranch = anchor.ParentBranch
-					forkPoint = anchor.ForkPoint
+				if unmarshalErr := json.Unmarshal(node.Data, &anchor); unmarshalErr != nil {
+					walkErr = fmt.Errorf("unmarshaling branch anchor on node %s: %w", node.ID, unmarshalErr)
+					return false
 				}
+				parentBranch = anchor.ParentBranch
+				forkPoint = anchor.ForkPoint
 			}
 
 			if !fn(node) {
@@ -155,13 +170,21 @@ func (t *TraversalEngine) WalkTimelineReverse(
 		if err != nil {
 			return err
 		}
+		if walkErr != nil {
+			return walkErr
+		}
 
 		if !continueWalk || parentBranch == "" {
 			break
 		}
 
+		parentGraphID, err := t.resolveParentGraphID(ctx, c, forkPoint)
+		if err != nil {
+			return err
+		}
+
 		currentName = parentBranch
-		currentGraphID = t.resolveParentGraphID(ctx, c, forkPoint)
+		currentGraphID = parentGraphID
 		currentCursor = forkPoint.String()
 	}
 

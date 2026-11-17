@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -93,16 +94,20 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 		return nil, fmt.Errorf("think state configuration not found: %s", activeThinkState)
 	}
 
-	e.logger.InfoContext(ctx, "assembling context bundle", "think_state", activeThinkState, "branch", activeBranch)
+	if e.logger != nil {
+		e.logger.InfoContext(ctx, "assembling context bundle", "think_state", activeThinkState, "branch", activeBranch)
+	}
 	bundle, graphData, err := e.bundleAssembler.Assemble(ctx, address, digestionHorizon, catalystID, activeThinkState, thinkState)
 	if err != nil {
-		e.logger.ErrorContext(ctx, "failed assembling bundle", "error", err)
+		if e.logger != nil {
+			e.logger.ErrorContext(ctx, "failed assembling bundle", "error", err)
+		}
 		return nil, fmt.Errorf("assembling bundle: %w", err)
 	}
 
 	settings, err := e.workspaceManager.GetSpaceSettings(e.session.SpaceID)
 	if err != nil {
-		settings = workspace.SpaceSettings{ReviewPolicy: workspace.ReviewPolicySettings{Active: true, MinTokens: 200}}
+		return nil, fmt.Errorf("loading space settings: %w", err)
 	}
 
 	e.session.mu.RLock()
@@ -119,10 +124,12 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 
 	registry := tools.NewRegistry()
 
-	var validStates []string
-	for k := range e.registry.GetAllConfigs() {
+	allConfigs := e.registry.GetAllConfigs()
+	validStates := make([]string, 0, len(allConfigs))
+	for k := range allConfigs {
 		validStates = append(validStates, k)
 	}
+	sort.Strings(validStates)
 	registry.Register(tools.NewTransitionThinkStateTool(validStates))
 
 	if thinkState.Config().Roles.Manager.Tools.QueryLens.Description != "" {
@@ -143,7 +150,8 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 		registry.Register(tools.NewCreateDigestTool(committer))
 	}
 
-	signal, err := e.turnExecutor.Execute(ctx, address, turnID, catalystID, true, thinkState, bundle, registry, ui, emitter)
+	managerModel := thinkState.Config().Roles.Manager.Model
+	signal, err := e.turnExecutor.Execute(ctx, address, turnID, catalystID, managerModel, true, thinkState, bundle, registry, ui, emitter)
 	if err == nil {
 		e.evaluateAndTriggerDigestion(ctx, address, thinkState.Config().Memory)
 	}
@@ -154,6 +162,9 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, responseID uuid.UUID, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
 	if !shouldReview {
 		return true
+	}
+	if ui == nil {
+		return false
 	}
 
 	turnContext := ProjectTurnContext(e.session.SpaceID, e.session.ChatID, responseID, bundle, graphData.Focus)
@@ -205,6 +216,9 @@ func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, respo
 }
 
 func (e *ChatEngine) evaluateAndTriggerDigestion(ctx context.Context, address *thinkgraph.ChatAddress, memoryConfig spaces.MemoryConfig) {
+	if e.workspaceManager == nil || e.digestManager == nil {
+		return
+	}
 	graphRepository := e.workspaceManager.GraphRepository()
 	if graphRepository == nil {
 		return
@@ -212,7 +226,13 @@ func (e *ChatEngine) evaluateAndTriggerDigestion(ctx context.Context, address *t
 
 	traversalEngine := thinkgraph.NewTraversalEngine(graphRepository)
 	timeline, err := traversalEngine.GetFullTimeline(ctx, address)
-	if err != nil || len(timeline) == 0 {
+	if err != nil {
+		if e.logger != nil {
+			e.logger.WarnContext(ctx, "failed to load timeline for digestion evaluation", "error", err)
+		}
+		return
+	}
+	if len(timeline) == 0 {
 		return
 	}
 
@@ -271,7 +291,9 @@ func (e *ChatEngine) evaluateAndTriggerDigestion(ctx context.Context, address *t
 
 	e.session.mu.Lock()
 	e.session.Meta.EvaluationHorizon = newEvalHorizonEvent.ID
-	_ = e.session.flushMetaLocked()
+	if flushErr := e.session.flushMetaLocked(); flushErr != nil && e.logger != nil {
+		e.logger.ErrorContext(ctx, "failed to flush evaluation horizon metadata", "error", flushErr)
+	}
 	e.session.mu.Unlock()
 
 	go e.executeBackgroundDigestion(address, targetWindow, activeBuffer, forceDigest, targetWindowHorizonEvent.ID)
@@ -307,29 +329,44 @@ func (e *ChatEngine) executeBackgroundDigestion(
 		thinkState.Config().WorkerSystemPrompt(),
 	)
 	if digestErr != nil {
+		if e.logger != nil {
+			e.logger.ErrorContext(bgCtx, "background digestion failed", "error", digestErr)
+		}
 		return
 	}
 
 	if count > 0 {
 		e.session.mu.Lock()
 		e.session.Meta.DigestionHorizon = targetWindowHorizonEventID
-		_ = e.session.flushMetaLocked()
+		if flushErr := e.session.flushMetaLocked(); flushErr != nil && e.logger != nil {
+			e.logger.ErrorContext(bgCtx, "failed to flush digestion horizon metadata", "error", flushErr)
+		}
 		e.session.mu.Unlock()
 	}
 }
 
+// streamMultiplexer buffers generated text for internal subgraph turns while forwarding
+// persisted graph nodes to the UI so subgraph views stay live without leaking raw JSON
+// into the main chat text stream.
 type streamMultiplexer struct {
-	buffer strings.Builder
-	ui     tools.UI
+	buffer           strings.Builder
+	ui               tools.UI
+	streamTextChunks bool
 }
 
 func (m *streamMultiplexer) OnTextChunk(chunk workspace.NodeChunk) {
 	m.buffer.WriteString(chunk.Text)
-	if m.ui != nil {
+	if m.streamTextChunks && m.ui != nil {
 		m.ui.OnTextChunk(chunk)
 	}
 }
 
 func (m *streamMultiplexer) ConfirmTransition(targetThinkState string, reasoning string) bool {
 	return false
+}
+
+func (m *streamMultiplexer) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {
+	if streamer := asGraphStreamer(m.ui); streamer != nil {
+		streamer.StreamGraphEvent(address, node)
+	}
 }

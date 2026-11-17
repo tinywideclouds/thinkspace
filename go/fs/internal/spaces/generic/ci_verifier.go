@@ -18,6 +18,9 @@ type CIVerifier struct {
 }
 
 func NewCIVerifier(toolchain spaces.ToolchainConfig, timeout time.Duration) *CIVerifier {
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
 	return &CIVerifier{
 		toolchain: toolchain,
 		timeout:   timeout,
@@ -33,7 +36,6 @@ func (v *CIVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSand
 
 	runPhase := func(phaseName string, commands []string, strict bool) {
 		for _, cmdStr := range commands {
-			// Check if we timed out before even starting this command
 			if verifyCtx.Err() != nil {
 				trace.WriteString(fmt.Sprintf("[%s] %s: TIMEOUT\n", phaseName, cmdStr))
 				if strict {
@@ -52,7 +54,6 @@ func (v *CIVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSand
 
 			output, err := sandbox.ExecuteCommand(verifyCtx, cmd, args...)
 			if err != nil {
-				// Catch the specific timeout error returned by the execution engine
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(verifyCtx.Err(), context.DeadlineExceeded) {
 					trace.WriteString(fmt.Sprintf("[%s] %s: TIMEOUT\n%s\n\n", phaseName, cmdStr, output))
 					if strict {
@@ -63,7 +64,6 @@ func (v *CIVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSand
 
 				trace.WriteString(fmt.Sprintf("[%s] %s: FAILED\n%s\n%v\n\n", phaseName, cmdStr, output, err))
 
-				// Only halt the loop if this is a strict verification phase
 				if strict {
 					hasError = true
 					break
@@ -75,11 +75,9 @@ func (v *CIVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSand
 	}
 
 	// Phase 1: Best-effort auto-fixing (Non-Strict)
-	// If goimports fails, we note it in the trace but continue so `go build` can catch the real error.
 	runPhase("PRE-VERIFY", v.toolchain.PreVerify, false)
 
 	// Phase 2: Actual Verification (Strict)
-	// Only run if the context hasn't timed out during pre-verify.
 	if verifyCtx.Err() == nil {
 		runPhase("VERIFY", v.toolchain.Verify, true)
 	} else {

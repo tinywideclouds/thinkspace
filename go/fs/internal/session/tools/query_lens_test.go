@@ -20,9 +20,13 @@ func (m *mockWorkspace) WorkspaceRoot() string             { return "/mock" }
 
 type mockGraphRepo struct {
 	thinkgraph.GraphRepository
+	digests []thinkgraph.DigestMeta
 }
 
 func (m *mockGraphRepo) GetLenses(ctx context.Context, c *thinkgraph.ChatAddress, tag string) (thinkgraph.LensResult, error) {
+	if tag == "digest-only" {
+		return thinkgraph.LensResult{Digests: m.digests}, nil
+	}
 	return thinkgraph.LensResult{
 		Nodes: []thinkgraph.Node{
 			{
@@ -37,7 +41,13 @@ func (m *mockGraphRepo) GetLenses(ctx context.Context, c *thinkgraph.ChatAddress
 }
 
 func TestQueryLensTool_Execute(t *testing.T) {
-	ws := &mockWorkspace{graph: &mockGraphRepo{}}
+	ws := &mockWorkspace{
+		graph: &mockGraphRepo{
+			digests: []thinkgraph.DigestMeta{
+				{Summary: "Archived security digest"},
+			},
+		},
+	}
 	tool := tools.NewQueryLensTool(ws)
 	emitter := &mockToolEmitter{}
 
@@ -83,5 +93,24 @@ func TestQueryLensTool_Execute(t *testing.T) {
 	}
 	if !foundStatus {
 		t.Errorf("expected tool_status telemetry event to be fired")
+	}
+
+	// Verify digest-only lens hits also render into WorkingMemory
+	digestBundle := &cognition.ThinkBundle{}
+	_, err = tool.Execute(context.Background(), tools.ExecutionContext{
+		RawArguments: map[string]any{tools.Tag: "digest-only"},
+		Bundle:       digestBundle,
+		UI:           &mockUI{},
+	})
+	if err != nil {
+		t.Fatalf("digest-only query_lens failed: %v", err)
+	}
+	if len(digestBundle.Trajectory.WorkingMemory) != 1 || !strings.Contains(digestBundle.Trajectory.WorkingMemory[0].Content, "Archived security digest") {
+		t.Errorf("expected digest summary in WorkingMemory, got %+v", digestBundle.Trajectory.WorkingMemory)
+	}
+
+	// Empty tag must fail validation
+	if _, err := tool.Execute(context.Background(), tools.ExecutionContext{RawArguments: map[string]any{tools.Tag: "  "}}); err == nil {
+		t.Errorf("expected error for empty query_lens tag")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 type teTestModelClient struct {
 	responses      []llm.StreamChunk
 	callIndex      int
+	capturedModel  string
 	capturedBundle cognition.ThinkBundle
 }
 
@@ -37,6 +39,7 @@ func (client *teTestModelClient) GenerateContentStream(
 	registry *tools.Registry,
 	config spaces.ThinkStateConfig,
 ) iter.Seq2[llm.StreamChunk, error] {
+	client.capturedModel = model
 	client.capturedBundle = bundle
 	return func(yield func(llm.StreamChunk, error) bool) {
 		for client.callIndex < len(client.responses) {
@@ -77,6 +80,7 @@ func (space *teTestThinkSpace) Config() spaces.ThinkStateConfig {
 	cfg := spaces.ThinkStateConfig{
 		Roles: spaces.RolesConfig{
 			Manager: spaces.ManagerConfig{Model: "test-manager"},
+			Worker:  spaces.WorkerConfig{Model: "test-worker"},
 		},
 		Timeouts: spaces.TimeoutsConfig{TurnSeconds: 300},
 	}
@@ -126,16 +130,26 @@ func (t *teMockSynthesisTool) Execute(ctx context.Context, ec tools.ExecutionCon
 }
 
 func setupExecutorTest(t *testing.T, spaceID, chatID string) (*session.TurnExecutor, *workspace.Service, *teTestModelClient) {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 
 	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
-	graphDB, _ := db.NewBadgerGraph(opts)
-	t.Cleanup(func() { graphDB.Close() })
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := graphDB.Close(); closeErr != nil {
+			t.Errorf("failed closing badger graph: %v", closeErr)
+		}
+	})
 
 	emitter := &teTestEmitter{}
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &teTestChatEngine{} }, graphDB, emitter)
-	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755); err != nil {
+		t.Fatalf("failed creating space dir: %v", err)
+	}
 
 	client := &teTestModelClient{}
 	workspaceService := svcManager.GetService(spaceID)
@@ -143,6 +157,32 @@ func setupExecutorTest(t *testing.T, spaceID, chatID string) (*session.TurnExecu
 	executor := session.NewTurnExecutor(logger, client, workspaceService)
 
 	return executor, workspaceService, client
+}
+
+func TestTurnExecutor_Execute_UsesExplicitTargetModel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	executor, _, client := setupExecutorTest(t, "golang", "test-model")
+	address := &thinkgraph.ChatAddress{
+		ChatID:    "test-model",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+
+	client.responses = []llm.StreamChunk{{Text: "Worker output"}}
+
+	_, err := executor.Execute(ctx, address, uuid.NewV7(), uuid.Nil(), "gemini-4-hydrogen", false, &teTestThinkSpace{}, cognition.ThinkBundle{}, tools.NewRegistry(), &teTestUI{}, &teTestEmitter{})
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if client.capturedModel != "gemini-4-hydrogen" {
+		t.Errorf("expected TurnExecutor to dispatch to 'gemini-4-hydrogen', got %q", client.capturedModel)
+	}
 }
 
 func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
@@ -170,7 +210,7 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 	registry := tools.NewRegistry()
 	ui := &teTestUI{}
 
-	signal, err := executor.Execute(ctx, address, responseID, parentID, true, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui, &teTestEmitter{})
+	signal, err := executor.Execute(ctx, address, responseID, parentID, "test-manager", true, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, ui, &teTestEmitter{})
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -209,7 +249,10 @@ func TestTurnExecutor_Execute_StandardResponse_OpenNodeHandshake(t *testing.T) {
 		t.Errorf("Expected text chunks to be attached to the pre-allocated node ID")
 	}
 
-	timeline, _ := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
+	timeline, err := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
 	if len(timeline) == 0 {
 		t.Errorf("Expected standard generation to be appended to graph timeline")
 	} else if timeline[len(timeline)-1].ID != shellNode.ID {
@@ -248,7 +291,7 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewTransitionThinkStateTool([]string{"concept"}))
 
-	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), false, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{}, nil)
+	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), "test-manager", false, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{}, nil)
 	if err != nil {
 		t.Fatalf("Expected nil error, got %v", err)
 	}
@@ -261,8 +304,10 @@ func TestTurnExecutor_Execute_RoutesToTool(t *testing.T) {
 		t.Errorf("Expected transition to concept, got %s", tr.TargetThinkState)
 	}
 
-	// This tool is intentionally completely silent on the main timeline
-	timeline, _ := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
+	timeline, err := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
 	if len(timeline) != 0 {
 		t.Errorf("Expected zero persisted nodes in main timeline on direct tool intercept, got %d", len(timeline))
 	}
@@ -299,7 +344,7 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 		},
 	}
 
-	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), false, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{}, nil)
+	signal, err := executor.Execute(ctx, address, responseID, uuid.Nil(), "test-manager", false, &teTestThinkSpace{}, initialBundle, registry, &teTestUI{}, nil)
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -311,5 +356,43 @@ func TestTurnExecutor_Execute_SynthesisLoop(t *testing.T) {
 
 	if synthSig.OriginalInstruction != "Dossier output" {
 		t.Errorf("Expected Dossier output, got %s", synthSig.OriginalInstruction)
+	}
+}
+
+func TestTurnExecutor_Execute_UnknownToolFeedbackAndMaxIterations(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	executor, _, client := setupExecutorTest(t, "golang", "test-unknown-tool")
+	address := &thinkgraph.ChatAddress{
+		ChatID:    "test-unknown-tool",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+
+	// Iteration 0 calls a non-existent tool; iteration 1 sees the system error feedback and recovers
+	client.responses = []llm.StreamChunk{
+		{ToolCalls: []llm.ToolCall{{Name: "hallucinated_tool"}}},
+		{Text: "Recovered after tool error"},
+	}
+
+	signal, err := executor.Execute(ctx, address, uuid.NewV7(), uuid.Nil(), "test-manager", false, &teTestThinkSpace{}, cognition.ThinkBundle{}, tools.NewRegistry(), &teTestUI{}, nil)
+	if err != nil {
+		t.Fatalf("expected recovery after unknown tool feedback, got error: %v", err)
+	}
+	if _, ok := signal.(*signals.SignalTerminal); !ok {
+		t.Errorf("expected SignalTerminal, got %T", signal)
+	}
+	foundToolFeedback := false
+	for _, ev := range client.capturedBundle.Trajectory.WorkingMemory {
+		if strings.Contains(ev.Content, "hallucinated_tool") && strings.Contains(ev.Content, "not available") {
+			foundToolFeedback = true
+		}
+	}
+	if !foundToolFeedback {
+		t.Errorf("expected system error feedback for unknown tool in WorkingMemory, got %+v", client.capturedBundle.Trajectory.WorkingMemory)
 	}
 }

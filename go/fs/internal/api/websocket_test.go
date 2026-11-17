@@ -14,6 +14,7 @@ import (
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/api"
+	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -198,5 +199,82 @@ func TestWebSocketUI_RoutingAndBlocking(t *testing.T) {
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for transition channel to unblock")
+	}
+
+	// Test 5: ReviewCandidate Blocking and Channel Push
+	type revRes struct {
+		accepted bool
+		reason   string
+	}
+	reviewDone := make(chan revRes)
+	go func() {
+		acc, rsn := ui.ReviewCandidate("candidate/cand-1")
+		reviewDone <- revRes{accepted: acc, reason: rsn}
+	}()
+
+	_, data, err = conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("failed to read review request: %v", err)
+	}
+	connectionManager.PushReviewDecision(true, "ship it")
+
+	select {
+	case res := <-reviewDone:
+		if !res.accepted || res.reason != "ship it" {
+			t.Errorf("unexpected review result: %+v", res)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for review channel to unblock")
+	}
+
+	// Test 6: ReviewContext Blocking and Channel Push
+	ctxDone := make(chan session.ContextApprovalDecision)
+	go func() {
+		ctxDone <- ui.ReviewContext(session.TurnContext{SpaceID: "space-1", ChatID: "chat-1"})
+	}()
+
+	_, data, err = conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("failed to read preview context request: %v", err)
+	}
+	connectionManager.PushContextApproval(session.ContextApprovalDecision{Approved: true, RetainedFilePaths: []string{"src/main.go"}})
+
+	select {
+	case dec := <-ctxDone:
+		if !dec.Approved || len(dec.RetainedFilePaths) != 1 || dec.RetainedFilePaths[0] != "src/main.go" {
+			t.Errorf("unexpected context approval decision: %+v", dec)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for context approval channel to unblock")
+	}
+}
+
+func TestConnectionManager_UnblocksImmediatelyOnContextCancel(t *testing.T) {
+	connCtx, cancel := context.WithCancel(context.Background())
+	cm := api.NewConnectionManager(connCtx, nil, nil, nil)
+
+	done := make(chan struct{})
+	go func() {
+		if strategy, autoAccept := cm.ChooseNextStep(); strategy != flows.StrategySkip || autoAccept {
+			t.Errorf("expected StrategySkip on cancelled context, got %v (auto=%v)", strategy, autoAccept)
+		}
+		if approved := cm.ConfirmTransition("golang", "test"); approved {
+			t.Errorf("expected false on cancelled ConfirmTransition")
+		}
+		if acc, _ := cm.ReviewCandidate("candidate/x"); acc {
+			t.Errorf("expected false on cancelled ReviewCandidate")
+		}
+		if dec := cm.ReviewContext(session.TurnContext{}); dec.Approved {
+			t.Errorf("expected false on cancelled ReviewContext")
+		}
+		close(done)
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("ConnectionManager blocked after context cancellation (goroutine leak)")
 	}
 }

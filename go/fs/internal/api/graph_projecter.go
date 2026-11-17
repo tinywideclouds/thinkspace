@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	pb "github.com/tinywideclouds.com/thinkspace/api/v1"
@@ -56,6 +57,7 @@ func ProjectEvents(nodes []thinkgraph.Node) []*pb.GraphEvent {
 		case workspace.EventCandidateResolution:
 			var payload workspace.CandidateResolution
 			if err := json.Unmarshal(n.Data, &payload); err != nil {
+				slog.Warn("skipping candidate_resolution node with invalid payload", "node_id", n.ID, "error", err)
 				continue
 			}
 			ev.Payload = &pb.GraphEvent_CandidateResolution{
@@ -68,12 +70,15 @@ func ProjectEvents(nodes []thinkgraph.Node) []*pb.GraphEvent {
 		case flows.EventFlowLifecycle:
 			var config flows.FlowData
 			if err := json.Unmarshal(n.Data, &config); err != nil {
+				slog.Warn("skipping flow_lifecycle node with invalid payload", "node_id", n.ID, "error", err)
 				continue
 			}
 
 			var state flows.FlowExecutionState
 			if len(n.MaterializedState) > 0 {
-				_ = json.Unmarshal(n.MaterializedState, &state)
+				if err := json.Unmarshal(n.MaterializedState, &state); err != nil {
+					slog.Warn("failed unmarshaling flow materialized state", "node_id", n.ID, "error", err)
+				}
 			}
 
 			var agents []*pb.AgentRecord
@@ -94,7 +99,7 @@ func ProjectEvents(nodes []thinkgraph.Node) []*pb.GraphEvent {
 					TaskId:  config.TaskID,
 					Task:    config.TaskPrompt,
 					Status:  mapFlowStatus(state.Status),
-					Summary: state.Summary, // No fallback hack needed; UI safely reads from Projection Cache
+					Summary: state.Summary,
 					Error:   state.Error,
 					Agents:  agents,
 				},

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"text/template"
+
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
@@ -47,7 +48,19 @@ func (m *DigestManager) CreateManualDigest(
 	model string,
 	basePersona string,
 ) error {
-	m.logger.InfoContext(ctx, "Creating manual context digest", "topic", topicName)
+	if m.client == nil {
+		return fmt.Errorf("model client is nil")
+	}
+	if svc == nil {
+		return fmt.Errorf("workspace service is nil")
+	}
+	if strings.TrimSpace(m.config.ManualPrompt) == "" {
+		return fmt.Errorf("digest manual_prompt configuration is empty")
+	}
+
+	if m.logger != nil {
+		m.logger.InfoContext(ctx, "Creating manual context digest", "topic", topicName)
+	}
 
 	tmpl, err := template.New("manual").Parse(m.config.ManualPrompt)
 	if err != nil {
@@ -117,8 +130,19 @@ func (m *DigestManager) CreateBackgroundDigest(
 	if len(targetWindow) == 0 {
 		return 0, nil
 	}
+	if m.client == nil {
+		return 0, fmt.Errorf("model client is nil")
+	}
+	if svc == nil {
+		return 0, fmt.Errorf("workspace service is nil")
+	}
+	if strings.TrimSpace(m.config.BackgroundPrompt) == "" {
+		return 0, fmt.Errorf("digest background_prompt configuration is empty")
+	}
 
-	m.logger.InfoContext(ctx, "Creating background context digest", "events", len(targetWindow), "forced", force)
+	if m.logger != nil {
+		m.logger.InfoContext(ctx, "Creating background context digest", "events", len(targetWindow), "forced", force)
+	}
 
 	var targetSb strings.Builder
 	var targetIDs []uuid.UUID
@@ -186,7 +210,7 @@ func (m *DigestManager) CreateBackgroundDigest(
 
 	count := 0
 	for _, d := range response.Digests {
-		if d.Summary == "" {
+		if strings.TrimSpace(d.Summary) == "" {
 			continue
 		}
 		if err := svc.AppendDigest(ctx, chatSession, d.Summary, d.Tags, false, targetIDs); err != nil {

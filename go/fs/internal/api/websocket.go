@@ -22,7 +22,7 @@ type reviewSelection struct {
 	reason   string
 }
 
-// ConnectionManager maintains the long-lived WebSocket connection and routes bytes.
+// ConnectionManager maintains the long-lived WebSocket connection and serializes outbound writes.
 type ConnectionManager struct {
 	ctx            context.Context
 	conn           *websocket.Conn
@@ -52,6 +52,9 @@ func NewConnectionManager(ctx context.Context, conn *websocket.Conn, chunkChan c
 }
 
 func (cm *ConnectionManager) SendBytes(data []byte) {
+	if cm == nil || cm.conn == nil || cm.ctx.Err() != nil {
+		return
+	}
 	cm.writeMu.Lock()
 	defer cm.writeMu.Unlock()
 	if err := cm.conn.Write(cm.ctx, websocket.MessageText, data); err != nil {
@@ -60,8 +63,12 @@ func (cm *ConnectionManager) SendBytes(data []byte) {
 }
 
 func (cm *ConnectionManager) OnTextChunk(chunk workspace.NodeChunk) {
-	if cm.chunkChan != nil {
-		cm.chunkChan <- chunk
+	if cm.chunkChan == nil {
+		return
+	}
+	select {
+	case cm.chunkChan <- chunk:
+	case <-cm.ctx.Done():
 	}
 }
 
@@ -73,56 +80,98 @@ func (cm *ConnectionManager) ConfirmTransition(targetThinkState string, reasonin
 	data, err := MarshalRequestTransition(targetThinkState, reasoning)
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request transition", "error", err)
-	} else {
-		cm.SendBytes(data)
+		return false
 	}
-	return <-cm.transitionChan
+	cm.SendBytes(data)
+
+	select {
+	case approved := <-cm.transitionChan:
+		return approved
+	case <-cm.ctx.Done():
+		return false
+	}
 }
 
 func (cm *ConnectionManager) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
 	data, err := MarshalPreviewContext(ctxData)
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling preview context for review", "error", err)
-	} else {
-		cm.SendBytes(data)
+		return session.ContextApprovalDecision{Approved: false}
 	}
-	return <-cm.approveChan
+	cm.SendBytes(data)
+
+	select {
+	case decision := <-cm.approveChan:
+		return decision
+	case <-cm.ctx.Done():
+		return session.ContextApprovalDecision{Approved: false}
+	}
 }
 
 func (cm *ConnectionManager) ChooseNextStep() (flows.FlowStrategy, bool) {
 	data, err := MarshalRequestStrategy()
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request strategy", "error", err)
-	} else {
-		cm.SendBytes(data)
+		return flows.StrategySkip, false
 	}
-	sel := <-cm.strategyChan
-	return sel.strategy, sel.autoAccept
+	cm.SendBytes(data)
+
+	select {
+	case sel := <-cm.strategyChan:
+		return sel.strategy, sel.autoAccept
+	case <-cm.ctx.Done():
+		return flows.StrategySkip, false
+	}
 }
 
 func (cm *ConnectionManager) ReviewCandidate(branch string) (bool, string) {
 	data, err := MarshalRequestReview(branch)
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request review", "error", err)
-	} else {
-		cm.SendBytes(data)
+		return false, "Failed to marshal review request"
 	}
-	sel := <-cm.reviewChan
-	return sel.accepted, sel.reason
+	cm.SendBytes(data)
+
+	select {
+	case sel := <-cm.reviewChan:
+		return sel.accepted, sel.reason
+	case <-cm.ctx.Done():
+		return false, "Client disconnected during review"
+	}
 }
 
 func (cm *ConnectionManager) PushStrategy(strategy flows.FlowStrategy, autoAccept bool) {
-	cm.strategyChan <- strategySelection{strategy: strategy, autoAccept: autoAccept}
+	select {
+	case cm.strategyChan <- strategySelection{strategy: strategy, autoAccept: autoAccept}:
+	case <-cm.ctx.Done():
+	default:
+		cm.logger.WarnContext(cm.ctx, "dropped unsolicited strategy selection")
+	}
 }
 
 func (cm *ConnectionManager) PushReviewDecision(accepted bool, reason string) {
-	cm.reviewChan <- reviewSelection{accepted: accepted, reason: reason}
+	select {
+	case cm.reviewChan <- reviewSelection{accepted: accepted, reason: reason}:
+	case <-cm.ctx.Done():
+	default:
+		cm.logger.WarnContext(cm.ctx, "dropped unsolicited review decision")
+	}
 }
 
 func (cm *ConnectionManager) PushContextApproval(decision session.ContextApprovalDecision) {
-	cm.approveChan <- decision
+	select {
+	case cm.approveChan <- decision:
+	case <-cm.ctx.Done():
+	default:
+		cm.logger.WarnContext(cm.ctx, "dropped unsolicited context approval")
+	}
 }
 
 func (cm *ConnectionManager) PushTransitionDecision(approved bool) {
-	cm.transitionChan <- approved
+	select {
+	case cm.transitionChan <- approved:
+	case <-cm.ctx.Done():
+	default:
+		cm.logger.WarnContext(cm.ctx, "dropped unsolicited transition decision")
+	}
 }

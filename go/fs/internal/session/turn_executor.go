@@ -69,6 +69,7 @@ func (e *TurnExecutor) Execute(
 	address *thinkgraph.ChatAddress,
 	responseID uuid.UUID,
 	parentID uuid.UUID,
+	model string,
 	anticipateResponse bool,
 	thinkState spaces.ThinkState,
 	bundle cognition.ThinkBundle,
@@ -79,7 +80,11 @@ func (e *TurnExecutor) Execute(
 	timeoutCtx, cancel := context.WithTimeout(ctx, thinkState.Config().TurnTimeout())
 	defer cancel()
 
-	managerModel := thinkState.Config().Roles.Manager.Model
+	targetModel := strings.TrimSpace(model)
+	if targetModel == "" {
+		targetModel = thinkState.Config().Roles.Manager.Model
+	}
+
 	maxIterations := 3
 	streamer := asGraphStreamer(ui)
 
@@ -111,7 +116,7 @@ func (e *TurnExecutor) Execute(
 		if e.logger != nil {
 			wbFiles, mbLayers, mbBytes, hasGoAST := inspectBundleContext(bundle)
 			e.logger.InfoContext(ctx, "TurnExecutor dispatching LLM context bundle",
-				"model", managerModel,
+				"model", targetModel,
 				"iteration", iteration,
 				"workbench_file_count", len(wbFiles),
 				"workbench_files", wbFiles,
@@ -125,7 +130,7 @@ func (e *TurnExecutor) Execute(
 
 		stream := e.modelClient.GenerateContentStream(
 			timeoutCtx,
-			managerModel,
+			targetModel,
 			bundle,
 			registry,
 			thinkState.Config(),
@@ -140,7 +145,9 @@ func (e *TurnExecutor) Execute(
 				return nil, fmt.Errorf("generation stream failed: %w", err)
 			}
 			if chunk.Text != "" {
-				ui.OnTextChunk(workspace.NodeChunk{NodeID: responseID, Text: chunk.Text})
+				if ui != nil {
+					ui.OnTextChunk(workspace.NodeChunk{NodeID: responseID, Text: chunk.Text})
+				}
 				fullModelResponse.WriteString(chunk.Text)
 			}
 			if len(chunk.ToolCalls) > 0 {
@@ -151,7 +158,9 @@ func (e *TurnExecutor) Execute(
 			}
 		}
 
-		e.logger.InfoContext(ctx, "TurnExecutor LLM generation complete", "text_length", fullModelResponse.Len(), "tool_count", len(interceptedTools), "response_id", responseID)
+		if e.logger != nil {
+			e.logger.InfoContext(ctx, "TurnExecutor LLM generation complete", "model", targetModel, "text_length", fullModelResponse.Len(), "tool_count", len(interceptedTools), "response_id", responseID)
+		}
 
 		if fullModelResponse.Len() > 0 {
 			var usage *telemetry.TokenUsage
@@ -163,7 +172,9 @@ func (e *TurnExecutor) Execute(
 				}
 			}
 
-			_ = e.workspaceService.AppendModelResponse(timeoutCtx, address, responseID, fullModelResponse.String(), usage, parentID)
+			if err := e.workspaceService.AppendModelResponse(timeoutCtx, address, responseID, fullModelResponse.String(), usage, parentID); err != nil {
+				return nil, fmt.Errorf("persisting model response: %w", err)
+			}
 
 			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 				Role:    "model",
@@ -174,18 +185,30 @@ func (e *TurnExecutor) Execute(
 		}
 
 		if len(interceptedTools) == 0 {
-			break
+			return &signals.SignalTerminal{}, nil
 		}
 
 		var yieldedSignal signals.EngineSignal
 		var mergedDispatch *signals.SignalDispatchFlow
 
 		for _, call := range interceptedTools {
-			e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name)
+			if e.logger != nil {
+				e.logger.InfoContext(ctx, "tool call intercepted", "tool", call.Name)
+			}
 
-			tool, exists := registry.Get(call.Name)
+			var tool tools.Tool
+			var exists bool
+			if registry != nil {
+				tool, exists = registry.Get(call.Name)
+			}
 			if !exists {
-				e.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
+				if e.logger != nil {
+					e.logger.WarnContext(ctx, "unknown tool call intercepted", "tool", call.Name)
+				}
+				bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+					Role:    "user",
+					Content: fmt.Sprintf("[System Error: Tool '%s' is not available in the current environment.]", call.Name),
+				})
 				continue
 			}
 
@@ -236,11 +259,15 @@ func (e *TurnExecutor) Execute(
 					ui.OnTextChunk(workspace.NodeChunk{NodeID: responseID, Text: tr.Content})
 				}
 
-				_ = e.broadcaster.AppendAndStream(ctx, address, ev, streamer)
+				if err := e.broadcaster.AppendAndStream(ctx, address, ev, streamer); err != nil {
+					return nil, fmt.Errorf("persisting tool response node: %w", err)
+				}
 			}
 
 			if tr.Signal != nil {
-				e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", tr.Signal))
+				if e.logger != nil {
+					e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", tr.Signal))
+				}
 				if dispatchSig, ok := tr.Signal.(*signals.SignalDispatchFlow); ok {
 					if mergedDispatch == nil {
 						mergedDispatch = &signals.SignalDispatchFlow{}
@@ -261,5 +288,5 @@ func (e *TurnExecutor) Execute(
 		}
 	}
 
-	return &signals.SignalTerminal{}, nil
+	return nil, fmt.Errorf("turn exceeded maximum tool-call iterations (%d)", maxIterations)
 }

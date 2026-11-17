@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -16,6 +18,14 @@ type TerminalUI struct{}
 
 func NewTerminalUI() *TerminalUI {
 	return &TerminalUI{}
+}
+
+func readLine(reader *bufio.Reader) (string, bool) {
+	input, err := reader.ReadString('\n')
+	if err != nil && (!errors.Is(err, io.EOF) || input == "") {
+		return "", false
+	}
+	return strings.TrimSpace(input), true
 }
 
 func (ui *TerminalUI) OnTextChunk(chunk workspace.NodeChunk) {
@@ -33,14 +43,15 @@ func (ui *TerminalUI) ConfirmTransition(targetThinkState string, reasoning strin
 	fmt.Print("Allow transition? [Y/n]: ")
 
 	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(strings.ToLower(input))
-
-	return input == "" || input == "y" || input == "yes"
+	input, ok := readLine(reader)
+	if !ok {
+		return false
+	}
+	lower := strings.ToLower(input)
+	return lower == "" || lower == "y" || lower == "yes"
 }
 
 func (ui *TerminalUI) ReviewContext(turnContext session.TurnContext) session.ContextApprovalDecision {
-	// For the CLI, we currently bypass manual context pruning and auto-approve.
 	return session.ContextApprovalDecision{
 		Approved: true,
 	}
@@ -55,17 +66,22 @@ func (ui *TerminalUI) ChooseNextStep() (flows.FlowStrategy, bool) {
 	fmt.Print("\nSelect strategy [1-4] (default 1): ")
 
 	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
+	input, ok := readLine(reader)
+	if !ok {
+		return flows.StrategySkip, false
+	}
 
 	switch input {
 	case "2":
 		return flows.StrategyReview, false
 	case "3":
 		fmt.Print("Auto-accept synthesized result without manual review? [y/N]: ")
-		autoInput, _ := reader.ReadString('\n')
-		autoAccept := strings.TrimSpace(strings.ToLower(autoInput))
-		return flows.StrategyRefine, autoAccept == "y" || autoAccept == "yes"
+		autoInput, autoOK := readLine(reader)
+		if !autoOK {
+			return flows.StrategyRefine, false
+		}
+		lower := strings.ToLower(autoInput)
+		return flows.StrategyRefine, lower == "y" || lower == "yes"
 	case "4":
 		return flows.StrategySkip, false
 	default:
@@ -78,19 +94,19 @@ func (ui *TerminalUI) ReviewCandidate(branch string) (bool, string) {
 	fmt.Print("Accept this candidate into the main timeline? [y/N]: ")
 
 	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(strings.ToLower(input))
-	accepted := input == "y" || input == "yes"
+	input, ok := readLine(reader)
+	if !ok {
+		return false, ""
+	}
+	lower := strings.ToLower(input)
+	accepted := lower == "y" || lower == "yes"
 
 	fmt.Print("Optional reason/comment: ")
-	reasonInput, _ := reader.ReadString('\n')
-	reason := strings.TrimSpace(reasonInput)
+	reason, _ := readLine(reader)
 
 	return accepted, reason
 }
 
 func (ui *TerminalUI) GetChunkChannel() chan<- workspace.NodeChunk {
-	// The standard CLI does not currently multiplex concurrent agent text streams to the terminal.
-	// It relies on the post-execution diffs and flow summaries.
 	return nil
 }

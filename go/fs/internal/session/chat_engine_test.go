@@ -136,15 +136,21 @@ func (flow *ceTestFlow) Next(state flows.FlowState) flows.FlowDirective {
 	return flows.FlowDirective{Action: flows.ActionFinish}
 }
 
-func scaffoldChat(workspaceRoot, spaceID, chatID string) {
+func scaffoldChat(t *testing.T, workspaceRoot, spaceID, chatID string) {
+	t.Helper()
 	metaPath := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
-	_ = os.MkdirAll(metaPath, 0755)
+	if err := os.MkdirAll(metaPath, 0755); err != nil {
+		t.Fatalf("failed to create chat meta dir: %v", err)
+	}
 
 	metaJSON := fmt.Sprintf(`{"id":"%s", "name":"%s", "active_branch": "main"}`, chatID, chatID)
-	_ = os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(metaJSON), 0644)
+	if err := os.WriteFile(filepath.Join(metaPath, "meta.json"), []byte(metaJSON), 0644); err != nil {
+		t.Fatalf("failed to write meta.json: %v", err)
+	}
 }
 
 func setupEngineTest(t *testing.T, chatID string) (*session.Manager, *session.ChatSession, *workspace.ServiceManager, *workspace.Service, *ceTestModelClient, string, *config.Registry) {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
 	spaceID := "test-space"
@@ -154,14 +160,22 @@ func setupEngineTest(t *testing.T, chatID string) (*session.Manager, *session.Ch
 	if err != nil {
 		t.Fatalf("failed to init badger: %v", err)
 	}
-	t.Cleanup(func() { graphDB.Close() })
+	t.Cleanup(func() {
+		if closeErr := graphDB.Close(); closeErr != nil {
+			t.Errorf("failed closing badger graph: %v", closeErr)
+		}
+	})
 
 	emitter := &ceTestEmitter{}
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &ceTestChatEngine{} }, graphDB, emitter)
-	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
-	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" })
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755); err != nil {
+		t.Fatalf("failed creating space dir: %v", err)
+	}
+	if err := svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("failed updating space state: %v", err)
+	}
 
-	scaffoldChat(workspaceRoot, spaceID, chatID)
+	scaffoldChat(t, workspaceRoot, spaceID, chatID)
 
 	registry := config.NewRegistry()
 	mockSpace := &ceTestThinkSpace{}
@@ -203,10 +217,12 @@ func TestChatEngine_Run_Sequencing(t *testing.T) {
 	chatID := "chat-seq"
 	_, chatSession, svcManager, _, client, spaceID, _ := setupEngineTest(t, chatID)
 
-	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+	if err := svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
 		s.ReviewPolicy.MinTokens = 1
-	})
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
 
 	client.responses = []llm.StreamChunk{{Text: "Test standard response"}}
 	ui := &ceTestUI{reviewApproved: true}
@@ -232,10 +248,12 @@ func TestChatEngine_Run_Transition(t *testing.T) {
 	chatID := "chat-trans"
 	_, chatSession, svcManager, workspaceService, client, spaceID, _ := setupEngineTest(t, chatID)
 
-	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+	if err := svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
 		s.ReviewPolicy.MinTokens = 1
-	})
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
 
 	client.responses = []llm.StreamChunk{
 		{
@@ -267,7 +285,6 @@ func TestChatEngine_Run_Transition(t *testing.T) {
 		t.Errorf("Expected chat to transition to 'concept', got '%s'", meta.ActiveThinkState)
 	}
 
-	// 1. Verify main timeline has no EventSystem nodes
 	chatData, err := chatSession.GetGraphData(ctx)
 	if err != nil {
 		t.Fatalf("Failed to fetch graph data: %v", err)
@@ -279,7 +296,6 @@ func TestChatEngine_Run_Transition(t *testing.T) {
 		}
 	}
 
-	// 2. Verify prompt node was mutated with transition metadata
 	var promptNode *thinkgraph.Node
 	for _, n := range chatData.Timeline {
 		if n.Type == thinkgraph.EventPrompt {
@@ -294,9 +310,11 @@ func TestChatEngine_Run_Transition(t *testing.T) {
 		t.Errorf("Expected prompt metadata to have transitioned_to='concept', got %v", promptNode.Metadata)
 	}
 
-	// 3. Verify transition event was logged to dedicated 'system' subgraph via GetSystemAddress
 	sysAddr := chatSession.GetSystemAddress()
-	sysTimeline, _ := workspaceService.Graph().GetSubGraphTimeline(ctx, sysAddr, sysAddr.GraphID)
+	sysTimeline, err := workspaceService.Graph().GetSubGraphTimeline(ctx, sysAddr, sysAddr.GraphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
 	foundSysEvent := false
 	for _, n := range sysTimeline {
 		if n.Type == thinkgraph.EventSystem && strings.Contains(n.Content, "Workspace transitioned to concept") {
@@ -308,7 +326,6 @@ func TestChatEngine_Run_Transition(t *testing.T) {
 		t.Errorf("Expected EventSystem node in 'system' subgraph")
 	}
 
-	// 4. Verify Catalyst remained the original prompt across the transition reboot
 	if client.lastRequest.Trajectory.Catalyst.Content != "Let's plan" {
 		t.Errorf("Expected Catalyst to be 'Let's plan', got '%s'", client.lastRequest.Trajectory.Catalyst.Content)
 	}
@@ -317,19 +334,22 @@ func TestChatEngine_Run_Transition(t *testing.T) {
 func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 	ctx := context.Background()
 	chatID := "chat-context"
-	turnManager, chatSession, svcManager, workspaceService, client, spaceID, _ := setupEngineTest(t, chatID)
-	_ = turnManager
+	_, chatSession, svcManager, workspaceService, client, spaceID, _ := setupEngineTest(t, chatID)
 
-	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+	if err := svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
 		s.ReviewPolicy.MinTokens = 1
-	})
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
 
 	ui := &ceTestUI{reviewApproved: true}
 	emitter := &ceTestEmitter{}
 
 	client.responses = []llm.StreamChunk{{Text: "Initialized"}}
-	_ = chatSession.RunTurn(ctx, "initialize", ui, emitter)
+	if err := chatSession.RunTurn(ctx, "initialize", ui, emitter); err != nil {
+		t.Fatalf("initial RunTurn failed: %v", err)
+	}
 
 	chatData, err := chatSession.GetGraphData(ctx)
 	if err != nil {
@@ -349,11 +369,13 @@ func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 		},
 	}
 
-	_ = workspaceService.Dispatcher().SaveSpaceContext(ctx, address, thinkgraph.SpaceContext{
+	if err := workspaceService.Dispatcher().SaveSpaceContext(ctx, address, thinkgraph.SpaceContext{
 		ID:      uuid.NewV7(),
 		Content: "Always use PostgreSQL.",
 		Tags:    []string{"database"},
-	})
+	}); err != nil {
+		t.Fatalf("SaveSpaceContext failed: %v", err)
+	}
 
 	priorNode := thinkgraph.Node{
 		Event: thinkgraph.Event{
@@ -365,11 +387,15 @@ func TestChatEngine_SpaceContextAssembly(t *testing.T) {
 			GraphID:   activeGraphID,
 		},
 	}
-	_ = svcManager.GraphRepository().AppendNode(ctx, address, priorNode)
+	if err := svcManager.GraphRepository().AppendNode(ctx, address, priorNode); err != nil {
+		t.Fatalf("AppendNode failed: %v", err)
+	}
 
 	client.responses = []llm.StreamChunk{{Text: "Ok"}}
 
-	_ = chatSession.RunTurn(ctx, "Build database", ui, emitter)
+	if err := chatSession.RunTurn(ctx, "Build database", ui, emitter); err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
 
 	foundRule := false
 	for _, memory := range client.lastRequest.Trajectory.LongTermMemory {
@@ -389,10 +415,12 @@ func TestChatEngine_Run_BypassesReviewOnLowTokenThreshold(t *testing.T) {
 	chatID := "chat-bypass-threshold"
 	_, chatSession, svcManager, _, client, spaceID, _ := setupEngineTest(t, chatID)
 
-	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+	if err := svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
 		s.ReviewPolicy.MinTokens = 5000
-	})
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
 
 	client.responses = []llm.StreamChunk{{Text: "Hello there!"}}
 	ui := &ceTestUI{reviewApproved: false}
@@ -413,10 +441,12 @@ func TestChatEngine_Run_BypassesReviewWhenDisabledGlobally(t *testing.T) {
 	chatID := "chat-bypass-disabled"
 	_, chatSession, svcManager, _, client, spaceID, _ := setupEngineTest(t, chatID)
 
-	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+	if err := svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = false
 		s.ReviewPolicy.MinTokens = 1
-	})
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
 
 	client.responses = []llm.StreamChunk{{Text: "Direct generation"}}
 	ui := &ceTestUI{reviewApproved: false}
@@ -438,28 +468,37 @@ func TestChatEngine_IntakeBootAndContextInjection(t *testing.T) {
 
 	_, _, serviceManager, _, client, spaceID, registry := setupEngineTest(t, chatID)
 
-	_ = serviceManager.UpdateChatMeta(spaceID, chatID, func(m *workspace.ChatMeta) {
+	if err := serviceManager.UpdateChatMeta(spaceID, chatID, func(m *workspace.ChatMeta) {
 		m.ActiveThinkState = ""
-	})
-	_ = serviceManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) {
+	}); err != nil {
+		t.Fatalf("UpdateChatMeta failed: %v", err)
+	}
+	if err := serviceManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) {
 		s.ThinkState = ""
-	})
+	}); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	digestManager := session.NewDigestManager(logger, client, session.DigestConfig{})
 
-	chatSession, _ := session.NewChatSession(ctx, logger, registry, serviceManager, client, &ceTestFlow{}, digestManager, spaceID, chatID)
+	chatSession, err := session.NewChatSession(ctx, logger, registry, serviceManager, client, &ceTestFlow{}, digestManager, spaceID, chatID)
+	if err != nil {
+		t.Fatalf("NewChatSession failed: %v", err)
+	}
 
 	client.responses = []llm.StreamChunk{{Text: "Hello there."}}
 	ui := &ceTestUI{reviewApproved: true}
 	emitter := &ceTestEmitter{}
 
-	err := chatSession.RunTurn(ctx, "hi", ui, emitter)
-	if err != nil {
+	if err := chatSession.RunTurn(ctx, "hi", ui, emitter); err != nil {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
 
-	meta, _ := serviceManager.GetChatMeta(spaceID, chatID)
+	meta, err := serviceManager.GetChatMeta(spaceID, chatID)
+	if err != nil {
+		t.Fatalf("GetChatMeta failed: %v", err)
+	}
 	if meta.ActiveThinkState != "intake" {
 		t.Errorf("Expected ActiveThinkState to default to 'intake', got '%s'", meta.ActiveThinkState)
 	}
@@ -475,10 +514,12 @@ func TestChatEngine_ContextReview_Retentions(t *testing.T) {
 	chatID := "chat-retention"
 	_, chatSession, svcManager, _, client, spaceID, _ := setupEngineTest(t, chatID)
 
-	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+	if err := svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
 		s.ReviewPolicy.MinTokens = 1
-	})
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
 
 	client.responses = []llm.StreamChunk{
 		{Text: "First response"},
@@ -496,7 +537,9 @@ func TestChatEngine_ContextReview_Retentions(t *testing.T) {
 		retainedHistoryIndices: []int{0, 2},
 	}
 
-	_ = chatSession.RunTurn(ctx, "New task", ui, emitter)
+	if err := chatSession.RunTurn(ctx, "New task", ui, emitter); err != nil {
+		t.Fatalf("Second turn failed: %v", err)
+	}
 
 	if len(client.lastRequest.Trajectory.WorkingMemory) != 1 {
 		t.Errorf("Expected working memory to be fully pruned down to retained index, got %d items", len(client.lastRequest.Trajectory.WorkingMemory))
@@ -514,10 +557,12 @@ func TestChatEngine_ContextReview_AbortOnMissingCatalyst(t *testing.T) {
 	chatID := "chat-abort"
 	_, chatSession, svcManager, _, client, spaceID, _ := setupEngineTest(t, chatID)
 
-	_ = svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+	if err := svcManager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = true
 		s.ReviewPolicy.MinTokens = 1
-	})
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
 
 	client.responses = []llm.StreamChunk{{Text: "This should not be called"}}
 

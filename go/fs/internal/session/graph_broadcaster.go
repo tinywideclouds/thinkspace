@@ -6,14 +6,13 @@ import (
 
 	"uuid"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
 // GraphStreamer is the minimal UI capability needed to push graph node updates.
-type GraphStreamer interface {
-	StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
-}
+type GraphStreamer = signals.GraphStreamer
 
 // GraphBroadcaster coordinates dual-write graph persistence (Ledger + BadgerGraph)
 // with immediate UI node streaming.
@@ -113,7 +112,13 @@ func (b *GraphBroadcaster) StreamNode(
 	}
 
 	nodes, err := b.graph.GetNodes(ctx, address, []string{nodeID.String()})
-	if err == nil && len(nodes) > 0 {
+	if err != nil {
+		if b.logger != nil {
+			b.logger.WarnContext(ctx, "failed to fetch node for UI streaming", "node_id", nodeID, "error", err)
+		}
+		return
+	}
+	if len(nodes) > 0 {
 		streamer.StreamGraphEvent(address, nodes[0])
 	}
 }

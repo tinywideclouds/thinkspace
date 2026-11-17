@@ -34,7 +34,7 @@ func NewGraphID(prefix GraphPrefix) GraphID {
 // ParseGraphID safely reconstructs a GraphID from its string representation.
 func ParseGraphID(s string) (GraphID, error) {
 	parts := strings.SplitN(s, ":", 2)
-	if len(parts) != 2 {
+	if len(parts) != 2 || parts[0] == "" {
 		return GraphID{}, fmt.Errorf("invalid GraphID format: missing prefix delimiter")
 	}
 

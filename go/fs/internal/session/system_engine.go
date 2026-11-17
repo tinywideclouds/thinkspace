@@ -74,7 +74,8 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 
 	e.session.Meta.ActiveThinkState = targetThinkState
 	if err := e.session.flushMetaLocked(); err != nil {
-		e.logger.WarnContext(ctx, "failed to flush meta after domain transition", "error", err)
+		e.session.mu.Unlock()
+		return nil, fmt.Errorf("persisting domain transition in chat meta: %w", err)
 	}
 	e.session.mu.Unlock()
 
@@ -93,7 +94,7 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 	sysAddress := e.session.GetSystemAddress()
 	sysEv := thinkgraph.NewEvent(thinkgraph.EventSystem, fmt.Sprintf("Workspace transitioned to %s", targetThinkState))
 	if err := e.broadcaster.AppendAndStream(ctx, sysAddress, sysEv, nil); err != nil {
-		e.logger.WarnContext(ctx, "failed appending transition system event", "error", err)
+		return nil, fmt.Errorf("appending transition system event: %w", err)
 	}
 
 	if catalystID != uuid.Nil() {
@@ -104,7 +105,9 @@ func (e *SystemEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddr
 		mut.Type = thinkgraph.MutationMetadata
 		mut.Timestamp = time.Now().UTC()
 
-		_ = e.broadcaster.MutateAndStream(ctx, address, mut, catalystID, ui)
+		if err := e.broadcaster.MutateAndStream(ctx, address, mut, catalystID, ui); err != nil {
+			return nil, fmt.Errorf("mutating catalyst transition metadata: %w", err)
+		}
 	}
 
 	return &signals.SignalExecuteChat{}, nil

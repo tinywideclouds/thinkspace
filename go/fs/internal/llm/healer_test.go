@@ -1,6 +1,7 @@
 package llm_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +11,7 @@ import (
 )
 
 func TestCompositeHealer_TestData(t *testing.T) {
-	// We test the full pipeline assembled for the gemini-3.5-flash family
-	healer := llm.GetHealerForModel("gemini-3.5-flash")
+	healer := llm.GetHealerForModel("gemini-4-hydrogen")
 	if healer == nil {
 		t.Fatalf("Expected a configured composite healer, got nil")
 	}
@@ -54,5 +54,43 @@ func TestCompositeHealer_TestData(t *testing.T) {
 				t.Errorf("Healer output mismatch.\nExpected:\n%s\nGot:\n%s", expectedStr, healedStr)
 			}
 		})
+	}
+}
+
+func TestCompositeHealer_ModelAgnosticAndBackslashSpace(t *testing.T) {
+	models := []string{"gemini-4-hydrogen", "gemini-3.8-flash", "custom-model-v1", ""}
+	raw := "```json\n{\"thought\":\"Fixing spacing\",\"patches\":[{\"file\":\"src/main.go\",\"action\":\"full_replace\",\"code\":\"package main\\n// comment\\ with backslash space\"}]}\n```"
+
+	for _, model := range models {
+		t.Run("model_"+model, func(t *testing.T) {
+			healer := llm.GetHealerForModel(model)
+			if healer == nil {
+				t.Fatalf("expected non-nil healer for model %q", model)
+			}
+
+			healed, modified := healer.Heal(raw)
+			if !modified {
+				t.Errorf("expected healer to sanitize markdown fences and backslash-space escape")
+			}
+
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(healed), &parsed); err != nil {
+				t.Fatalf("expected healed JSON to unmarshal cleanly, got error: %v\nhealed:\n%s", err, healed)
+			}
+		})
+	}
+}
+
+func TestGoEscapeSanitizer_PreservesValidEscapedBackslashes(t *testing.T) {
+	sanitizer := &llm.GoEscapeSanitizer{}
+
+	// Valid JSON containing an escaped backslash followed by ')' (represents literal `\)` in Go regex)
+	validJSON := `{"pattern":"\\)","unicode":"\u0041","newline":"\n"}`
+	healed, modified := sanitizer.Heal(validJSON)
+	if modified {
+		t.Errorf("expected valid escaped backslash JSON not to be modified, got: %s", healed)
+	}
+	if healed != validJSON {
+		t.Errorf("expected %q, got %q", validJSON, healed)
 	}
 }

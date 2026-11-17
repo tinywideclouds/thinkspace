@@ -24,22 +24,24 @@ func NewContextProjecter() *ContextProjecter {
 }
 
 func (a *ContextProjecter) extractContent(node Node) string {
-	if len(node.Data) > 0 {
-		switch string(node.Type) {
-		case string(EventPrompt):
+	switch string(node.Type) {
+	case "flow_lifecycle":
+		return fmt.Sprintf("[System: A sub-agent flow is executing or completed. Result: %s]", node.Content)
+	case "candidate_resolution":
+		return fmt.Sprintf("[System: The user resolved a proposal. Result: %s]", node.Content)
+	case string(EventPrompt):
+		if len(node.Data) > 0 {
 			var p Prompt
 			if err := json.Unmarshal(node.Data, &p); err == nil && p.Content != "" {
 				return p.Content
 			}
-		case string(EventModel):
+		}
+	case string(EventModel):
+		if len(node.Data) > 0 {
 			var m ModelResponse
 			if err := json.Unmarshal(node.Data, &m); err == nil && m.Content != "" {
 				return m.Content
 			}
-		case "flow_lifecycle":
-			return fmt.Sprintf("[System: A sub-agent flow is executing or completed. Result: %s]", node.Content)
-		case "candidate_resolution":
-			return fmt.Sprintf("[System: The user resolved a proposal. Result: %s]", node.Content)
 		}
 	}
 	return node.Content
@@ -63,13 +65,15 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 
 	trajectory.LongTermMemory = append(trajectory.LongTermMemory, metadata.String())
 
-	for _, sc := range req.Manifest.SpaceContexts {
-		trajectory.LongTermMemory = append(trajectory.LongTermMemory, sc.Content)
-	}
+	if req.Manifest != nil {
+		for _, sc := range req.Manifest.SpaceContexts {
+			trajectory.LongTermMemory = append(trajectory.LongTermMemory, sc.Content)
+		}
 
-	for _, d := range req.Manifest.Digests {
-		if d.Promoted {
-			trajectory.LongTermMemory = append(trajectory.LongTermMemory, d.Summary)
+		for _, d := range req.Manifest.Digests {
+			if d.Promoted {
+				trajectory.LongTermMemory = append(trajectory.LongTermMemory, d.Summary)
+			}
 		}
 	}
 

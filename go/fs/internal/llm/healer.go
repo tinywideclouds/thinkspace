@@ -1,11 +1,17 @@
 package llm
 
 import (
+	"log/slog"
 	"regexp"
 	"strings"
 )
 
-// ResponseHealer defines middleware to correct known model-specific hallucination or syntax errors.
+var (
+	jsonBoundaryAnchoredRegex = regexp.MustCompile(`(?s)\{\s*"(thought|patches|digests)"\s*:.*}`)
+	jsonEscapeTokenRegex      = regexp.MustCompile(`\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}|(.))`)
+)
+
+// ResponseHealer defines middleware to correct known model hallucination or syntax errors.
 type ResponseHealer interface {
 	Heal(raw string) (string, bool)
 }
@@ -50,19 +56,15 @@ type JSONBoundaryExtractor struct{}
 
 func (h *JSONBoundaryExtractor) Heal(raw string) (string, bool) {
 	trimmed := strings.TrimSpace(raw)
-	// If it already looks like a pure JSON object, skip heavy regex.
 	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
 		return raw, false
 	}
 
-	// Use a strict anchor to our domain keys to avoid crashing on stray brackets in conversational text
-	re := regexp.MustCompile(`(?s)\{\s*"(thought|patches)"\s*:.*}`)
-	match := re.FindString(raw)
+	match := jsonBoundaryAnchoredRegex.FindString(raw)
 	if match != "" {
 		return match, true
 	}
 
-	// Absolute fallback
 	start := strings.Index(raw, "{")
 	end := strings.LastIndex(raw, "}")
 	if start != -1 && end != -1 && end > start {
@@ -72,36 +74,40 @@ func (h *JSONBoundaryExtractor) Heal(raw string) (string, bool) {
 	return raw, false
 }
 
-// GoEscapeSanitizer fixes invalid JSON escapes commonly hallucinated inside Go code strings (e.g., `\)`).
+// GoEscapeSanitizer fixes invalid JSON escapes commonly hallucinated inside Go code strings (e.g., `\)` or `\ `)
+// while preserving valid escapes such as `\\`, `\n`, `\t`, `\"`, and `\uXXXX`.
 type GoEscapeSanitizer struct{}
 
 func (h *GoEscapeSanitizer) Heal(raw string) (string, bool) {
-	re := regexp.MustCompile(`\\([^"\\/bfnrtu])`)
-	sanitized := re.ReplaceAllString(raw, "$1")
+	modified := false
+	sanitized := jsonEscapeTokenRegex.ReplaceAllStringFunc(raw, func(match string) string {
+		// Valid 2-char escape (\\, \", \/, \b, \f, \n, \r, \t) or \uXXXX
+		if len(match) == 6 || strings.ContainsRune(`"\/bfnrt`, rune(match[1])) {
+			return match
+		}
+		modified = true
+		return match[1:]
+	})
 
-	if sanitized != raw {
-		return sanitized, true
+	return sanitized, modified
+}
+
+// DefaultJSONHealer returns the standard model-agnostic JSON response healing pipeline.
+func DefaultJSONHealer() ResponseHealer {
+	return CompositeHealer{
+		&MarkdownBlockExtractor{},
+		&JSONBoundaryExtractor{},
+		&GoEscapeSanitizer{},
 	}
-	return raw, false
 }
 
 // --- Factory ---
 
-// GetHealerForModel composes a specific pipeline of heuristics based on the model family.
+// GetHealerForModel composes the JSON response healing pipeline for a configured model.
+// If no model name is provided, it logs a warning and still returns the default JSON healer.
 func GetHealerForModel(modelName string) ResponseHealer {
-	var pipeline CompositeHealer
-
-	// Generic JSON extraction applies to almost all current instruction-tuned models
-	pipeline = append(pipeline, &MarkdownBlockExtractor{})
-	pipeline = append(pipeline, &JSONBoundaryExtractor{})
-
-	// Gemini family has specific quirks with Go string escapes
-	if strings.Contains(modelName, "gemini") || strings.Contains(modelName, "test-worker") {
-		pipeline = append(pipeline, &GoEscapeSanitizer{})
+	if strings.TrimSpace(modelName) == "" {
+		slog.Warn("GetHealerForModel called with empty model name; falling back to default JSON healer")
 	}
-
-	if len(pipeline) > 0 {
-		return pipeline
-	}
-	return nil
+	return DefaultJSONHealer()
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,10 @@ import (
 
 // ApplyDevSkeleton provisions the physical directory structure and metadata directly via the ServiceManager.
 func ApplyDevSkeleton(logger *slog.Logger, manager *workspace.ServiceManager) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	skeleton, err := GetEmbeddedSkeleton()
 	if err != nil {
 		logger.Error("Failed to parse embedded skeleton file", "error", err)
@@ -29,7 +34,7 @@ func ApplyDevSkeleton(logger *slog.Logger, manager *workspace.ServiceManager) {
 	}
 
 	metaPath := filepath.Join(chatDir, "meta.json")
-	if _, err := os.Stat(metaPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(metaPath); errors.Is(statErr, os.ErrNotExist) {
 		meta := workspace.ChatMeta{
 			ID:               skeleton.Chat,
 			Name:             skeleton.Chat,
@@ -45,10 +50,12 @@ func ApplyDevSkeleton(logger *slog.Logger, manager *workspace.ServiceManager) {
 		} else {
 			logger.Error("Failed to marshal skeleton meta.json", "error", err)
 		}
+	} else if statErr != nil {
+		logger.Error("Failed checking skeleton meta.json", "error", statErr)
 	}
 
 	settingsPath := filepath.Join(spaceDir, "settings.json")
-	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(settingsPath); errors.Is(statErr, os.ErrNotExist) {
 		settings := workspace.SpaceSettings{
 			ReviewPolicy: workspace.ReviewPolicySettings{
 				Active:    true,
@@ -63,6 +70,8 @@ func ApplyDevSkeleton(logger *slog.Logger, manager *workspace.ServiceManager) {
 		} else {
 			logger.Error("Failed to marshal skeleton settings.json", "error", err)
 		}
+	} else if statErr != nil {
+		logger.Error("Failed checking skeleton settings.json", "error", statErr)
 	}
 
 	if err := manager.UpdateSpaceState(skeleton.Space, func(state *workspace.SpaceState) {

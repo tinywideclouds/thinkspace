@@ -67,27 +67,6 @@ func NewWorkerEngine(
 	}
 }
 
-func (engine *WorkerEngine) persistFlowState(
-	ctx context.Context,
-	chatSession *thinkgraph.ChatAddress,
-	flowNodeID uuid.UUID,
-	state flows.FlowExecutionState,
-	ui UserInterface,
-) {
-	stateBytes, err := json.Marshal(state)
-	if err != nil {
-		engine.logger.ErrorContext(ctx, "failed to marshal flow execution state", "error", err)
-		return
-	}
-
-	stateMut := thinkgraph.StateMutation{State: stateBytes}
-	stateMut.TargetID = flowNodeID
-	stateMut.Type = thinkgraph.MutationState
-	stateMut.Timestamp = time.Now().UTC()
-
-	_ = engine.broadcaster.MutateAndStream(ctx, chatSession, stateMut, flowNodeID, ui)
-}
-
 func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, signal signals.EngineSignal, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
 	sig, ok := signal.(*signals.SignalDispatchFlow)
 	if !ok {
@@ -126,6 +105,16 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 		},
 	}
 
+	scope := NewFlowScope(engine.logger, engine.service, engine.broadcaster, chatSession, flowAddress, flowID)
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			if finalizeErr := scope.Finalize(ctx, "Flow terminated"); finalizeErr != nil && engine.logger != nil {
+				engine.logger.ErrorContext(ctx, "failed to finalize flow scope", "error", finalizeErr)
+			}
+		}
+	}()
+
 	var joinNodeID uuid.UUID
 	var optionsNodeID uuid.UUID
 	var latestRecords []flows.AgentRecord
@@ -154,7 +143,7 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 				return nil, fmt.Errorf("failed to initialize flow anchor in graph: %w", err)
 			}
 
-			candidates, returnedJoinID, records, err := engine.spawnAgents(ctx, chatSession, flowAddress, space, flowContext, directive.Tasks, turnID, ui, emitter)
+			candidates, returnedJoinID, records, err := engine.spawnAgents(ctx, chatSession, flowAddress, scope, space, flowContext, directive.Tasks, turnID, ui, emitter)
 			if err != nil {
 				return nil, err
 			}
@@ -166,18 +155,22 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 			yieldEv := thinkgraph.NewEvent(thinkgraph.EventSystem, "Awaiting delegation strategy selection...")
 			yieldEv.Edges = map[string]string{"parent_id": joinNodeID.String()}
 			if err := engine.broadcaster.AppendAndStream(ctx, chatSession, yieldEv, ui); err != nil {
-				engine.logger.ErrorContext(ctx, "failed to append strategy request event", "error", err)
+				return nil, fmt.Errorf("appending strategy request event: %w", err)
 			}
 
 			optionsNodeID = yieldEv.ID
-			strategy, autoAccept := ui.ChooseNextStep()
+			strategy := flows.StrategySkip
+			autoAccept := false
+			if ui != nil {
+				strategy, autoAccept = ui.ChooseNextStep()
+			}
 			state.UserStrategy = strategy
 			state.AutoAccept = autoAccept
 
 			stratEv := thinkgraph.NewEvent(thinkgraph.EventSystem, fmt.Sprintf("Strategy selected: %s (auto_accept=%v)", strategy, autoAccept))
 			stratEv.Edges = map[string]string{"parent_id": optionsNodeID.String()}
 			if err := engine.broadcaster.AppendAndStream(ctx, chatSession, stratEv, ui); err != nil {
-				engine.logger.ErrorContext(ctx, "failed to append strategy choice event", "error", err)
+				return nil, fmt.Errorf("appending strategy choice event: %w", err)
 			}
 
 		case flows.ActionSynthesize:
@@ -197,6 +190,7 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 			signal := &signals.SignalSynthesize{
 				OriginalInstruction: directive.Tasks[0].Instruction,
 				Candidates:          state.Candidates,
+				Flow:                scope,
 				FlowAddress:         flowAddress,
 				ParentNodeID:        optionsNodeID,
 				AutoAccept:          directive.AutoAccept,
@@ -206,13 +200,14 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 				signal.OriginalContext = state.InitialTasks[0].ContextDigest
 			}
 
+			handedOff = true
 			return signal, nil
 
 		case flows.ActionManualReview:
 			yieldEv := thinkgraph.NewEvent(thinkgraph.EventSystem, "Awaiting manual review of candidate branches...")
 			yieldEv.Edges = map[string]string{"parent_id": joinNodeID.String()}
 			if err := engine.broadcaster.AppendAndStream(ctx, chatSession, yieldEv, ui); err != nil {
-				engine.logger.ErrorContext(ctx, "failed to append manual review request event", "error", err)
+				return nil, fmt.Errorf("appending manual review request event: %w", err)
 			}
 
 			acceptedCount := 0
@@ -220,12 +215,11 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 				accepted := false
 				var userReason string
 				if ui != nil {
-					accepted, userReason = ui.ReviewCandidate(cand.CandidateID)
+					accepted, userReason = ui.ReviewCandidate(cand.BranchRef())
 				}
 				if accepted {
 					acceptedCount++
 				}
-				branchName := strings.TrimPrefix(cand.CandidateID, "candidate/")
 				reason := strings.TrimSpace(userReason)
 				if reason == "" {
 					if accepted {
@@ -234,38 +228,37 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 						reason = "Rejected via manual review"
 					}
 				}
-				if err := engine.service.ResolveCandidate(ctx, chatSession, branchName, accepted, reason); err != nil {
-					engine.logger.ErrorContext(ctx, "failed to resolve candidate manually", "error", err, "candidate", branchName)
+				if err := scope.ResolveCandidate(ctx, cand.ID, accepted, reason); err != nil {
+					return nil, fmt.Errorf("resolving candidate %s manually: %w", cand.ID, err)
 				}
 			}
 
 			if acceptedCount > 0 {
-				engine.persistFlowState(ctx, chatSession, flowAddress.GraphID.UUID, flows.FlowExecutionState{
-					Status:  flows.FlowStatusCompleted,
-					Summary: fmt.Sprintf("Accepted %d candidate branch(es) via manual review.", acceptedCount),
-					Agents:  latestRecords,
-				}, ui)
+				if err := scope.Complete(ctx, fmt.Sprintf("Accepted %d candidate branch(es) via manual review.", acceptedCount), latestRecords, ui); err != nil {
+					return nil, err
+				}
 			} else {
-				engine.persistFlowState(ctx, chatSession, flowAddress.GraphID.UUID, flows.FlowExecutionState{
-					Status:  flows.FlowStatusFailed,
-					Summary: "All candidate branches were rejected during manual review.",
-					Agents:  latestRecords,
-				}, ui)
+				if err := scope.Fail(ctx, "All candidate branches were rejected during manual review.", "", latestRecords, ui); err != nil {
+					return nil, err
+				}
 			}
 
 			return &signals.SignalTerminal{}, nil
 
 		case flows.ActionFinish:
+			if err := scope.Finalize(ctx, "Skipped by user"); err != nil {
+				return nil, fmt.Errorf("finalizing skipped flow candidates: %w", err)
+			}
+			if err := scope.Complete(ctx, "Flow skipped by user.", latestRecords, ui); err != nil {
+				return nil, err
+			}
 			return &signals.SignalTerminal{}, nil
 
 		case flows.ActionError:
 			if directive.Error != nil {
-				engine.persistFlowState(ctx, chatSession, flowAddress.GraphID.UUID, flows.FlowExecutionState{
-					Status:  flows.FlowStatusFailed,
-					Summary: "Flow terminated with error.",
-					Error:   directive.Error.Error(),
-					Agents:  latestRecords,
-				}, ui)
+				if failErr := scope.Fail(ctx, "Flow terminated with error.", directive.Error.Error(), latestRecords, ui); failErr != nil && engine.logger != nil {
+					engine.logger.ErrorContext(ctx, "failed recording flow error state", "error", failErr)
+				}
 			}
 			return nil, directive.Error
 
@@ -281,14 +274,21 @@ func (engine *WorkerEngine) spawnAgents(
 	ctx context.Context,
 	chatSession *thinkgraph.ChatAddress,
 	flowAddress *thinkgraph.ChatAddress,
+	scope *FlowScope,
 	space spaces.ThinkState,
 	flowContext flows.FlowContext,
 	tasks []flows.SubAgentTask,
 	managerNodeID uuid.UUID,
 	ui UserInterface,
 	emitter telemetry.Emitter,
-) ([]flows.BranchResult, uuid.UUID, []flows.AgentRecord, error) {
-	engine.logger.InfoContext(ctx, "WorkerEngine spawning agents", "flow_id", flowContext.FlowID, "manager_node_id_parent", managerNodeID, "task_count", len(tasks))
+) ([]flows.Candidate, uuid.UUID, []flows.AgentRecord, error) {
+	if len(tasks) == 0 {
+		return nil, uuid.Nil(), nil, fmt.Errorf("spawnAgents called with empty task list")
+	}
+
+	if engine.logger != nil {
+		engine.logger.InfoContext(ctx, "WorkerEngine spawning agents", "flow_id", flowContext.FlowID, "manager_node_id_parent", managerNodeID, "task_count", len(tasks))
+	}
 
 	if emitter != nil {
 		emitter.Emit("manager", telemetry.Event{
@@ -305,7 +305,7 @@ func (engine *WorkerEngine) spawnAgents(
 		})
 	}
 
-	var branches []flows.BranchResult
+	var candidates []flows.Candidate
 	var records []flows.AgentRecord
 	var errMsgs []string
 	var joinEdges []string
@@ -318,11 +318,9 @@ func (engine *WorkerEngine) spawnAgents(
 		})
 	}
 
-	engine.persistFlowState(ctx, chatSession, flowAddress.GraphID.UUID, flows.FlowExecutionState{
-		Status:  flows.FlowStatusRunning,
-		Summary: "Agents initializing...",
-		Agents:  records,
-	}, ui)
+	if err := scope.SetRunning(ctx, "Agents initializing...", records, ui); err != nil {
+		return nil, uuid.Nil(), records, err
+	}
 
 	results := make(chan SubAgentResult, len(tasks))
 
@@ -331,6 +329,7 @@ func (engine *WorkerEngine) spawnAgents(
 			results <- engine.runner.Run(ctx, SubAgentRunRequest{
 				ChatSession:  chatSession,
 				FlowAddress:  flowAddress,
+				Scope:        scope,
 				Space:        space,
 				FlowContext:  flowContext,
 				Task:         t,
@@ -347,13 +346,7 @@ func (engine *WorkerEngine) spawnAgents(
 		if res.Err != nil {
 			errMsgs = append(errMsgs, res.Err.Error())
 		} else {
-			branches = append(branches, flows.BranchResult{
-				CandidateID: res.CandidateID,
-				Passed:      res.Passed,
-				Trace:       res.Trace,
-				RawPayload:  res.Record.RawPayload,
-				Instruction: res.Record.Instruction,
-			})
+			candidates = append(candidates, res.Candidate)
 			for j := range records {
 				if records[j].AgentID == res.Record.AgentID {
 					records[j] = res.Record
@@ -365,31 +358,26 @@ func (engine *WorkerEngine) spawnAgents(
 			}
 		}
 
-		engine.persistFlowState(ctx, chatSession, flowAddress.GraphID.UUID, flows.FlowExecutionState{
-			Status:  flows.FlowStatusRunning,
-			Summary: "Agents executing...",
-			Agents:  records,
-		}, ui)
+		if err := scope.SetRunning(ctx, "Agents executing...", records, ui); err != nil {
+			return nil, uuid.Nil(), records, err
+		}
 	}
 
 	if len(errMsgs) > 0 {
 		combinedErr := strings.Join(errMsgs, " ; ")
-		engine.persistFlowState(ctx, chatSession, flowAddress.GraphID.UUID, flows.FlowExecutionState{
-			Status:  flows.FlowStatusFailed,
-			Summary: "Flow aborted due to system error.",
-			Error:   combinedErr,
-			Agents:  records,
-		}, ui)
+		if failErr := scope.Fail(ctx, "Flow aborted due to system error.", combinedErr, records, ui); failErr != nil && engine.logger != nil {
+			engine.logger.ErrorContext(ctx, "failed recording flow abort state", "error", failErr)
+		}
 		return nil, uuid.Nil(), records, fmt.Errorf("fatal system errors aborted execution: %s", combinedErr)
 	}
 
 	passedCount := 0
 	var failedTraces []string
-	for _, b := range branches {
-		if b.Passed {
+	for _, c := range candidates {
+		if c.Passed {
 			passedCount++
-		} else if strings.TrimSpace(b.Trace) != "" {
-			failedTraces = append(failedTraces, fmt.Sprintf("[%s]\n%s", b.CandidateID, b.Trace))
+		} else if strings.TrimSpace(c.Trace) != "" {
+			failedTraces = append(failedTraces, fmt.Sprintf("[%s]\n%s", c.BranchRef(), c.Trace))
 		}
 	}
 
@@ -397,19 +385,26 @@ func (engine *WorkerEngine) spawnAgents(
 	var statePayload flows.FlowExecutionState
 
 	if passedCount == 0 {
-		joinSummary = fmt.Sprintf("Generated %d candidate branch(es), but verification failed. Candidate available for review.", len(branches))
+		joinSummary = fmt.Sprintf("Generated %d candidate branch(es), but verification failed. Candidate available for review.", len(candidates))
+		errSummary := strings.Join(failedTraces, "\n\n")
 		statePayload = flows.FlowExecutionState{
 			Status:  flows.FlowStatusFailed,
 			Summary: joinSummary,
-			Error:   strings.Join(failedTraces, "\n\n"),
+			Error:   errSummary,
 			Agents:  records,
 		}
+		if err := scope.Fail(ctx, joinSummary, errSummary, records, ui); err != nil {
+			return nil, uuid.Nil(), records, err
+		}
 	} else {
-		joinSummary = fmt.Sprintf("Generated %d candidate branches (%d passed verification).", len(branches), passedCount)
+		joinSummary = fmt.Sprintf("Generated %d candidate branches (%d passed verification).", len(candidates), passedCount)
 		statePayload = flows.FlowExecutionState{
 			Status:  flows.FlowStatusCompleted,
 			Summary: joinSummary,
 			Agents:  records,
+		}
+		if err := scope.SetRunning(ctx, joinSummary, records, ui); err != nil {
+			return nil, uuid.Nil(), records, err
 		}
 	}
 
@@ -429,14 +424,12 @@ func (engine *WorkerEngine) spawnAgents(
 
 	if engine.broadcaster.dispatcher != nil {
 		if err := engine.broadcaster.dispatcher.AppendEvent(ctx, flowAddress, joinEvent); err != nil {
-			engine.logger.ErrorContext(ctx, "failed to append join event", "error", err)
+			return nil, uuid.Nil(), records, fmt.Errorf("appending flow join event: %w", err)
 		}
 	}
 	if ui != nil {
 		ui.StreamGraphEvent(flowAddress, thinkgraph.Node{Event: joinEvent, MaterializedState: stateBytes})
 	}
 
-	engine.persistFlowState(ctx, chatSession, flowAddress.GraphID.UUID, statePayload, ui)
-
-	return branches, joinEvent.ID, records, nil
+	return candidates, joinEvent.ID, records, nil
 }

@@ -31,6 +31,9 @@ func NewServer(
 	manager *workspace.ServiceManager,
 	turnManager *session.Manager,
 ) *Server {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Server{
 		logger:      logger,
 		registry:    registry,
@@ -49,8 +52,8 @@ func (server *Server) handleGetPreview(w http.ResponseWriter, r *http.Request) {
 	previewID := r.PathValue("preview_id")
 	spaceID := r.URL.Query().Get("space")
 
-	if spaceID == "" {
-		http.Error(w, "Missing space query parameter", http.StatusBadRequest)
+	if spaceID == "" || chatID == "" || previewID == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
 		return
 	}
 
@@ -100,9 +103,8 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		isConfigured := false
-		state, err := server.manager.GetSpaceState(id)
-
-		if err == nil && state.ThinkState != "" {
+		state, stateErr := server.manager.GetSpaceState(id)
+		if stateErr == nil && state.ThinkState != "" {
 			if _, ok := server.registry.GetThinkState(state.ThinkState); ok {
 				isConfigured = true
 			}
@@ -119,20 +121,21 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		server.logger.Error("Failed to marshal available spaces", "error", err)
 	} else {
-		if writeErr := connection.Write(ctx, websocket.MessageText, handshakeBytes); writeErr != nil {
-			server.logger.Warn("Failed writing available spaces handshake", "error", writeErr)
-		}
+		connectionManager.SendBytes(handshakeBytes)
 	}
 
 	go func() {
-		for chunk := range chunkChan {
-			streamBytes, err := MarshalChatStream(chunk)
-			if err != nil {
-				server.logger.Error("Failed marshaling chat stream", "error", err)
-				continue
-			}
-			if writeErr := connection.Write(ctx, websocket.MessageText, streamBytes); writeErr != nil {
-				server.logger.Warn("Failed streaming chunk to client", "error", writeErr)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case chunk := <-chunkChan:
+				streamBytes, err := MarshalChatStream(chunk)
+				if err != nil {
+					server.logger.Error("Failed marshaling chat stream", "error", err)
+					continue
+				}
+				connectionManager.SendBytes(streamBytes)
 			}
 		}
 	}()
@@ -153,19 +156,18 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		switch inbound.Type {
 		case "submit_prompt":
 			payload := inbound.SubmitPrompt
-
-			if payload.Text == "" {
+			if payload == nil || payload.Text == "" || payload.SpaceID == "" || payload.ChatID == "" {
 				continue
 			}
 
-			emitter := NewWebSocketEmitter(ctx, connection)
+			emitter := NewConnectionEmitter(connectionManager)
 			ui := NewTurnUI(connectionManager)
 
-			go func(promptText string) {
-				server.logger.Info("Starting RunTurn goroutine", "space_id", payload.SpaceID, "chat_id", payload.ChatID, "prompt", promptText)
+			go func(req SubmitPrompt) {
+				server.logger.Info("Starting RunTurn goroutine", "space_id", req.SpaceID, "chat_id", req.ChatID, "prompt", req.Text)
 
-				if err := server.turnManager.RunTurn(ctx, payload.SpaceID, payload.ChatID, promptText, ui, emitter); err != nil {
-					server.logger.Error("turn failed in execution", "space_id", payload.SpaceID, "chat_id", payload.ChatID, "error", err)
+				if err := server.turnManager.RunTurn(ctx, req.SpaceID, req.ChatID, req.Text, ui, emitter); err != nil {
+					server.logger.Error("turn failed in execution", "space_id", req.SpaceID, "chat_id", req.ChatID, "error", err)
 					emitter.Emit("system", telemetry.Event{
 						ID:        uuid.NewV7(),
 						Type:      "error",
@@ -173,12 +175,15 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 						Message:   fmt.Sprintf("System Error: %v", err),
 					})
 				} else {
-					server.logger.Info("Finished RunTurn goroutine successfully", "space_id", payload.SpaceID, "chat_id", payload.ChatID)
+					server.logger.Info("Finished RunTurn goroutine successfully", "space_id", req.SpaceID, "chat_id", req.ChatID)
 				}
-			}(payload.Text)
+			}(*payload)
 
 		case "load_history":
 			payload := inbound.LoadHistory
+			if payload == nil || payload.SpaceID == "" || payload.ChatID == "" {
+				continue
+			}
 
 			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
@@ -227,6 +232,9 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		case "load_sub_graph":
 			payload := inbound.LoadSubGraph
+			if payload == nil || payload.SpaceID == "" || payload.ChatID == "" || payload.GraphID == "" {
+				continue
+			}
 
 			var targetGraphID thinkgraph.GraphID
 			if strings.HasPrefix(payload.GraphID, "flow-") {
@@ -270,6 +278,9 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		case "fork_chat":
 			payload := inbound.ForkChat
+			if payload == nil || payload.SpaceID == "" || payload.ChatID == "" {
+				continue
+			}
 
 			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
@@ -313,14 +324,19 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed to get timeline after fork", "error", err)
 			} else {
 				coordinate := ProjectionCoordinate{SpaceID: payload.SpaceID, ChatID: payload.ChatID, ProjectionID: newBranchID}
-				syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore, coordinate)
-				if err == nil {
+				syncData, marshalErr := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore, coordinate)
+				if marshalErr != nil {
+					server.logger.Error("Failed to marshal fork sync history", "error", marshalErr)
+				} else {
 					connectionManager.SendBytes(syncData)
 				}
 			}
 
 		case "inline_edit":
 			payload := inbound.InlineEdit
+			if payload == nil || payload.SpaceID == "" || payload.ChatID == "" {
+				continue
+			}
 
 			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
@@ -352,6 +368,9 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		case "switch_branch":
 			payload := inbound.SwitchBranch
+			if payload == nil || payload.SpaceID == "" || payload.ChatID == "" || payload.TargetBranch == "" {
+				continue
+			}
 
 			chatSession, err := server.turnManager.GetSession(ctx, payload.SpaceID, payload.ChatID)
 			if err != nil {
@@ -383,28 +402,38 @@ func (server *Server) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				server.logger.Error("Failed getting timeline on switch branch", "error", err)
 			} else {
 				coordinate := ProjectionCoordinate{SpaceID: payload.SpaceID, ChatID: payload.ChatID, ProjectionID: payload.TargetBranch}
-				syncData, err := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore, coordinate)
-				if err == nil {
+				syncData, marshalErr := MarshalSyncHistory(events, nil, thinkgraph.AttentionFocus{}, nextCursor, hasMore, coordinate)
+				if marshalErr != nil {
+					server.logger.Error("Failed to marshal switch branch sync history", "error", marshalErr)
+				} else {
 					connectionManager.SendBytes(syncData)
 				}
 			}
 
 		case "select_strategy":
-			connectionManager.PushStrategy(inbound.SelectStrategy.StrategyID, inbound.SelectStrategy.AutoAccept)
+			if inbound.SelectStrategy != nil {
+				connectionManager.PushStrategy(inbound.SelectStrategy.StrategyID, inbound.SelectStrategy.AutoAccept)
+			}
 
 		case "review_decision":
-			connectionManager.PushReviewDecision(inbound.ReviewDecision.Accepted, inbound.ReviewDecision.Reason)
+			if inbound.ReviewDecision != nil {
+				connectionManager.PushReviewDecision(inbound.ReviewDecision.Accepted, inbound.ReviewDecision.Reason)
+			}
 
 		case "approve_context":
-			decision := session.ContextApprovalDecision{
-				Approved:               inbound.ApproveContext.Approved,
-				RetainedFilePaths:      inbound.ApproveContext.RetainedFilePaths,
-				RetainedHistoryIndices: inbound.ApproveContext.RetainedHistoryIndices,
+			if inbound.ApproveContext != nil {
+				decision := session.ContextApprovalDecision{
+					Approved:               inbound.ApproveContext.Approved,
+					RetainedFilePaths:      inbound.ApproveContext.RetainedFilePaths,
+					RetainedHistoryIndices: inbound.ApproveContext.RetainedHistoryIndices,
+				}
+				connectionManager.PushContextApproval(decision)
 			}
-			connectionManager.PushContextApproval(decision)
 
 		case "transition_decision":
-			connectionManager.PushTransitionDecision(inbound.TransitionDecision.Approved)
+			if inbound.TransitionDecision != nil {
+				connectionManager.PushTransitionDecision(inbound.TransitionDecision.Approved)
+			}
 		}
 	}
 }

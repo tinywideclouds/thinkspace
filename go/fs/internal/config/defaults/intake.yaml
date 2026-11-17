@@ -20,7 +20,7 @@ intake:
 
   roles:
     manager:
-      model: "gemini-3.6-flash"
+      model: "gemini-3.8-flash"
       system_prompt: |
         You are the Intake Coordinator.
         Evaluate the incoming user prompt against the available specialized environments:
@@ -30,7 +30,7 @@ intake:
         If the task clearly falls into one of these environments, invoke `transition_workspace` immediately.
 
     worker:
-      model: "gemini-3.5-flash"
+      model: "gemini-4-hydrogen"
       max_tokens: 4096
       system_prompt: |
         You are an intake assistant. Summarize introductory requirements if needed.

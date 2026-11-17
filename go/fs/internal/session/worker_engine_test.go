@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"uuid"
@@ -49,8 +50,11 @@ func (client *weMockModelClient) GenerateContentStream(
 }
 
 type weMockChatEngine struct {
+	mu           sync.Mutex
 	sandbox      *weMockSandbox
 	acceptCalled bool
+	rejectedIDs  []string
+	rejectReason string
 }
 
 func (m *weMockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
@@ -64,13 +68,21 @@ func (m *weMockChatEngine) ReadCandidateDiff(ctx context.Context, chatID string,
 	return "+ mock diff", nil
 }
 func (m *weMockChatEngine) Accept(ctx context.Context, chatID string, candidateID string, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.acceptCalled = true
 	return nil
 }
 func (m *weMockChatEngine) Reject(ctx context.Context, chatID string, candidateID string, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rejectedIDs = append(m.rejectedIDs, candidateID)
+	m.rejectReason = reason
 	return nil
 }
 func (m *weMockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.sandbox = &weMockSandbox{candidateID: candidateID}
 	return m.sandbox, nil
 }
@@ -170,6 +182,7 @@ func (u *weMockUI) ConfirmTransition(targetThinkState string, reasoning string) 
 func (u *weMockUI) GetChunkChannel() chan<- workspace.NodeChunk { return nil }
 
 func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
+	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &weMockChatEngine{}
 	workspaceRoot := t.TempDir()
@@ -197,15 +210,19 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
 		},
 	}
-	_ = service.InitializeChat(context.Background(), chatSession)
+	if err := service.InitializeChat(ctx, chatSession); err != nil {
+		t.Fatalf("InitializeChat failed: %v", err)
+	}
 
 	registry := config.NewRegistry()
 	mockSpace := &weMockThinkSpace{}
 	registry.RegisterThinkState("golang", mockSpace)
 	registry.RegisterConfig("golang", mockSpace.Config())
-	_ = svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" })
+	if err := svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
 
-	scaffoldChat(workspaceRoot, "golang", "chat-1")
+	scaffoldChat(t, workspaceRoot, "golang", "chat-1")
 
 	modelClient := &weMockModelClient{
 		responses: []llm.StreamChunk{{Text: "Sub-agent output."}},
@@ -216,7 +233,7 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	fanOutFlow := flows.NewFanOutFlow(logger, flowCfg)
 
 	sessionManager := session.NewManager(logger, registry, svcManager, modelClient, fanOutFlow, nil)
-	chatSupervisor, err := sessionManager.GetSession(context.Background(), "golang", "chat-1")
+	chatSupervisor, err := sessionManager.GetSession(ctx, "golang", "chat-1")
 	if err != nil {
 		t.Fatalf("failed to get supervisor session: %v", err)
 	}
@@ -240,7 +257,7 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	turnID := uuid.NewV7()
 	catalystID := uuid.NewV7()
 
-	signal, err := workerEngine.Execute(context.Background(), chatSession, turnID, catalystID, dispatchSignal, ui, emitter)
+	signal, err := workerEngine.Execute(ctx, chatSession, turnID, catalystID, dispatchSignal, ui, emitter)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -248,6 +265,14 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	synthSig, ok := signal.(*signals.SignalSynthesize)
 	if !ok {
 		t.Fatalf("Expected SignalSynthesize based on StrategyRefine yield, got %T", signal)
+	}
+
+	if synthSig.Flow == nil {
+		t.Fatalf("Expected SignalSynthesize to carry active FlowHandle for ownership handoff")
+	}
+
+	if len(engine.rejectedIDs) != 0 {
+		t.Errorf("Expected WorkerEngine not to reject candidates on Refine handoff, got rejected: %v", engine.rejectedIDs)
 	}
 
 	if !synthSig.AutoAccept {
@@ -258,7 +283,10 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 		t.Errorf("Expected synthesise signal to carry active FlowAddress for cross-boundary routing")
 	}
 
-	mainTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), chatSession, chatSession.GraphID)
+	mainTimeline, err := service.Graph().GetSubGraphTimeline(ctx, chatSession, chatSession.GraphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
 	var flowCard *thinkgraph.Node
 	var optionsNode *thinkgraph.Node
 	for _, n := range mainTimeline {
@@ -282,8 +310,8 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	if err := json.Unmarshal(flowCard.MaterializedState, &flowExecState); err != nil {
 		t.Fatalf("Failed to unmarshal flow card state: %v", err)
 	}
-	if flowExecState.Status != flows.FlowStatusCompleted {
-		t.Errorf("Expected Flow Card on main timeline to be FlowStatusCompleted, got %v", flowExecState.Status)
+	if flowExecState.Status != flows.FlowStatusRunning {
+		t.Errorf("Expected Flow Card on main timeline to remain FlowStatusRunning until synthesis completes, got %v", flowExecState.Status)
 	}
 
 	if optionsNode == nil {
@@ -295,8 +323,13 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	}
 
 	subGraphAddr := synthSig.FlowAddress
-	_ = service.SyncGraphContext(context.Background(), subGraphAddr)
-	flowTimeline, _ := service.Graph().GetSubGraphTimeline(context.Background(), subGraphAddr, subGraphAddr.GraphID)
+	if err := service.SyncGraphContext(ctx, subGraphAddr); err != nil {
+		t.Fatalf("SyncGraphContext failed: %v", err)
+	}
+	flowTimeline, err := service.Graph().GetSubGraphTimeline(ctx, subGraphAddr, subGraphAddr.GraphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
 
 	var taskNode *thinkgraph.Node
 	var joinNode *thinkgraph.Node
@@ -326,7 +359,88 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	}
 }
 
+func TestWorkerEngine_SkipStrategy_CleansUpAllCandidateBranches(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	engine := &weMockChatEngine{}
+	workspaceRoot := t.TempDir()
+
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	defer graphDB.Close()
+
+	graphStore := thinkgraph.NewGraphStore(graphDB, nil)
+	ledger := thinkgraph.NewFileLedger(1000, workspaceRoot)
+	dispatcher := thinkgraph.NewDispatcher(graphStore, ledger)
+
+	emitter := &weMockEmitter{}
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return engine }, graphDB, emitter)
+	service := svcManager.GetService("golang")
+
+	chatSession := &thinkgraph.ChatAddress{
+		ChatID:    "chat-skip",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	if err := service.InitializeChat(ctx, chatSession); err != nil {
+		t.Fatalf("InitializeChat failed: %v", err)
+	}
+
+	registry := config.NewRegistry()
+	mockSpace := &weMockThinkSpace{}
+	registry.RegisterThinkState("golang", mockSpace)
+	registry.RegisterConfig("golang", mockSpace.Config())
+	if err := svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
+
+	scaffoldChat(t, workspaceRoot, "golang", "chat-skip")
+
+	modelClient := &weMockModelClient{
+		responses: []llm.StreamChunk{{Text: "Sub-agent output."}},
+	}
+	turnExecutor := session.NewTurnExecutor(logger, modelClient, service)
+	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
+
+	sessionManager := session.NewManager(logger, registry, svcManager, modelClient, fanOutFlow, nil)
+	chatSupervisor, err := sessionManager.GetSession(ctx, "golang", "chat-skip")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+
+	workerEngine := session.NewWorkerEngine(logger, chatSupervisor, registry, service, turnExecutor, dispatcher, fanOutFlow)
+	ui := &weMockUI{strategyToReturn: flows.StrategySkip}
+
+	dispatchSignal := &signals.SignalDispatchFlow{
+		Tasks: []flows.SubAgentTask{
+			{AgentID: "agent-1", Instruction: "Draft approach A"},
+		},
+	}
+
+	finalSig, err := workerEngine.Execute(ctx, chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, ui, emitter)
+	if err != nil {
+		t.Fatalf("unexpected error on StrategySkip: %v", err)
+	}
+	if !finalSig.IsTerminal() {
+		t.Fatalf("expected SignalTerminal on StrategySkip, got %T", finalSig)
+	}
+
+	if len(engine.rejectedIDs) != 1 {
+		t.Fatalf("expected FlowScope.Finalize to reject 1 skipped candidate branch, got %d", len(engine.rejectedIDs))
+	}
+	if engine.rejectReason != "Skipped by user" {
+		t.Errorf("expected reject reason 'Skipped by user', got %q", engine.rejectReason)
+	}
+}
+
 func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing.T) {
+	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &weMockChatEngine{}
 	workspaceRoot := t.TempDir()
@@ -354,7 +468,9 @@ func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing
 			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
 		},
 	}
-	_ = service.InitializeChat(context.Background(), chatSession)
+	if err := service.InitializeChat(ctx, chatSession); err != nil {
+		t.Fatalf("InitializeChat failed: %v", err)
+	}
 
 	registry := config.NewRegistry()
 	mockSpace := &weMockThinkSpace{
@@ -365,9 +481,11 @@ func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing
 	}
 	registry.RegisterThinkState("golang", mockSpace)
 	registry.RegisterConfig("golang", mockSpace.Config())
-	_ = svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" })
+	if err := svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
 
-	scaffoldChat(workspaceRoot, "golang", "chat-fail-accept")
+	scaffoldChat(t, workspaceRoot, "golang", "chat-fail-accept")
 
 	modelClient := &weMockModelClient{
 		responses: []llm.StreamChunk{
@@ -379,7 +497,7 @@ func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing
 	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
 
 	sessionManager := session.NewManager(logger, registry, svcManager, modelClient, fanOutFlow, nil)
-	chatSupervisor, err := sessionManager.GetSession(context.Background(), "golang", "chat-fail-accept")
+	chatSupervisor, err := sessionManager.GetSession(ctx, "golang", "chat-fail-accept")
 	if err != nil {
 		t.Fatalf("failed to get supervisor session: %v", err)
 	}
@@ -400,7 +518,7 @@ func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing
 		},
 	}
 
-	finalSig, err := workerEngine.Execute(context.Background(), chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, ui, emitter)
+	finalSig, err := workerEngine.Execute(ctx, chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, ui, emitter)
 	if err != nil {
 		t.Fatalf("expected failed verification flow to allow manual review/accept without returning fatal error, got: %v", err)
 	}
@@ -408,7 +526,6 @@ func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing
 		t.Errorf("expected terminal signal after manual review accept, got %T", finalSig)
 	}
 
-	// Verify the main timeline streamed a FlowStatusFailed update with the verification error before user override
 	sawFailedCard := false
 	for _, n := range ui.streamedMainNodes {
 		if n.Type == flows.EventFlowLifecycle && len(n.MaterializedState) > 0 {
@@ -430,6 +547,7 @@ func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing
 }
 
 func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
+	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &weMockChatEngine{}
 	workspaceRoot := t.TempDir()
@@ -448,21 +566,25 @@ func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
 			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
 		},
 	}
-	_ = service.InitializeChat(context.Background(), chatSession)
+	if err := service.InitializeChat(ctx, chatSession); err != nil {
+		t.Fatalf("InitializeChat failed: %v", err)
+	}
 
 	registry := config.NewRegistry()
 	mockSpace := &weMockThinkSpace{}
 	registry.RegisterThinkState("golang", mockSpace)
 	registry.RegisterConfig("golang", mockSpace.Config())
-	_ = svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" })
+	if err := svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
 
-	scaffoldChat(workspaceRoot, "golang", "chat-1")
+	scaffoldChat(t, workspaceRoot, "golang", "chat-1")
 
 	turnExecutor := session.NewTurnExecutor(logger, &weMockModelClient{}, service)
 	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
 
 	sessionManager := session.NewManager(logger, registry, svcManager, &weMockModelClient{}, fanOutFlow, nil)
-	chatSupervisor, err := sessionManager.GetSession(context.Background(), "golang", "chat-1")
+	chatSupervisor, err := sessionManager.GetSession(ctx, "golang", "chat-1")
 	if err != nil {
 		t.Fatalf("failed to get supervisor session: %v", err)
 	}
@@ -477,7 +599,7 @@ func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
 	}
 	dispatchSignal := &signals.SignalDispatchFlow{Tasks: tasks}
 
-	_, err = workerEngine.Execute(context.Background(), chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, &weMockUI{}, emitter)
+	_, err = workerEngine.Execute(ctx, chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, &weMockUI{}, emitter)
 
 	if err == nil {
 		t.Fatalf("expected flow to fail-fast on missing file, but it succeeded")

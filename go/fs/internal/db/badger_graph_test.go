@@ -14,13 +14,16 @@ import (
 )
 
 func setupTestGraph(t *testing.T) *db.BadgerGraph {
+	t.Helper()
 	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
 	graph, err := db.NewBadgerGraph(opts)
 	if err != nil {
 		t.Fatalf("Failed to initialize in-memory badger graph: %v", err)
 	}
 	t.Cleanup(func() {
-		graph.Close()
+		if closeErr := graph.Close(); closeErr != nil {
+			t.Errorf("failed closing badger graph: %v", closeErr)
+		}
 	})
 	return graph
 }
@@ -85,7 +88,9 @@ func TestBadgerGraph_GetTimelinePage(t *testing.T) {
 		ev.Timestamp = time.Now().Add(time.Duration(i) * time.Minute)
 		ev.GraphID = graphID
 		node := thinkgraph.Node{Event: ev}
-		_ = graph.AppendNode(ctx, chat, node)
+		if err := graph.AppendNode(ctx, chat, node); err != nil {
+			t.Fatalf("AppendNode %d failed: %v", i, err)
+		}
 		nodes = append(nodes, node)
 	}
 
@@ -153,12 +158,16 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 	ev2.GraphID = graphID
 	node2 := thinkgraph.Node{Event: ev2}
 
-	_ = graph.AppendNode(ctx, chat, node1)
-	_ = graph.AppendNode(ctx, chat, node2)
+	if err := graph.AppendNode(ctx, chat, node1); err != nil {
+		t.Fatalf("AppendNode 1 failed: %v", err)
+	}
+	if err := graph.AppendNode(ctx, chat, node2); err != nil {
+		t.Fatalf("AppendNode 2 failed: %v", err)
+	}
 
-	t1, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
-	if len(t1) != 2 {
-		t.Fatalf("Expected 2 nodes baseline, got %d", len(t1))
+	t1, err := graph.GetSubGraphTimeline(ctx, chat, graphID)
+	if err != nil || len(t1) != 2 {
+		t.Fatalf("Expected 2 nodes baseline, got %d (err=%v)", len(t1), err)
 	}
 
 	mut1 := thinkgraph.TombstoneMutation{
@@ -172,9 +181,9 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 		t.Fatalf("Failed to save tombstone mutation: %v", err)
 	}
 
-	t2, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
-	if len(t2) != 1 || t2[0].ID != node2.ID {
-		t.Fatalf("Tombstoned node was not filtered out of timeline")
+	t2, err := graph.GetSubGraphTimeline(ctx, chat, graphID)
+	if err != nil || len(t2) != 1 || t2[0].ID != node2.ID {
+		t.Fatalf("Tombstoned node was not filtered out of timeline (err=%v)", err)
 	}
 
 	mut2 := thinkgraph.ContentMutation{
@@ -185,11 +194,13 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 		},
 		Content: "Updated content!",
 	}
-	_ = graph.SaveMutation(ctx, chat, mut2)
+	if err := graph.SaveMutation(ctx, chat, mut2); err != nil {
+		t.Fatalf("SaveMutation ContentMutation failed: %v", err)
+	}
 
-	t3, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
-	if t3[0].Content != "Updated content!" {
-		t.Errorf("Mutation update failed, content is: %s", t3[0].Content)
+	t3, err := graph.GetSubGraphTimeline(ctx, chat, graphID)
+	if err != nil || t3[0].Content != "Updated content!" {
+		t.Errorf("Mutation update failed, content is: %s (err=%v)", t3[0].Content, err)
 	}
 
 	mut3 := thinkgraph.RestoreMutation{
@@ -199,15 +210,17 @@ func TestBadgerGraph_Mutations_TombstoneAndUpdate(t *testing.T) {
 			Timestamp: time.Now(),
 		},
 	}
-	_ = graph.SaveMutation(ctx, chat, mut3)
+	if err := graph.SaveMutation(ctx, chat, mut3); err != nil {
+		t.Fatalf("SaveMutation RestoreMutation failed: %v", err)
+	}
 
-	t4, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
-	if len(t4) != 2 {
-		t.Fatalf("Failed to restore tombstoned node")
+	t4, err := graph.GetSubGraphTimeline(ctx, chat, graphID)
+	if err != nil || len(t4) != 2 {
+		t.Fatalf("Failed to restore tombstoned node (err=%v)", err)
 	}
 }
 
-func TestBadgerGraph_Mutations_StateUpdate(t *testing.T) {
+func TestBadgerGraph_Mutations_StateAndCombinedContentUpdate(t *testing.T) {
 	graph := setupTestGraph(t)
 	ctx := context.Background()
 	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
@@ -223,7 +236,9 @@ func TestBadgerGraph_Mutations_StateUpdate(t *testing.T) {
 	ev1 := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Flow Node")
 	ev1.GraphID = graphID
 	node1 := thinkgraph.Node{Event: ev1}
-	_ = graph.AppendNode(ctx, chat, node1)
+	if err := graph.AppendNode(ctx, chat, node1); err != nil {
+		t.Fatalf("AppendNode failed: %v", err)
+	}
 
 	stateBytes := []byte(`{"status":"running"}`)
 	mut := thinkgraph.StateMutation{
@@ -235,11 +250,102 @@ func TestBadgerGraph_Mutations_StateUpdate(t *testing.T) {
 		State: stateBytes,
 	}
 
-	_ = graph.SaveMutation(ctx, chat, mut)
+	if err := graph.SaveMutation(ctx, chat, mut); err != nil {
+		t.Fatalf("SaveMutation failed: %v", err)
+	}
 
-	t1, _ := graph.GetSubGraphTimeline(ctx, chat, graphID)
+	t1, err := graph.GetSubGraphTimeline(ctx, chat, graphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
 	if string(t1[0].MaterializedState) != string(stateBytes) {
 		t.Errorf("State mutation update failed, got %s", string(t1[0].MaterializedState))
+	}
+	if t1[0].Content != "Flow Node" {
+		t.Errorf("Expected Content to remain 'Flow Node' when StateMutation.Content is empty, got %q", t1[0].Content)
+	}
+
+	// Combined StateMutation with Content updates both atomically
+	completedState := []byte(`{"status":"completed"}`)
+	combinedMut := thinkgraph.StateMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  node1.ID,
+			Type:      thinkgraph.MutationState,
+			Timestamp: time.Now(),
+		},
+		Content: "Flow Completed Summary",
+		State:   completedState,
+	}
+	if err := graph.SaveMutation(ctx, chat, combinedMut); err != nil {
+		t.Fatalf("SaveMutation combined failed: %v", err)
+	}
+
+	t2, err := graph.GetSubGraphTimeline(ctx, chat, graphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
+	if t2[0].Content != "Flow Completed Summary" || string(t2[0].MaterializedState) != string(completedState) {
+		t.Errorf("Expected combined state+content update, got content=%q state=%s", t2[0].Content, string(t2[0].MaterializedState))
+	}
+}
+
+func TestBadgerGraph_SyncStatePerSubGraphAndClear(t *testing.T) {
+	graph := setupTestGraph(t)
+	ctx := context.Background()
+
+	mainID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+	mainAddr := &thinkgraph.ChatAddress{
+		ChatID:    "chat-sync-isolation",
+		ProjectID: "test-space",
+		SubGraph:  thinkgraph.SubGraph{Name: "main", GraphID: mainID},
+	}
+
+	flowID := thinkgraph.NewGraphID(thinkgraph.PrefixFlow)
+	flowAddr := &thinkgraph.ChatAddress{
+		ChatID:    "chat-sync-isolation",
+		ProjectID: "test-space",
+		SubGraph:  thinkgraph.SubGraph{Name: "flow-" + flowID.UUID.String(), GraphID: flowID},
+	}
+
+	// Append 2 events to main and 1 event to flow subgraph; their sync states must remain isolated
+	for i := 0; i < 2; i++ {
+		ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("main-%d", i))
+		ev.GraphID = mainID
+		if err := graph.AppendNode(ctx, mainAddr, thinkgraph.Node{Event: ev}); err != nil {
+			t.Fatalf("AppendNode(main) failed: %v", err)
+		}
+	}
+
+	flowEv := thinkgraph.NewEvent(thinkgraph.EventPrompt, "flow-0")
+	flowEv.GraphID = flowID
+	if err := graph.AppendNode(ctx, flowAddr, thinkgraph.Node{Event: flowEv}); err != nil {
+		t.Fatalf("AppendNode(flow) failed: %v", err)
+	}
+
+	// Re-appending an existing node ID must be idempotent for TotalEvents
+	if err := graph.AppendNode(ctx, flowAddr, thinkgraph.Node{Event: flowEv}); err != nil {
+		t.Fatalf("idempotent AppendNode(flow) failed: %v", err)
+	}
+
+	mainSync, err := graph.GetSyncState(ctx, mainAddr)
+	if err != nil || mainSync == nil || mainSync.TotalEvents != 2 {
+		t.Fatalf("expected main sync TotalEvents=2, got %+v (err=%v)", mainSync, err)
+	}
+
+	flowSync, err := graph.GetSyncState(ctx, flowAddr)
+	if err != nil || flowSync == nil || flowSync.TotalEvents != 1 {
+		t.Fatalf("expected flow sync TotalEvents=1, got %+v (err=%v)", flowSync, err)
+	}
+
+	// ClearChatGraph must clear sync state across all branches/subgraphs
+	if err := graph.ClearChatGraph(ctx, mainAddr); err != nil {
+		t.Fatalf("ClearChatGraph failed: %v", err)
+	}
+	if clearedMain, _ := graph.GetSyncState(ctx, mainAddr); clearedMain != nil {
+		t.Errorf("expected main sync state to be cleared, got %+v", clearedMain)
+	}
+	if clearedFlow, _ := graph.GetSyncState(ctx, flowAddr); clearedFlow != nil {
+		t.Errorf("expected flow sync state to be cleared, got %+v", clearedFlow)
 	}
 }
 
@@ -275,9 +381,15 @@ func TestBadgerGraph_GetLenses(t *testing.T) {
 		Tags:    []string{"database"},
 	}
 
-	_ = graph.AppendNode(ctx, chat, node1)
-	_ = graph.SaveDigest(ctx, chat, digest)
-	_ = graph.SaveSpaceContext(ctx, chat, spaceCtx)
+	if err := graph.AppendNode(ctx, chat, node1); err != nil {
+		t.Fatalf("AppendNode failed: %v", err)
+	}
+	if err := graph.SaveDigest(ctx, chat, digest); err != nil {
+		t.Fatalf("SaveDigest failed: %v", err)
+	}
+	if err := graph.SaveSpaceContext(ctx, chat, spaceCtx); err != nil {
+		t.Fatalf("SaveSpaceContext failed: %v", err)
+	}
 
 	result, err := graph.GetLenses(ctx, chat, "database")
 	if err != nil {

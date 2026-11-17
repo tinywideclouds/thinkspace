@@ -144,3 +144,29 @@ func TestContextProjecter_DefensiveIntegrityError(t *testing.T) {
 		t.Errorf("Expected specific invalid trajectory error, got: %v", err)
 	}
 }
+
+func TestContextProjecter_NilManifestAndSystemNodeAnnotations(t *testing.T) {
+	req := thinkgraph.ContextRequest{
+		Manifest: nil,
+		RecentEvents: []thinkgraph.Node{
+			{Event: thinkgraph.NewEvent("flow_lifecycle", "Flow completed")},
+			{Event: thinkgraph.NewEvent("candidate_resolution", "Proposal accepted")},
+		},
+		Catalyst: &thinkgraph.Node{
+			Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, "Next step"),
+		},
+	}
+
+	projecter := thinkgraph.NewContextProjecter()
+	trajectory, err := projecter.Build(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error with nil Manifest: %v", err)
+	}
+
+	if !strings.Contains(trajectory.Catalyst.Content, "[System: A sub-agent flow is executing or completed. Result: Flow completed]") {
+		t.Errorf("expected flow_lifecycle annotation in collapsed catalyst, got: %q", trajectory.Catalyst.Content)
+	}
+	if !strings.Contains(trajectory.Catalyst.Content, "[System: The user resolved a proposal. Result: Proposal accepted]") {
+		t.Errorf("expected candidate_resolution annotation in collapsed catalyst, got: %q", trajectory.Catalyst.Content)
+	}
+}

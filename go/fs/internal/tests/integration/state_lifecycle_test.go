@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
@@ -42,7 +44,11 @@ func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error { re
 func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { return nil }
 func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
 
-type mockChatEngine struct{}
+type mockChatEngine struct {
+	mu       sync.Mutex
+	accepted []string
+	rejected map[string]string
+}
 
 func (engine *mockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
 func (engine *mockChatEngine) Snapshot(ctx context.Context, chatID, msg string) (string, error) {
@@ -55,9 +61,18 @@ func (engine *mockChatEngine) PreviewCandidate(ctx context.Context, chatID, cand
 	return nil
 }
 func (engine *mockChatEngine) Accept(ctx context.Context, chatID, candidateID, reason string) error {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	engine.accepted = append(engine.accepted, candidateID)
 	return nil
 }
 func (engine *mockChatEngine) Reject(ctx context.Context, chatID, candidateID, reason string) error {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if engine.rejected == nil {
+		engine.rejected = make(map[string]string)
+	}
+	engine.rejected[candidateID] = reason
 	return nil
 }
 func (engine *mockChatEngine) ReadCandidateDiff(ctx context.Context, chatID, candidateID string) (string, error) {
@@ -87,7 +102,13 @@ func (m *mockDeterministicLLM) GenerateContentStream(
 type mockThinkState struct{}
 
 func (m *mockThinkState) Config() spaces.ThinkStateConfig {
-	cfg := spaces.ThinkStateConfig{Timeouts: spaces.TimeoutsConfig{TurnSeconds: 10}}
+	cfg := spaces.ThinkStateConfig{
+		Timeouts: spaces.TimeoutsConfig{TurnSeconds: 10},
+		Roles: spaces.RolesConfig{
+			Manager: spaces.ManagerConfig{Model: "mock-manager"},
+			Worker:  spaces.WorkerConfig{Model: "mock-worker"},
+		},
+	}
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -165,20 +186,62 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 	defer graphDB.Close()
 
 	registry := config.NewRegistry()
+	if err := registry.LoadFS(fstest.MapFS{
+		"fanout.yaml": &fstest.MapFile{
+			Data: []byte(`
+fanout:
+  version: 3
+  type: "flow"
+  name: "Parallel FanOut"
+  retry_prompt: "Retry: {{.ErrorTrace}}"
+  review_prompt: "Review: {{ range .Branches }}{{ .CandidateID }}{{ end }}"
+  refine_prompt: "Refine: {{ range .Branches }}{{ .CandidateID }}{{ end }}"
+  synthesize_prompt: "Synthesize a single, unified implementation combining the strongest architectural patterns from the candidate branches."
+  synthesis_review_prompt: "Summarize the synthesized candidate {{ .CandidateID }} for user approval."
+`),
+		},
+		"digest.yaml": &fstest.MapFile{
+			Data: []byte(`
+digest:
+  version: 1
+  type: "core"
+  name: "Digest Manager"
+  manual_prompt: "Topic: {{.TopicName}}\nInstruction: {{.Instruction}}\nContext: {{.Context}}"
+  background_prompt: "Target Window:\n{{.TargetWindow}}\nActive Buffer:\n{{.ActiveBuffer}}"
+`),
+		},
+	}, "."); err != nil {
+		t.Fatalf("Failed loading flow/core configs: %v", err)
+	}
+
+	var digestCfg session.DigestConfig
+	if err := registry.DecodeCoreConfig("digest", &digestCfg); err != nil {
+		t.Fatalf("Failed decoding digest config: %v", err)
+	}
+
 	mockSpace := &mockThinkState{}
 	registry.RegisterThinkState("golang", mockSpace)
 	registry.RegisterConfig("golang", mockSpace.Config())
 
-	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(s string) workspace.ChatVersioner { return &mockChatEngine{} }, graphDB, nil)
-	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
-	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" })
+	versioner := &mockChatEngine{}
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(s string) workspace.ChatVersioner { return versioner }, graphDB, nil)
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755); err != nil {
+		t.Fatalf("Failed creating space dir: %v", err)
+	}
+	if err := svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("Failed updating space state: %v", err)
+	}
 
 	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
 	metaJSON := fmt.Sprintf(`{"id":"%s", "name":"Lifecycle Chat", "active_branch": "main"}`, chatID)
 
 	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
-	_ = os.MkdirAll(chatDir, 0755)
-	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(metaJSON), 0644)
+	if err := os.MkdirAll(chatDir, 0755); err != nil {
+		t.Fatalf("Failed creating chat dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(metaJSON), 0644); err != nil {
+		t.Fatalf("Failed writing meta.json: %v", err)
+	}
 
 	svc := svcManager.GetService(spaceID)
 	chatAddress := &thinkgraph.ChatAddress{
@@ -226,7 +289,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}`
 
 		mockLLM := &mockDeterministicLLM{Responses: []llm.StreamChunk{{Text: mockJSON}}}
-		digestManager := session.NewDigestManager(logger, mockLLM, session.DigestConfig{})
+		digestManager := session.NewDigestManager(logger, mockLLM, digestCfg)
 
 		count, err := digestManager.CreateBackgroundDigest(ctx, svc, chatAddress, targetEvents, nil, true, "mock-model", "persona")
 		if err != nil || count != 1 {
@@ -293,10 +356,13 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 					Text: `{"thought":"Sub-agent branch output","patches":[]}`,
 				},
 				{
+					Text: "Manager evaluation: Combine the best test patterns into a unified test suite.",
+				},
+				{
 					Text: `{"thought":"Golden Synthesis Patch","patches":[]}`,
 				},
 				{
-					Text: "Manager review: The synthesized solution combines the best test patterns.",
+					Text: "Final synthesized test suite summary on main timeline.",
 				},
 			},
 		}
@@ -310,7 +376,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 
 		responseID := uuid.NewV7()
 
-		signal, err := turnExecutor.Execute(ctx, chatAddress, responseID, uuid.Nil(), false, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui, emitter)
+		signal, err := turnExecutor.Execute(ctx, chatAddress, responseID, uuid.Nil(), "mock-manager", false, mockSpace, cognition.ThinkBundle{}, toolRegistry, ui, emitter)
 		if err != nil {
 			t.Fatalf("TurnExecutor failed: %v", err)
 		}
@@ -320,7 +386,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 			t.Fatalf("Expected TurnExecutor to yield a SignalDispatchFlow, got %T", signal)
 		}
 
-		digestManager := session.NewDigestManager(logger, toolLLM, session.DigestConfig{})
+		digestManager := session.NewDigestManager(logger, toolLLM, digestCfg)
 		integrationChatSession, err = session.NewChatSession(ctx, logger, registry, svcManager, toolLLM, &mockFlow{}, digestManager, spaceID, chatID)
 		if err != nil {
 			t.Fatalf("Failed to spin up ChatSession supervisor: %v", err)
@@ -349,43 +415,75 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}
 
 		flowAddr := synthSig.FlowAddress
-		_ = svc.SyncGraphContext(context.Background(), flowAddr)
-		flowTimeline, _ := svc.Graph().GetSubGraphTimeline(ctx, flowAddr, flowAddr.GraphID)
+		expectedSynthCand := fmt.Sprintf("%s-%s-synthesis", chatID, flowAddr.SubGraph.Name)
+		expectedWorkerCand := fmt.Sprintf("%s-%s-1", chatID, flowAddr.SubGraph.Name)
 
-		hasSynthPrompt := false
+		if len(versioner.accepted) != 1 || versioner.accepted[0] != expectedSynthCand {
+			t.Errorf("Expected synthesis candidate %q to be accepted, got %v", expectedSynthCand, versioner.accepted)
+		}
+		if versioner.rejected[expectedWorkerCand] != "Superseded by synthesis" {
+			t.Errorf("Expected superseded worker candidate %q to be rejected, got %q", expectedWorkerCand, versioner.rejected[expectedWorkerCand])
+		}
+
+		if err := svc.SyncGraphContext(ctx, flowAddr); err != nil {
+			t.Fatalf("SyncGraphContext failed: %v", err)
+		}
+		flowTimeline, err := svc.Graph().GetSubGraphTimeline(ctx, flowAddr, flowAddr.GraphID)
+		if err != nil {
+			t.Fatalf("GetSubGraphTimeline failed: %v", err)
+		}
+
+		hasRefinePrompt := false
+		hasSynthesizeTaskPrompt := false
 		hasSynthRes := false
 		for _, n := range flowTimeline {
 			if n.Type == thinkgraph.EventPrompt && n.Edges["parent_id"] == synthSig.ParentNodeID.String() {
-				hasSynthPrompt = true
+				hasRefinePrompt = true
 			}
-			if n.Type == workspace.EventCandidateResolution && strings.Contains(n.Content, "ACCEPTED") {
+			if n.Type == thinkgraph.EventPrompt && n.Metadata["agent_id"] == "synthesis" {
+				hasSynthesizeTaskPrompt = true
+			}
+			if n.Type == workspace.EventCandidateResolution && n.Metadata["agent_id"] == "synthesis" && strings.Contains(n.Content, "ACCEPTED") {
 				hasSynthRes = true
 			}
 		}
 
-		if !hasSynthPrompt {
-			t.Errorf("Expected synthesis prompt node linked to ParentNodeID %s across boundary", synthSig.ParentNodeID.String())
+		if !hasRefinePrompt {
+			t.Errorf("Expected Manager refine prompt node linked to ParentNodeID %s across boundary", synthSig.ParentNodeID.String())
+		}
+		if !hasSynthesizeTaskPrompt {
+			t.Errorf("Expected synthesis worker prompt node from YAML synthesize_prompt on flow subgraph")
 		}
 		if !hasSynthRes {
-			t.Errorf("Expected candidate resolution ACCEPTED node at the tail of the flow subgraph")
+			t.Errorf("Expected synthesis candidate resolution ACCEPTED node at the tail of the flow subgraph")
 		}
 
-		mainTimeline, _ := svc.Graph().GetSubGraphTimeline(ctx, chatAddress, chatAddress.GraphID)
-		hasManagerReview := false
-		hasUserDecision := false
+		mainTimeline, err := svc.Graph().GetSubGraphTimeline(ctx, chatAddress, chatAddress.GraphID)
+		if err != nil {
+			t.Fatalf("GetSubGraphTimeline failed: %v", err)
+		}
+		var managerReviewID uuid.UUID
+		hasResolution := false
+		var userDecisionParentID string
 		for _, n := range mainTimeline {
-			if n.Type == thinkgraph.EventModel && strings.Contains(n.Content, "Manager review:") {
-				hasManagerReview = true
+			if n.Type == thinkgraph.EventModel && n.Content == "Final synthesized test suite summary on main timeline." {
+				managerReviewID = n.ID
+			}
+			if n.Type == workspace.EventCandidateResolution {
+				hasResolution = true
 			}
 			if n.Type == thinkgraph.EventPrompt && strings.Contains(n.Content, "accepted flow: verified and accepted") {
-				hasUserDecision = true
+				userDecisionParentID = n.Edges["parent_id"]
 			}
 		}
-		if !hasManagerReview {
-			t.Errorf("Expected Manager review EventModel node on the main timeline")
+		if managerReviewID == uuid.Nil() {
+			t.Errorf("Expected Manager final review EventModel node on the main timeline")
 		}
-		if !hasUserDecision {
-			t.Errorf("Expected user decision EventPrompt node on the main timeline")
+		if !hasResolution {
+			t.Errorf("Expected CandidateResolution node on the main timeline")
+		}
+		if userDecisionParentID != managerReviewID.String() {
+			t.Errorf("Expected user decision EventPrompt node to link to Manager review node %s, got %q", managerReviewID.String(), userDecisionParentID)
 		}
 	})
 
@@ -397,6 +495,11 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		registry.RegisterThinkState("concept", mockSpace)
 		registry.RegisterConfig("concept", mockSpace.Config())
 
+		catalystEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Switch to concept mode")
+		if err := svc.Dispatcher().AppendEvent(ctx, chatAddress, catalystEvent); err != nil {
+			t.Fatalf("Failed to seed catalyst prompt event: %v", err)
+		}
+
 		systemEngine := session.NewSystemEngine(logger, integrationChatSession, registry, svc)
 
 		transitionSig := &signals.SignalTransition{
@@ -404,8 +507,7 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}
 
 		turnID := uuid.NewV7()
-		catalystID := uuid.NewV7()
-		nextSignal, err := systemEngine.Execute(ctx, chatAddress, turnID, catalystID, transitionSig, &mockUI{}, &mockEmitter{})
+		nextSignal, err := systemEngine.Execute(ctx, chatAddress, turnID, catalystEvent.ID, transitionSig, &mockUI{}, &mockEmitter{})
 		if err != nil {
 			t.Fatalf("SystemEngine failed: %v", err)
 		}
@@ -420,6 +522,21 @@ func TestEndToEndStateLifecycle(t *testing.T) {
 		}
 		if meta.ActiveThinkState != "concept" {
 			t.Errorf("Expected active think state to be explicitly mutated to 'concept', got '%s'", meta.ActiveThinkState)
+		}
+
+		mainTimeline, err := svc.Graph().GetSubGraphTimeline(ctx, chatAddress, chatAddress.GraphID)
+		if err != nil {
+			t.Fatalf("Failed to fetch main timeline: %v", err)
+		}
+		foundTransitionBadge := false
+		for _, n := range mainTimeline {
+			if n.ID == catalystEvent.ID && n.Metadata["transitioned_to"] == "concept" {
+				foundTransitionBadge = true
+				break
+			}
+		}
+		if !foundTransitionBadge {
+			t.Errorf("Expected catalyst prompt node %s to be mutated with transitioned_to='concept'", catalystEvent.ID)
 		}
 
 		sysAddr := integrationChatSession.GetSystemAddress()

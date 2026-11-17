@@ -40,37 +40,49 @@ func (p *SearchReplacePatcher) Apply(ctx context.Context, sandbox workspace.Cand
 	}
 
 	fileModifications := make(map[string]string)
+	var fileOrder []string
 
 	for _, match := range matches {
 		if len(match) != 4 {
 			continue
 		}
 
-		filePath := filepath.ToSlash(filepath.Clean(strings.TrimSpace(match[1])))
+		rawPath := strings.TrimSpace(match[1])
+		if rawPath == "" {
+			return fmt.Errorf("patch block is missing target file path")
+		}
+
+		filePath := filepath.ToSlash(filepath.Clean(rawPath))
+		if filepath.IsAbs(filePath) || filePath == "." || filePath == ".." || strings.HasPrefix(filePath, "../") {
+			return fmt.Errorf("invalid or escaping target file path: %q", rawPath)
+		}
+
 		searchBlock := match[2]
 		replaceBlock := match[3]
 
-		// Load from sandbox if not already loaded in this batch
+		if strings.TrimSpace(searchBlock) == "" {
+			return fmt.Errorf("empty SEARCH block is not allowed for %s", filePath)
+		}
+
 		content, exists := fileModifications[filePath]
 		if !exists {
-			bytes, err := sandbox.ReadFile(ctx, filePath)
+			rawBytes, err := sandbox.ReadFile(ctx, filePath)
 			if err != nil {
-				return fmt.Errorf("cannot patch missing file %s", filePath)
+				return fmt.Errorf("cannot patch missing or unreadable file %s: %w", filePath, err)
 			}
-			content = string(bytes)
+			content = string(rawBytes)
+			fileOrder = append(fileOrder, filePath)
 		}
 
 		if !strings.Contains(content, searchBlock) {
 			return fmt.Errorf("search block not found in %s:\n%s", filePath, searchBlock)
 		}
 
-		// Apply the string replacement
 		fileModifications[filePath] = strings.Replace(content, searchBlock, replaceBlock, 1)
 	}
 
-	// Flush modifications to the physical sandbox
-	for filePath, newContent := range fileModifications {
-		if err := sandbox.WriteFile(ctx, filePath, []byte(newContent)); err != nil {
+	for _, filePath := range fileOrder {
+		if err := sandbox.WriteFile(ctx, filePath, []byte(fileModifications[filePath])); err != nil {
 			return fmt.Errorf("writing patched file %s: %w", filePath, err)
 		}
 	}

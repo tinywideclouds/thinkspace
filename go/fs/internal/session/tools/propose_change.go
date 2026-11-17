@@ -73,7 +73,7 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (T
 		return ToolResponse{}, fmt.Errorf("invalid propose_change schema: %w", err)
 	}
 
-	if request.Instruction == "" && len(request.AgentInstructions) == 0 {
+	if strings.TrimSpace(request.Instruction) == "" && len(request.AgentInstructions) == 0 {
 		if ec.Emitter != nil {
 			ec.Emitter.Emit("manager", telemetry.Event{
 				ID:        uuid.NewV7(),
@@ -90,17 +90,19 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (T
 	// 2. Map Instructions cleanly without destroying the distinct approaches
 	if len(request.AgentInstructions) > 0 {
 		for i, item := range request.AgentInstructions {
+			body := strings.TrimSpace(item.Instruction)
+			if body == "" {
+				body = strings.TrimSpace(request.Instruction)
+			}
+			if body == "" {
+				return ToolResponse{}, fmt.Errorf("agent_instructions[%d] is missing an instruction", i)
+			}
+
 			var finalInst strings.Builder
-
-			if item.Approach != "" {
-				finalInst.WriteString(fmt.Sprintf("[Approach: %s]\n", item.Approach))
+			if strings.TrimSpace(item.Approach) != "" {
+				finalInst.WriteString(fmt.Sprintf("[Approach: %s]\n", strings.TrimSpace(item.Approach)))
 			}
-
-			if item.Instruction != "" {
-				finalInst.WriteString(item.Instruction)
-			} else if request.Instruction != "" {
-				finalInst.WriteString(request.Instruction)
-			}
+			finalInst.WriteString(body)
 
 			tasks = append(tasks, flows.SubAgentTask{
 				AgentID:       fmt.Sprintf("agent-%d", i+1),
@@ -125,9 +127,9 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (T
 		}
 	}
 
-	leadSummary := request.Instruction
+	leadSummary := strings.TrimSpace(request.Instruction)
 	if leadSummary == "" && len(request.AgentInstructions) > 0 {
-		leadSummary = request.AgentInstructions[0].Instruction
+		leadSummary = strings.TrimSpace(request.AgentInstructions[0].Instruction)
 	}
 	content := fmt.Sprintf("Executing %d agent(s): %s", len(tasks), leadSummary)
 	if len(content) > 80 {

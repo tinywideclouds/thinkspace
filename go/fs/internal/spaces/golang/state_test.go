@@ -16,8 +16,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
-// --- Mocks ---
-
 type mockSandbox struct {
 	files       map[string][]byte
 	shouldDelay bool
@@ -91,6 +89,7 @@ func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { re
 func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
 
 func setupGoThinkState(t *testing.T, verifyTimeout int) *golang.GoThinkState {
+	t.Helper()
 	config := spaces.ThinkStateConfig{
 		Name: "golang",
 		Options: map[string]any{
@@ -125,8 +124,6 @@ func setupGoThinkState(t *testing.T, verifyTimeout int) *golang.GoThinkState {
 	return golang.NewGoThinkState(config)
 }
 
-// --- Verifier Tests ---
-
 func TestCIVerifier_ASTError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -134,8 +131,12 @@ func TestCIVerifier_ASTError(t *testing.T) {
 	space := setupGoThinkState(t, 5)
 	sandbox := newMockSandbox()
 
-	sandbox.WriteFile(ctx, "src/go.mod", []byte("module test"))
-	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc invalid() {\n"))
+	if err := sandbox.WriteFile(ctx, "src/go.mod", []byte("module test")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc invalid() {\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
@@ -153,7 +154,9 @@ func TestCIVerifier_MissingGoMod(t *testing.T) {
 	space := setupGoThinkState(t, 5)
 	sandbox := newMockSandbox()
 
-	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
+	if err := sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
@@ -171,9 +174,15 @@ func TestCIVerifier_Success(t *testing.T) {
 	space := setupGoThinkState(t, 15)
 	sandbox := newMockSandbox()
 
-	sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n"))
-	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
-	sandbox.WriteFile(ctx, "src/main_test.go", []byte("package main\nimport \"testing\"\nfunc TestMain(t *testing.T) {}\n"))
+	if err := sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := sandbox.WriteFile(ctx, "src/main_test.go", []byte("package main\nimport \"testing\"\nfunc TestMain(t *testing.T) {}\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	err := space.Verifier().Verify(ctx, sandbox)
 	if err != nil {
@@ -189,8 +198,12 @@ func TestCIVerifier_TimeoutLoop(t *testing.T) {
 	sandbox := newMockSandbox()
 	sandbox.shouldDelay = true
 
-	sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n"))
-	sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n"))
+	if err := sandbox.WriteFile(ctx, "src/go.mod", []byte("module testmod\n\ngo 1.21\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := sandbox.WriteFile(ctx, "src/main.go", []byte("package main\nfunc main() {}\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	err := space.Verifier().Verify(ctx, sandbox)
 	if err == nil {
@@ -201,7 +214,6 @@ func TestCIVerifier_TimeoutLoop(t *testing.T) {
 	}
 }
 
-// --- Mapbook Tests ---
 func TestGolangMapbook_GenerateLayers(t *testing.T) {
 	ctx := context.Background()
 	workspaceRoot := t.TempDir()
@@ -212,8 +224,12 @@ func TestGolangMapbook_GenerateLayers(t *testing.T) {
 		t.Fatalf("failed to setup test directories: %v", err)
 	}
 
-	_ = os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0644)
-	_ = os.WriteFile(filepath.Join(pkgDir, "handler.go"), []byte("package api"), 0644)
+	if err := os.WriteFile(filepath.Join(srcDir, "main.go"), []byte("package main"), 0644); err != nil {
+		t.Fatalf("failed writing main.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "handler.go"), []byte("package api"), 0644); err != nil {
+		t.Fatalf("failed writing handler.go: %v", err)
+	}
 
 	book := golang.NewGolangMapbook()
 	layers, err := book.GenerateLayers(ctx, workspaceRoot)
@@ -259,7 +275,6 @@ func TestGolangMapbook_GenerateLayers_NoSrcDirectory(t *testing.T) {
 	}
 }
 
-// --- Interface Contract & Domain Option Tests ---
 func TestGoThinkState_InterfaceContractsAndOptions(t *testing.T) {
 	space := setupGoThinkState(t, 15)
 
@@ -276,7 +291,6 @@ func TestGoThinkState_InterfaceContractsAndOptions(t *testing.T) {
 		t.Errorf("expected FormatImports to be true")
 	}
 
-	// Verify disabling format_imports via domain options stops patcher from rewriting source
 	disabledSpace := golang.NewGoThinkState(spaces.ThinkStateConfig{
 		Name: "golang",
 		Options: map[string]any{
@@ -289,11 +303,14 @@ func TestGoThinkState_InterfaceContractsAndOptions(t *testing.T) {
 
 	sandbox := newMockSandbox()
 	rawCode := "package main\nfunc main(){fmt.Println(\"hello\")}"
-	payload, _ := json.Marshal(map[string]any{
+	payload, err := json.Marshal(map[string]any{
 		"patches": []map[string]string{
 			{"file": "src/main.go", "action": "full_replace", "code": rawCode},
 		},
 	})
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
 	if err := disabledSpace.Patcher().Apply(context.Background(), sandbox, string(payload)); err != nil {
 		t.Fatalf("patcher failed: %v", err)
 	}
@@ -302,7 +319,6 @@ func TestGoThinkState_InterfaceContractsAndOptions(t *testing.T) {
 	}
 }
 
-// --- Cognitive Hook Tests ---
 func TestGoThinkState_EnrichBundle(t *testing.T) {
 	ctx := context.Background()
 	workspaceRoot := t.TempDir()

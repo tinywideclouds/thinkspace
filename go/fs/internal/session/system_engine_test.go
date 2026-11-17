@@ -23,8 +23,6 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// --- Mocks ---
-
 type seMockChatEngine struct{}
 
 func (e *seMockChatEngine) InitChat(ctx context.Context, chatID string) error { return nil }
@@ -87,9 +85,8 @@ func (e *seMockEmitter) Emit(channel string, event telemetry.Event) {
 	e.events = append(e.events, event)
 }
 
-// --- Tests ---
-
 func setupSystemEngineTest(t *testing.T) (*session.SystemEngine, *session.ChatSession, *workspace.Service, *config.Registry, string, string) {
+	t.Helper()
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	workspaceRoot := t.TempDir()
@@ -101,7 +98,11 @@ func setupSystemEngineTest(t *testing.T) (*session.SystemEngine, *session.ChatSe
 	if err != nil {
 		t.Fatalf("failed to init badger: %v", err)
 	}
-	t.Cleanup(func() { graphDB.Close() })
+	t.Cleanup(func() {
+		if closeErr := graphDB.Close(); closeErr != nil {
+			t.Errorf("failed closing badger graph: %v", closeErr)
+		}
+	})
 
 	registry := config.NewRegistry()
 	registry.RegisterThinkState("concept", &seMockThinkSpace{})
@@ -109,9 +110,16 @@ func setupSystemEngineTest(t *testing.T) (*session.SystemEngine, *session.ChatSe
 
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &seMockChatEngine{} }, graphDB, nil)
 
-	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID, "chats", chatID), 0755)
-	_ = os.WriteFile(filepath.Join(workspaceRoot, spaceID, "chats", chatID, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"Sys Chat", "active_branch": "main"}`), 0644)
-	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "concept" })
+	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
+	if err := os.MkdirAll(chatDir, 0755); err != nil {
+		t.Fatalf("failed creating chat dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"Sys Chat", "active_branch": "main"}`), 0644); err != nil {
+		t.Fatalf("failed writing meta.json: %v", err)
+	}
+	if err := svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "concept" }); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
 
 	chatSession, err := session.NewChatSession(ctx, logger, registry, svcManager, nil, nil, nil, spaceID, chatID)
 	if err != nil {
@@ -128,7 +136,6 @@ func TestSystemEngine_Execute_SuccessfulTransition(t *testing.T) {
 	ctx := context.Background()
 	systemEngine, chatSession, wsService, _, spaceID, chatID := setupSystemEngineTest(t)
 
-	// Pre-seed a prompt on the main timeline to act as the driving catalyst
 	address := &thinkgraph.ChatAddress{
 		ChatID:    chatID,
 		ProjectID: spaceID,
@@ -157,12 +164,10 @@ func TestSystemEngine_Execute_SuccessfulTransition(t *testing.T) {
 		t.Fatalf("SystemEngine.Execute failed: %v", err)
 	}
 
-	// 1. Verify the resulting signal is a clean ExecuteChat intent without string sentinels
 	if _, ok := resultSig.(*signals.SignalExecuteChat); !ok {
 		t.Errorf("Expected SignalExecuteChat, got %T", resultSig)
 	}
 
-	// 2. Verify Session Metadata Updated
 	chatSession.Mu().RLock()
 	activeThinkState := chatSession.Meta.ActiveThinkState
 	chatSession.Mu().RUnlock()
@@ -171,7 +176,6 @@ func TestSystemEngine_Execute_SuccessfulTransition(t *testing.T) {
 		t.Errorf("Expected session ActiveThinkState to be 'golang', got '%s'", activeThinkState)
 	}
 
-	// 3. Verify Administrative System Subgraph Isolation
 	sysAddr := chatSession.GetSystemAddress()
 	if sysAddr.Name != "system" {
 		t.Errorf("Expected system subgraph to be named 'system', got '%s'", sysAddr.Name)
@@ -193,7 +197,6 @@ func TestSystemEngine_Execute_SuccessfulTransition(t *testing.T) {
 		t.Errorf("Expected transition EventSystem node to be dual-written to 'system' subgraph")
 	}
 
-	// 4. Verify Catalyst Prompt Mutation (Dual-Write Inline Badge)
 	mainTimeline, err := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
 	if err != nil {
 		t.Fatalf("Failed to fetch main timeline: %v", err)
@@ -237,7 +240,6 @@ func TestSystemEngine_Execute_InvalidTarget(t *testing.T) {
 		t.Errorf("Expected nil signal on error, got %T", resultSig)
 	}
 
-	// Check if the UI received the system error chunk
 	if len(ui.textChunks) == 0 || !strings.Contains(ui.textChunks[0], "Think state 'non-existent-domain' does not exist") {
 		t.Errorf("Expected UI to receive inline error chunk, got %v", ui.textChunks)
 	}
@@ -249,7 +251,6 @@ func TestSystemEngine_Execute_InvalidSignalType(t *testing.T) {
 
 	address := &thinkgraph.ChatAddress{}
 
-	// Pass an incorrect signal type
 	wrongSignal := &signals.SignalSynthesize{}
 	_, err := systemEngine.Execute(ctx, address, uuid.NewV7(), uuid.NewV7(), wrongSignal, &seMockUI{}, nil)
 

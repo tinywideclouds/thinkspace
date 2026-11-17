@@ -35,8 +35,8 @@ func TestFanOutFlow_StateTransitions(t *testing.T) {
 
 	t.Run("Agents Finished Successfully -> Request Strategy", func(t *testing.T) {
 		state := FlowState{
-			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: true},
+			Candidates: []Candidate{
+				{ID: "cand-1", Passed: true},
 			},
 		}
 		directive := flow.Next(state)
@@ -47,9 +47,9 @@ func TestFanOutFlow_StateTransitions(t *testing.T) {
 
 	t.Run("All Agents Failed -> Still Requests Strategy For User Review/Accept", func(t *testing.T) {
 		state := FlowState{
-			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: false, Trace: "go.mod version mismatch"},
-				{CandidateID: "cand-2", Passed: false, Trace: "test failed"},
+			Candidates: []Candidate{
+				{ID: "cand-1", Passed: false, Trace: "go.mod version mismatch"},
+				{ID: "cand-2", Passed: false, Trace: "test failed"},
 			},
 		}
 		directive := flow.Next(state)
@@ -60,8 +60,8 @@ func TestFanOutFlow_StateTransitions(t *testing.T) {
 
 	t.Run("User Chose Manual Strategy -> Manual Review", func(t *testing.T) {
 		state := FlowState{
-			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: true},
+			Candidates: []Candidate{
+				{ID: "cand-1", Passed: true},
 			},
 			UserStrategy: StrategyManual,
 		}
@@ -73,8 +73,8 @@ func TestFanOutFlow_StateTransitions(t *testing.T) {
 
 	t.Run("User Chose Skip Strategy -> Finish", func(t *testing.T) {
 		state := FlowState{
-			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: true},
+			Candidates: []Candidate{
+				{ID: "cand-1", Passed: true},
 			},
 			UserStrategy: StrategySkip,
 		}
@@ -86,8 +86,8 @@ func TestFanOutFlow_StateTransitions(t *testing.T) {
 
 	t.Run("User Chose Refine Strategy -> Synthesize", func(t *testing.T) {
 		state := FlowState{
-			Candidates: []BranchResult{
-				{CandidateID: "cand-1", Passed: true},
+			Candidates: []Candidate{
+				{ID: "cand-1", Passed: true},
 			},
 			UserStrategy: StrategyRefine,
 		}

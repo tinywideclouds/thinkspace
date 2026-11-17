@@ -22,6 +22,10 @@ func NewTurnUI(connectionManager *ConnectionManager) *TurnUI {
 // It intercepts the pure node and address from the domain, attaches the transport coordinates,
 // marshals the envelope, and dispatches it via the embedded ConnectionManager.
 func (ui *TurnUI) StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node) {
+	if ui == nil || ui.ConnectionManager == nil || address == nil {
+		return
+	}
+
 	coordinate := ProjectionCoordinate{
 		SpaceID:      address.ProjectID,
 		ChatID:       address.ChatID,

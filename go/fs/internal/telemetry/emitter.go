@@ -34,7 +34,9 @@ type MultiEmitter []Emitter
 
 func (m MultiEmitter) Emit(channel string, event Event) {
 	for _, e := range m {
-		e.Emit(channel, event)
+		if e != nil {
+			e.Emit(channel, event)
+		}
 	}
 }
 
@@ -48,7 +50,12 @@ func NewSlogEmitter(logger *slog.Logger) *SlogEmitter {
 }
 
 func (s *SlogEmitter) Emit(channel string, event Event) {
-	log := s.logger.With(
+	logger := s.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	log := logger.With(
 		"channel", channel,
 		"event_id", event.ID.String(),
 		"event_type", event.Type,

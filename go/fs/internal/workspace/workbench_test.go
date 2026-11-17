@@ -42,7 +42,8 @@ func TestWorkbench_Build(t *testing.T) {
 
 	sandbox := &mockWorkbenchSandbox{
 		files: map[string][]byte{
-			"src/main.go": []byte("package main"),
+			"src/main.go":  []byte("package main"),
+			"src/empty.go": []byte(""),
 		},
 	}
 
@@ -69,6 +70,16 @@ func TestWorkbench_Build(t *testing.T) {
 		}
 		if !strings.Contains(res[0].Content, "package main") {
 			t.Errorf("missing file content in output: %s", res[0].Content)
+		}
+	})
+
+	t.Run("Allows Existing Empty File", func(t *testing.T) {
+		res, err := workbench.Build(ctx, sandbox, []string{"src/empty.go"})
+		if err != nil {
+			t.Fatalf("expected existing empty file to succeed, got: %v", err)
+		}
+		if len(res) != 1 || res[0].Content != "" {
+			t.Errorf("expected 1 item with empty content, got %+v", res)
 		}
 	})
 

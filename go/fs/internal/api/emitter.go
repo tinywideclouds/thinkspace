@@ -8,22 +8,35 @@ import (
 )
 
 type WebSocketEmitter struct {
-	ctx  context.Context
-	conn *websocket.Conn
+	sendFn func([]byte)
 }
 
 func NewWebSocketEmitter(ctx context.Context, conn *websocket.Conn) *WebSocketEmitter {
 	return &WebSocketEmitter{
-		ctx:  ctx,
-		conn: conn,
+		sendFn: func(data []byte) {
+			if conn != nil {
+				_ = conn.Write(ctx, websocket.MessageText, data)
+			}
+		},
+	}
+}
+
+func NewConnectionEmitter(cm *ConnectionManager) *WebSocketEmitter {
+	return &WebSocketEmitter{
+		sendFn: func(data []byte) {
+			if cm != nil {
+				cm.SendBytes(data)
+			}
+		},
 	}
 }
 
 func (w *WebSocketEmitter) Emit(channel string, event telemetry.Event) {
+	if w == nil || w.sendFn == nil {
+		return
+	}
 	bytes, err := MarshalTelemetryEvent(channel, event)
 	if err == nil {
-		if writeErr := w.conn.Write(w.ctx, websocket.MessageText, bytes); writeErr != nil {
-			return
-		}
+		w.sendFn(bytes)
 	}
 }

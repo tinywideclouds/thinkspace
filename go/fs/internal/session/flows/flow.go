@@ -1,5 +1,7 @@
 package flows
 
+import "uuid"
+
 // FlowStrategy defines how the user wants to process candidate branches.
 type FlowStrategy string
 
@@ -10,13 +12,24 @@ const (
 	StrategyRefine FlowStrategy = "refine"
 )
 
-// BranchResult encapsulates the final state of a candidate branch produced by a flow.
-type BranchResult struct {
-	CandidateID string
+// Candidate encapsulates the canonical identity and outcome of a candidate branch produced during a flow.
+type Candidate struct {
+	ID          string    // Bare canonical ID (e.g., "<chatID>-flow-<uuid>-agent-1")
+	AgentID     string    // Logical role label (e.g., "agent-1", "synthesis")
+	LeafNodeID  uuid.UUID // Tail graph node ID for this candidate's subgraph branch
 	Passed      bool
 	Trace       string
+	Diff        string
 	RawPayload  string
 	Instruction string
+}
+
+func (c Candidate) BranchRef() string {
+	return "candidate/" + c.ID
+}
+
+func (c Candidate) TagRef() string {
+	return "proposal-" + c.ID
 }
 
 // FlowAction defines the toolkit of capabilities the FlowEngine knows how to execute.
@@ -34,7 +47,7 @@ const (
 // FlowState is passed to the Flow so it can evaluate what has happened so far.
 type FlowState struct {
 	InitialTasks []SubAgentTask
-	Candidates   []BranchResult
+	Candidates   []Candidate
 	UserStrategy FlowStrategy
 	AutoAccept   bool
 }

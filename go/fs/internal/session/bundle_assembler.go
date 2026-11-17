@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"text/template"
 
 	"uuid"
@@ -33,6 +34,9 @@ func NewBundleAssembler(
 	registry *config.Registry,
 	workspaceRoot string,
 ) *BundleAssembler {
+	if projecter == nil {
+		projecter = thinkgraph.NewContextProjecter()
+	}
 	return &BundleAssembler{
 		logger:        logger,
 		graphRepo:     graphRepo,
@@ -52,7 +56,9 @@ func (a *BundleAssembler) Assemble(
 	thinkState spaces.ThinkState,
 ) (cognition.ThinkBundle, *thinkgraph.GraphData, error) {
 	if a.graphRepo == nil {
-		a.logger.ErrorContext(ctx, "cannot assemble bundle: graph repository is nil")
+		if a.logger != nil {
+			a.logger.ErrorContext(ctx, "cannot assemble bundle: graph repository is nil")
+		}
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("graph repository is nil")
 	}
 
@@ -95,8 +101,11 @@ func (a *BundleAssembler) Assemble(
 
 	var catalystNode *thinkgraph.Node
 	if catalystID != uuid.Nil() {
-		nodes, err := a.graphRepo.GetNodes(ctx, chatObj, []string{catalystID.String()})
-		if err == nil && len(nodes) > 0 {
+		nodes, getErr := a.graphRepo.GetNodes(ctx, chatObj, []string{catalystID.String()})
+		if getErr != nil {
+			return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching catalyst node %s: %w", catalystID, getErr)
+		}
+		if len(nodes) > 0 {
 			catalystNode = &nodes[0]
 		}
 	} else if len(volatileEvents) > 0 {
@@ -124,14 +133,15 @@ func (a *BundleAssembler) Assemble(
 	}
 
 	projectWorkspaceDir := filepath.Join(a.workspaceRoot, chatObj.ProjectID, "workspace")
-	rawMapbook, err := thinkState.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
-	if err != nil {
-		return cognition.ThinkBundle{}, nil, fmt.Errorf("generating mapbook layers: %w", err)
-	}
-
 	stringMaps := make(map[string]string)
-	for k, v := range rawMapbook {
-		stringMaps[string(k)] = v
+	if thinkState.Mapbook() != nil {
+		rawMapbook, mbErr := thinkState.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
+		if mbErr != nil {
+			return cognition.ThinkBundle{}, nil, fmt.Errorf("generating mapbook layers: %w", mbErr)
+		}
+		for k, v := range rawMapbook {
+			stringMaps[string(k)] = v
+		}
 	}
 
 	trajectoryRequest := thinkgraph.ContextRequest{
@@ -147,7 +157,10 @@ func (a *BundleAssembler) Assemble(
 	}
 
 	rawSystemPrompt := thinkState.Config().ManagerSystemPrompt()
-	availableSummary := a.registry.AvailableThinkStatesSummary()
+	var availableSummary string
+	if a.registry != nil {
+		availableSummary = a.registry.AvailableThinkStatesSummary()
+	}
 
 	finalSystemPrompt := formatPersona(a.logger, rawSystemPrompt, availableSummary, activeThinkState)
 
@@ -342,5 +355,6 @@ func mapKeys(m map[string]bool) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 	return keys
 }

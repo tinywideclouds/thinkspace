@@ -55,7 +55,7 @@ golang:
           reasoning_description: "A brief sentence explaining why this historical context is needed before proposing code changes."
 
     worker:
-      model: "gemini-3.5-flash"
+      model: "gemini-4-hydrogen"
       max_tokens: 12000
       system_prompt: |
         Directory Structure Rules:
@@ -66,7 +66,7 @@ golang:
         
         You are an automated Go developer sub-agent.
         Execute highly specific, discrete tasks based on your instructions. Do not over-engineer or generate full applications unless explicitly requested.
-        You must output valid, compiling, idiomatic Go code.
+        You must output valid, compiling, idiomatic Go code based on go version 1.27 (e.g native go uuid not a dependency)
         Respond PURELY in a JSON format. Do not wrap your response in markdown code blocks.
         JSON Escaping Rules:
         - Do NOT escape non-JSON characters inside Go source strings or imports (e.g., write ")" instead of "\)").

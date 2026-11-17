@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"google.golang.org/genai"
@@ -31,6 +32,11 @@ func (a *Adapter) GenerateContentStream(
 	registry *tools.Registry,
 	config spaces.ThinkStateConfig,
 ) iter.Seq2[llm.StreamChunk, error] {
+	if a == nil || a.client == nil {
+		return func(yield func(llm.StreamChunk, error) bool) {
+			yield(llm.StreamChunk{}, fmt.Errorf("gemini client is not initialized"))
+		}
+	}
 
 	var genaiTools []*genai.Tool
 	if registry != nil {
@@ -40,16 +46,32 @@ func (a *Adapter) GenerateContentStream(
 		var digest *tools.CreateDigestTool
 
 		if t, ok := registry.Get(string(tools.TransitionThinkState)); ok {
-			transition, _ = t.(*tools.TransitionThinkStateTool)
+			var typeOK bool
+			transition, typeOK = t.(*tools.TransitionThinkStateTool)
+			if !typeOK {
+				slog.WarnContext(ctx, "registered tool did not match expected type", "tool", tools.TransitionThinkState, "actual_type", fmt.Sprintf("%T", t))
+			}
 		}
 		if p, ok := registry.Get(string(tools.ProposeChange)); ok {
-			propose, _ = p.(*tools.ProposeChangeTool)
+			var typeOK bool
+			propose, typeOK = p.(*tools.ProposeChangeTool)
+			if !typeOK {
+				slog.WarnContext(ctx, "registered tool did not match expected type", "tool", tools.ProposeChange, "actual_type", fmt.Sprintf("%T", p))
+			}
 		}
 		if q, ok := registry.Get(string(tools.QueryLens)); ok {
-			query, _ = q.(*tools.QueryLensTool)
+			var typeOK bool
+			query, typeOK = q.(*tools.QueryLensTool)
+			if !typeOK {
+				slog.WarnContext(ctx, "registered tool did not match expected type", "tool", tools.QueryLens, "actual_type", fmt.Sprintf("%T", q))
+			}
 		}
 		if d, ok := registry.Get(string(tools.CreateDigest)); ok {
-			digest, _ = d.(*tools.CreateDigestTool)
+			var typeOK bool
+			digest, typeOK = d.(*tools.CreateDigestTool)
+			if !typeOK {
+				slog.WarnContext(ctx, "registered tool did not match expected type", "tool", tools.CreateDigest, "actual_type", fmt.Sprintf("%T", d))
+			}
 		}
 
 		genaiTools = geminitools.CompileCoreTools(transition, propose, query, digest, config)
@@ -91,10 +113,11 @@ func (a *Adapter) GenerateContentStream(
 							parsedChunk.Text += part.Text
 						}
 						if part.FunctionCall != nil {
-							var argKeys []string
+							argKeys := make([]string, 0, len(part.FunctionCall.Args))
 							for k := range part.FunctionCall.Args {
 								argKeys = append(argKeys, k)
 							}
+							sort.Strings(argKeys)
 							slog.InfoContext(ctx, "gemini stream yielded function call",
 								"model", model,
 								"tool_name", part.FunctionCall.Name,
@@ -136,8 +159,13 @@ func (a *Adapter) compileSystemInstruction(bundle cognition.ThinkBundle) string 
 	}
 	if len(bundle.Mapbook.Maps) > 0 {
 		b.WriteString("\n\n### THE MAPBOOK\n")
-		for mapName, mapContent := range bundle.Mapbook.Maps {
-			b.WriteString(fmt.Sprintf("\n--- %s ---\n%s\n", mapName, mapContent))
+		mapNames := make([]string, 0, len(bundle.Mapbook.Maps))
+		for mapName := range bundle.Mapbook.Maps {
+			mapNames = append(mapNames, mapName)
+		}
+		sort.Strings(mapNames)
+		for _, mapName := range mapNames {
+			b.WriteString(fmt.Sprintf("\n--- %s ---\n%s\n", mapName, bundle.Mapbook.Maps[mapName]))
 		}
 	}
 	return b.String()
@@ -170,8 +198,12 @@ func (a *Adapter) compileHistory(bundle cognition.ThinkBundle) []*genai.Content 
 		catalyst.WriteString("\n")
 	}
 	catalyst.WriteString(bundle.Trajectory.Catalyst.Content)
+	catalystRole := bundle.Trajectory.Catalyst.Role
+	if catalystRole == "" {
+		catalystRole = "user"
+	}
 	history = append(history, &genai.Content{
-		Role:  bundle.Trajectory.Catalyst.Role,
+		Role:  catalystRole,
 		Parts: []*genai.Part{{Text: catalyst.String()}},
 	})
 	return history

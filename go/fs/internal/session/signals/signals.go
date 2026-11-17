@@ -1,11 +1,30 @@
 package signals
 
 import (
+	"context"
+
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
+
+// GraphStreamer is the minimal UI capability needed to push graph node updates.
+type GraphStreamer interface {
+	StreamGraphEvent(address *thinkgraph.ChatAddress, node thinkgraph.Node)
+}
+
+// FlowHandle represents a transferable, thread-safe lifecycle controller for an active flow
+// and all candidate branches spawned during its execution.
+type FlowHandle interface {
+	RegisterCandidate(cand flows.Candidate)
+	Candidates() []flows.Candidate
+	ResolveCandidate(ctx context.Context, candidateID string, accept bool, reason string) error
+	Finalize(ctx context.Context, fallbackReason string) error
+	SetRunning(ctx context.Context, summary string, agents []flows.AgentRecord, streamer GraphStreamer) error
+	Complete(ctx context.Context, summary string, agents []flows.AgentRecord, streamer GraphStreamer) error
+	Fail(ctx context.Context, summary string, errTrace string, agents []flows.AgentRecord, streamer GraphStreamer) error
+}
 
 // EngineSignal represents a strictly typed intent yielded by a tool or engine back to the ChatSession supervisor.
 type EngineSignal interface {
@@ -34,7 +53,8 @@ func (s *SignalDispatchFlow) IsTerminal() bool { return false }
 type SignalSynthesize struct {
 	OriginalInstruction string
 	OriginalContext     string
-	Candidates          []flows.BranchResult
+	Candidates          []flows.Candidate
+	Flow                FlowHandle
 	FlowAddress         *thinkgraph.ChatAddress
 	ParentNodeID        uuid.UUID
 	AutoAccept          bool

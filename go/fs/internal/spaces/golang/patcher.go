@@ -9,8 +9,10 @@ import (
 	"go/token"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 	"golang.org/x/tools/imports"
 )
@@ -39,16 +41,29 @@ type PatchRequest struct {
 }
 
 func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSandbox, llmOutput string) error {
+	cleanedOutput := llmOutput
+	if healed, modified := llm.DefaultJSONHealer().Heal(llmOutput); modified {
+		cleanedOutput = healed
+	}
+
 	var payload struct {
 		Patches []PatchRequest `json:"patches"`
 	}
 
-	if err := json.Unmarshal([]byte(llmOutput), &payload); err != nil {
+	if err := json.Unmarshal([]byte(cleanedOutput), &payload); err != nil {
 		return fmt.Errorf("invalid patch JSON: %w", err)
 	}
 
 	for _, patch := range payload.Patches {
-		cleanPath := filepath.ToSlash(filepath.Clean(patch.File))
+		rawPath := strings.TrimSpace(patch.File)
+		if rawPath == "" {
+			return fmt.Errorf("patch entry is missing target file path")
+		}
+
+		cleanPath := filepath.ToSlash(filepath.Clean(rawPath))
+		if filepath.IsAbs(cleanPath) || cleanPath == "." || cleanPath == ".." || strings.HasPrefix(cleanPath, "../") {
+			return fmt.Errorf("invalid or escaping target file path: %q", patch.File)
+		}
 
 		args := []any{"action", patch.Action, "file", cleanPath}
 		if patch.Name != "" {
@@ -56,27 +71,27 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 		}
 		slog.InfoContext(ctx, "applied AST patch", args...)
 
-		if patch.Action == "full_replace" {
+		switch patch.Action {
+		case "full_replace":
 			if err := p.writeFile(ctx, sandbox, cleanPath, []byte(patch.Code)); err != nil {
 				return err
 			}
-			continue
-		}
 
-		src, err := sandbox.ReadFile(ctx, cleanPath)
-		if err != nil {
-			return fmt.Errorf("cannot patch missing file %s. Use full_replace to create new files", cleanPath)
-		}
-
-		if patch.Action == "add_code" {
-			src = append(src, []byte("\n\n"+patch.Code)...)
-			if err := p.writeFile(ctx, sandbox, cleanPath, src); err != nil {
+		case "add_code":
+			src, err := sandbox.ReadFile(ctx, cleanPath)
+			if err != nil {
+				return fmt.Errorf("cannot patch missing file %s (use full_replace to create new files): %w", cleanPath, err)
+			}
+			combined := append(slices.Clone(src), []byte("\n\n"+patch.Code)...)
+			if err := p.writeFile(ctx, sandbox, cleanPath, combined); err != nil {
 				return err
 			}
-			continue
-		}
 
-		if patch.Action == "replace_function" {
+		case "replace_function":
+			src, err := sandbox.ReadFile(ctx, cleanPath)
+			if err != nil {
+				return fmt.Errorf("cannot patch missing file %s (use full_replace to create new files): %w", cleanPath, err)
+			}
 			newSrc, err := p.replaceFunctionAST(src, patch.Name, patch.Code)
 			if err != nil {
 				return fmt.Errorf("failed to apply AST patch to %s: %w", cleanPath, err)
@@ -84,6 +99,9 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 			if err := p.writeFile(ctx, sandbox, cleanPath, newSrc); err != nil {
 				return err
 			}
+
+		default:
+			return fmt.Errorf("unsupported patch action %q for file %s", patch.Action, cleanPath)
 		}
 	}
 
@@ -110,6 +128,10 @@ func (p *GoASTPatcher) writeFile(ctx context.Context, sandbox workspace.Candidat
 }
 
 func (p *GoASTPatcher) replaceFunctionAST(src []byte, funcName string, newCode string) ([]byte, error) {
+	if strings.TrimSpace(funcName) == "" {
+		return nil, fmt.Errorf("replace_function requires a non-empty function name")
+	}
+
 	fset := token.NewFileSet()
 	node, err := parser.ParseFile(fset, "", src, parser.ParseComments)
 	if err != nil {

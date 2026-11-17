@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -39,6 +40,11 @@ concept:
 fanout:
   type: "flow"
   name: "Parallel FanOut"
+  retry_prompt: "Retry"
+  review_prompt: "Review"
+  refine_prompt: "Refine"
+  synthesize_prompt: "Synthesize"
+  synthesis_review_prompt: "Summary"
 digest:
   type: "core"
   name: "Digest Manager"
@@ -67,24 +73,67 @@ digest:
 	}
 
 	// Test Flow decoding
-	type mockConfig struct {
-		Name string `yaml:"name"`
-	}
-	var flowCfg mockConfig
-	if err := registry.DecodeFlowConfig("fanout", &flowCfg); err != nil {
-		t.Fatalf("DecodeFlowConfig failed: %v", err)
+	flowCfg, err := registry.GetFanOutConfig()
+	if err != nil {
+		t.Fatalf("GetFanOutConfig failed: %v", err)
 	}
 	if flowCfg.Name != "Parallel FanOut" {
 		t.Errorf("Expected flow name 'Parallel FanOut', got %q", flowCfg.Name)
 	}
 
 	// Test Core decoding
+	type mockConfig struct {
+		Name string `yaml:"name"`
+	}
 	var coreCfg mockConfig
 	if err := registry.DecodeCoreConfig("digest", &coreCfg); err != nil {
 		t.Fatalf("DecodeCoreConfig failed: %v", err)
 	}
 	if coreCfg.Name != "Digest Manager" {
 		t.Errorf("Expected core name 'Digest Manager', got %q", coreCfg.Name)
+	}
+}
+
+func TestRegistry_LoadFS_ReportsInvalidFlowWithoutBlockingSubsequentThinkStates(t *testing.T) {
+	mockFS := fstest.MapFS{
+		"fanout.yaml": &fstest.MapFile{
+			Data: []byte(`
+fanout:
+  type: "flow"
+  name: "Parallel FanOut"
+  retry_prompt: "Retry"
+`),
+		},
+		"golang.yaml": &fstest.MapFile{
+			Data: []byte(`
+golang:
+  type: "thinkstate"
+  name: "Golang Environment"
+`),
+		},
+		"intake.yaml": &fstest.MapFile{
+			Data: []byte(`
+intake:
+  type: "thinkstate"
+  name: "Intake"
+`),
+		},
+	}
+
+	registry := config.NewRegistry()
+	err := registry.LoadFS(mockFS, ".")
+	if err == nil {
+		t.Fatalf("expected LoadFS to return error for invalid fanout config, got nil")
+	}
+	if !strings.Contains(err.Error(), "fanout.yaml") {
+		t.Errorf("expected error to identify failing file fanout.yaml, got: %v", err)
+	}
+
+	if _, ok := registry.GetThinkState("golang"); !ok {
+		t.Errorf("expected 'golang' think state to still load when fanout.yaml fails validation")
+	}
+	if _, ok := registry.GetThinkState("intake"); !ok {
+		t.Errorf("expected 'intake' think state to still load when fanout.yaml fails validation")
 	}
 }
 

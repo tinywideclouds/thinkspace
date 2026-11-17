@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type FileLedger struct {
+	mu                sync.Mutex
 	MaxEventsPerShard int
 	workspaceRoot     string
 }
@@ -33,6 +35,9 @@ func ResolveLogDirName(subgraphName string) string {
 }
 
 func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Event) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	name := c.Name
 	if name == "" {
 		name = "main"
@@ -48,12 +53,16 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Even
 
 	if manifest.EventCount >= l.MaxEventsPerShard {
 		var i int
-		fmt.Sscanf(manifest.ActiveShard, "%d.jsonl", &i)
+		if _, scanErr := fmt.Sscanf(manifest.ActiveShard, "%d.jsonl", &i); scanErr != nil {
+			return fmt.Errorf("parsing active shard filename %q: %w", manifest.ActiveShard, scanErr)
+		}
 		manifest.ActiveShard = fmt.Sprintf("%05d.jsonl", i+1)
 		manifest.EventCount = 0
 	}
 
-	event.GraphID = c.GraphID
+	if event.GraphID.IsZero() {
+		event.GraphID = c.GraphID
+	}
 
 	b, err := json.Marshal(event)
 	if err != nil {
@@ -61,17 +70,23 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Even
 	}
 
 	logsDir := filepath.Join(ledgerDir, "logs", dirName)
-	_ = os.MkdirAll(logsDir, 0755)
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		return fmt.Errorf("creating logs directory %s: %w", logsDir, err)
+	}
 
 	shardPath := filepath.Join(logsDir, manifest.ActiveShard)
 	f, err := os.OpenFile(shardPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("opening ledger shard: %w", err)
 	}
-	defer f.Close()
 
 	if _, err := f.Write(append(b, '\n')); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("writing event: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing ledger shard: %w", err)
 	}
 
 	manifest.EventCount++
@@ -80,8 +95,13 @@ func (l *FileLedger) AppendEvent(ctx context.Context, c *ChatAddress, event Even
 }
 
 func (l *FileLedger) SaveDigest(ctx context.Context, c *ChatAddress, digest DigestMeta) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	digestsDir := filepath.Join(l.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "digests")
-	_ = os.MkdirAll(digestsDir, 0755)
+	if err := os.MkdirAll(digestsDir, 0755); err != nil {
+		return fmt.Errorf("creating digests directory %s: %w", digestsDir, err)
+	}
 
 	isSticky := "false"
 	if digest.Promoted {
@@ -114,8 +134,13 @@ func (l *FileLedger) SaveDigest(ctx context.Context, c *ChatAddress, digest Dige
 }
 
 func (l *FileLedger) SaveSpaceContext(ctx context.Context, c *ChatAddress, spaceCtx SpaceContext) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	contextsDir := filepath.Join(l.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "contexts")
-	_ = os.MkdirAll(contextsDir, 0755)
+	if err := os.MkdirAll(contextsDir, 0755); err != nil {
+		return fmt.Errorf("creating contexts directory %s: %w", contextsDir, err)
+	}
 
 	var tagStrs []string
 	for _, tag := range spaceCtx.Tags {
@@ -134,8 +159,13 @@ func (l *FileLedger) SaveSpaceContext(ctx context.Context, c *ChatAddress, space
 }
 
 func (l *FileLedger) SaveMutation(ctx context.Context, c *ChatAddress, mutation Mutator) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	mutationsDir := filepath.Join(l.workspaceRoot, c.ProjectID, "chats", c.ChatID, "ledger", "mutations")
-	_ = os.MkdirAll(mutationsDir, 0755)
+	if err := os.MkdirAll(mutationsDir, 0755); err != nil {
+		return fmt.Errorf("creating mutations directory %s: %w", mutationsDir, err)
+	}
 
 	b, err := json.MarshalIndent(mutation, "", "  ")
 	if err != nil {

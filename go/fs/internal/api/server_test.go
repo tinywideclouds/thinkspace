@@ -59,16 +59,21 @@ func setupTestServer(t *testing.T) (*http.ServeMux, string, *workspace.ServiceMa
   name: test-domain
   system_prompt: "You are a test assistant."
   roles:
-    manager: "manager rules"
-    worker: "worker rules"
-  models:
-    manager: "gemini-test-manager"
-    worker: "gemini-test-worker"
+    manager:
+      model: "gemini-test-manager"
+      system_prompt: "manager rules"
+    worker:
+      model: "gemini-test-worker"
+      system_prompt: "worker rules"
 
 fanout:
   type: flow
   name: FanOut Flow
   retry_prompt: "retry"
+  review_prompt: "review"
+  refine_prompt: "refine"
+  synthesize_prompt: "synthesize"
+  synthesis_review_prompt: "synthesis_review"
 `
 	configPath := filepath.Join(configsDir, "golang.yaml")
 	if err := os.WriteFile(configPath, []byte(yamlContent), 0644); err != nil {

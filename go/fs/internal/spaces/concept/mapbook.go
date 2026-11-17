@@ -2,9 +2,12 @@ package concept
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
@@ -31,57 +34,79 @@ func (m *ConceptMapbook) GenerateLayers(ctx context.Context, workspaceRoot strin
 
 	conceptIndex := make(map[string][]string) // tag -> list of files
 
-	err := filepath.Walk(workspaceRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(info.Name(), ".md") {
+	err := filepath.WalkDir(workspaceRoot, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if path == workspaceRoot && errors.Is(walkErr, os.ErrNotExist) {
+				return filepath.SkipAll
+			}
+			return walkErr
+		}
+
+		if d.IsDir() {
+			if path != workspaceRoot && (d.Name() == "chats" || strings.HasPrefix(d.Name(), ".")) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 
-		relPath, _ := filepath.Rel(workspaceRoot, path)
-
-		// Skip internal chat histories
-		if strings.HasPrefix(relPath, "chats") {
+		if !strings.HasSuffix(d.Name(), ".md") {
 			return nil
+		}
+
+		relPath, relErr := filepath.Rel(workspaceRoot, path)
+		if relErr != nil {
+			return fmt.Errorf("computing relative path for %s: %w", path, relErr)
 		}
 
 		content, readErr := os.ReadFile(path)
 		if readErr != nil {
-			return nil
+			return fmt.Errorf("reading markdown file %s: %w", relPath, readErr)
 		}
 
 		var fm Frontmatter
 		if fmData := m.extractFrontmatter(string(content)); fmData != "" {
-			_ = yaml.Unmarshal([]byte(fmData), &fm)
+			if unmarshalErr := yaml.Unmarshal([]byte(fmData), &fm); unmarshalErr != nil {
+				return fmt.Errorf("parsing frontmatter in %s: %w", filepath.ToSlash(relPath), unmarshalErr)
+			}
 		}
 
-		// Fallbacks if frontmatter is missing
 		title := fm.Title
 		if title == "" {
 			title = filepath.Base(relPath)
 		}
 
-		tocBuilder.WriteString(fmt.Sprintf("- %s (%s)\n", filepath.ToSlash(relPath), title))
+		slashPath := filepath.ToSlash(relPath)
+		tocBuilder.WriteString(fmt.Sprintf("- %s (%s)\n", slashPath, title))
 		if fm.Overview != "" {
 			tocBuilder.WriteString(fmt.Sprintf("  Overview: %s\n", fm.Overview))
 		}
 
 		for _, tag := range fm.Tags {
-			conceptIndex[tag] = append(conceptIndex[tag], filepath.ToSlash(relPath))
+			if trimmed := strings.TrimSpace(tag); trimmed != "" {
+				conceptIndex[trimmed] = append(conceptIndex[trimmed], slashPath)
+			}
 		}
 
 		return nil
 	})
-
-	if err == nil {
-		layers[spaces.LayerStructural] = tocBuilder.String()
+	if err != nil {
+		return nil, fmt.Errorf("walking workspace for concept mapbook: %w", err)
 	}
+
+	layers[spaces.LayerStructural] = tocBuilder.String()
 
 	var indexBuilder strings.Builder
 	indexBuilder.WriteString("Conceptual Index (Tags to Files):\n")
 	if len(conceptIndex) == 0 {
 		indexBuilder.WriteString("No tagged files found yet.\n")
 	} else {
-		for tag, files := range conceptIndex {
-			indexBuilder.WriteString(fmt.Sprintf("#%s -> %s\n", tag, strings.Join(files, ", ")))
+		tags := make([]string, 0, len(conceptIndex))
+		for tag := range conceptIndex {
+			tags = append(tags, tag)
+		}
+		sort.Strings(tags)
+		for _, tag := range tags {
+			indexBuilder.WriteString(fmt.Sprintf("#%s -> %s\n", tag, strings.Join(conceptIndex[tag], ", ")))
 		}
 	}
 	layers[spaces.LayerConceptual] = indexBuilder.String()

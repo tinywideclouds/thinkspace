@@ -76,6 +76,56 @@ type refineBranchView struct {
 	Diff        string
 }
 
+func (e *SynthesizeEngine) loadFanOutConfig() (config.FanOutFlowConfig, error) {
+	if e.registry == nil {
+		return config.FanOutFlowConfig{}, fmt.Errorf("config registry is nil; cannot load fanout flow config")
+	}
+	fanoutCfg, err := e.registry.GetFanOutConfig()
+	if err != nil {
+		return config.FanOutFlowConfig{}, fmt.Errorf("loading fanout flow config: %w", err)
+	}
+	return fanoutCfg, nil
+}
+
+func (e *SynthesizeEngine) appendSubgraphResolution(
+	ctx context.Context,
+	flowAddress *thinkgraph.ChatAddress,
+	parentNodeID uuid.UUID,
+	candidateID string,
+	accepted bool,
+	reason string,
+	ui UserInterface,
+) error {
+	statusStr := "REJECTED"
+	if accepted {
+		statusStr = "ACCEPTED"
+	}
+	resEvent := thinkgraph.NewEvent(workspace.EventCandidateResolution, fmt.Sprintf("Proposal %s. Reason: %s", statusStr, reason))
+	resEvent.Metadata["agent_id"] = "synthesis"
+	if resEvent.Edges == nil {
+		resEvent.Edges = make(map[string]string)
+	}
+	if parentNodeID != uuid.Nil() {
+		resEvent.Edges["parent_id"] = parentNodeID.String()
+	}
+
+	resPayload := workspace.CandidateResolution{
+		CandidateID: candidateID,
+		Accepted:    accepted,
+		Reason:      reason,
+	}
+	resBytes, err := json.Marshal(resPayload)
+	if err != nil {
+		return fmt.Errorf("marshaling synthesis resolution payload: %w", err)
+	}
+	resEvent.Data = resBytes
+
+	if err := e.broadcaster.AppendAndStream(ctx, flowAddress, resEvent, ui); err != nil {
+		return fmt.Errorf("appending synthesis candidate resolution event: %w", err)
+	}
+	return nil
+}
+
 func (e *SynthesizeEngine) Execute(
 	ctx context.Context,
 	chatSession *thinkgraph.ChatAddress,
@@ -90,6 +140,35 @@ func (e *SynthesizeEngine) Execute(
 		return nil, fmt.Errorf("SynthesizeEngine expected SignalSynthesize, got %T", signal)
 	}
 
+	fanoutCfg, err := e.loadFanOutConfig()
+	if err != nil {
+		return nil, err
+	}
+	synthesizePrompt := strings.TrimSpace(fanoutCfg.SynthesizePrompt)
+	synthesisReviewPromptTmpl := strings.TrimSpace(fanoutCfg.SynthesisReviewPrompt)
+
+	scope := sig.Flow
+	if scope == nil {
+		var flowNodeID uuid.UUID
+		if sig.FlowAddress != nil {
+			flowNodeID = sig.FlowAddress.GraphID.UUID
+		}
+		localScope := NewFlowScope(e.logger, e.service, e.broadcaster, chatSession, sig.FlowAddress, flowNodeID)
+		for _, c := range sig.Candidates {
+			localScope.RegisterCandidate(c)
+		}
+		scope = localScope
+	}
+
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			if finalizeErr := scope.Finalize(ctx, "Superseded by synthesis"); finalizeErr != nil && e.logger != nil {
+				e.logger.ErrorContext(ctx, "failed to finalize flow scope after synthesis", "error", finalizeErr)
+			}
+		}
+	}()
+
 	e.session.mu.RLock()
 	activeThinkState := e.session.Meta.ActiveThinkState
 	e.session.mu.RUnlock()
@@ -99,205 +178,314 @@ func (e *SynthesizeEngine) Execute(
 		return nil, fmt.Errorf("think state configuration not found: %s", activeThinkState)
 	}
 
+	candidates := sig.Candidates
+	if len(candidates) == 0 {
+		candidates = scope.Candidates()
+	}
+
 	if emitter != nil {
 		emitter.Emit("manager", telemetry.Event{
 			ID:        uuid.NewV7(),
 			Type:      "flow_status",
 			Timestamp: time.Now(),
-			Message:   fmt.Sprintf("Synthesizing refined solution from %d candidates...", len(sig.Candidates)),
+			Message:   fmt.Sprintf("Manager evaluating %d candidate(s) for synthesis...", len(candidates)),
 		})
 	}
 
-	// 1. Render refine_prompt template with candidate diffs and verification traces
+	// Stage 1: Render refine_prompt template with candidate diffs and verification traces
 	var branchViews []refineBranchView
-	for _, cand := range sig.Candidates {
-		branchName := strings.TrimPrefix(cand.CandidateID, "candidate/")
-		diff, diffErr := e.service.ReadCandidate(ctx, chatSession, branchName)
-		if diffErr != nil {
-			e.logger.WarnContext(ctx, "failed reading candidate diff for synthesis", "candidate", branchName, "error", diffErr)
-			diff = cand.RawPayload
+	for _, cand := range candidates {
+		diff := cand.Diff
+		if diff == "" && e.service != nil {
+			if readDiff, diffErr := e.service.ReadCandidate(ctx, chatSession, cand.ID); diffErr != nil {
+				if e.logger != nil {
+					e.logger.WarnContext(ctx, "failed reading candidate diff for synthesis", "candidate", cand.ID, "error", diffErr)
+				}
+				diff = cand.RawPayload
+			} else {
+				diff = readDiff
+			}
 		}
 		branchViews = append(branchViews, refineBranchView{
-			CandidateID: cand.CandidateID,
+			CandidateID: cand.BranchRef(),
 			Passed:      cand.Passed,
 			Trace:       cand.Trace,
 			Diff:        diff,
 		})
 	}
 
-	renderedInstruction := sig.OriginalInstruction
+	renderedRefinePrompt := sig.OriginalInstruction
 	if tmpl, parseErr := template.New("refine").Parse(sig.OriginalInstruction); parseErr == nil {
 		var buf bytes.Buffer
 		if execErr := tmpl.Execute(&buf, map[string]any{"Branches": branchViews}); execErr == nil {
-			renderedInstruction = buf.String()
-		} else {
+			renderedRefinePrompt = buf.String()
+		} else if e.logger != nil {
 			e.logger.WarnContext(ctx, "failed executing refine prompt template", "error", execErr)
 		}
-	} else {
+	} else if e.logger != nil {
 		e.logger.WarnContext(ctx, "failed parsing refine prompt template", "error", parseErr)
 	}
 
+	// Append refine evaluation prompt node onto the subgraph (linked from optionsNodeID)
 	synthPromptID := uuid.NewV7()
-	promptNode := thinkgraph.NewEvent(thinkgraph.EventPrompt, "[Synthesis Phase]: "+renderedInstruction)
+	promptNode := thinkgraph.NewEvent(thinkgraph.EventPrompt, renderedRefinePrompt)
 	promptNode.ID = synthPromptID
+	promptNode.Metadata["agent_id"] = "manager"
 	promptNode.Edges = map[string]string{"parent_id": sig.ParentNodeID.String()}
 
 	if err := e.broadcaster.AppendAndStream(ctx, sig.FlowAddress, promptNode, ui); err != nil {
-		e.logger.ErrorContext(ctx, "failed to append synthesis prompt node", "error", err, "node_id", synthPromptID)
+		return nil, fmt.Errorf("appending synthesis evaluation prompt node: %w", err)
 	}
 
-	if emitter != nil {
-		emitter.Emit("manager", telemetry.Event{
-			ID:        uuid.NewV7(),
-			Type:      "flow_status",
-			Timestamp: time.Now(),
-			Message:   "Applying synthesized patches and verifying workspace...",
-		})
-	}
-
-	// 2. Subgraph Worker Turn via SubAgentRunner: Generate, patch, verify, and deliver golden candidate
-	synthResult := e.runner.ExecuteCandidate(ctx, CandidateExecutionRequest{
-		ChatSession:    chatSession,
-		FlowAddress:    sig.FlowAddress,
-		Space:          space,
-		CandidateID:    "synthesis-refine",
-		BaseAgentRules: space.Config().WorkerSystemPrompt(),
-		ContextDigest:  sig.OriginalContext,
-		Instruction:    "[Synthesis Phase]: Combine the best approaches from the candidate branches:\n\n" + renderedInstruction,
-		ParentNodeID:   synthPromptID,
-		DraftMessage:   "Applied synthesized golden candidate",
-		UI:             nil,
-		Emitter:        emitter,
-	})
-	if synthResult.Err != nil {
-		e.updateMainTimelineFlowCard(ctx, chatSession, sig.FlowAddress.GraphID.UUID, flows.FlowStatusFailed, "Synthesis generation failed: "+synthResult.Err.Error(), ui)
-		return nil, fmt.Errorf("synthesis execution failed: %w", synthResult.Err)
-	}
-
-	patchApplied := synthResult.PatchApplied
-	verified := synthResult.Passed
-	verifyTrace := "Synthesis verification passed."
-	if !verified {
-		verifyTrace = synthResult.Trace
-	}
-	synthesizedDiff := synthResult.Diff
-
-	// 3. Main Timeline Manager Review Turn: Summarize the flow outcome in plain Markdown
-	var reviewPrompt strings.Builder
-	reviewPrompt.WriteString("The parallel sub-agent flow and synthesis phase have concluded. Provide a concise, human-readable summary of what was accomplished, comparing the candidate approaches and explaining the final synthesized changes.\n")
-	reviewPrompt.WriteString("Do NOT output raw JSON patches. Respond in clean Markdown for the user.\n\n")
-	reviewPrompt.WriteString(fmt.Sprintf("### Goal Context\n%s\n\n", sig.OriginalContext))
-	reviewPrompt.WriteString(fmt.Sprintf("### Synthesis Verification\n- **Verified:** %v\n- **Trace:** %s\n\n", verified, verifyTrace))
-	if synthesizedDiff != "" {
-		reviewPrompt.WriteString(fmt.Sprintf("### Applied Diff\n```diff\n%s\n```\n", synthesizedDiff))
-	}
-
-	managerBundle := e.bundleAssembler.AssembleWorkerBundle(
+	// Manager LLM evaluates the candidate diffs on the subgraph to produce the comparative evaluation
+	evalBundle := e.bundleAssembler.AssembleWorkerBundle(
 		ctx,
 		chatSession.ProjectID,
 		space,
 		space.Config().ManagerSystemPrompt(),
 		sig.OriginalContext,
-		reviewPrompt.String(),
+		renderedRefinePrompt,
 		nil,
 	)
-	managerBundle.Rules.FormattingConstraints = ""
+	evalBundle.Rules.FormattingConstraints = ""
 
-	reviewNodeID := uuid.NewV7()
-	if _, reviewErr := e.turnExecutor.Execute(ctx, chatSession, reviewNodeID, sig.ParentNodeID, true, space, managerBundle, tools.NewRegistry(), ui, emitter); reviewErr != nil {
-		e.logger.ErrorContext(ctx, "failed executing Manager flow review turn", "error", reviewErr)
+	evalMux := &streamMultiplexer{ui: ui, streamTextChunks: false}
+	evalModelID := uuid.NewV7()
+	managerModel := space.Config().Roles.Manager.Model
+
+	if _, evalErr := e.turnExecutor.Execute(ctx, sig.FlowAddress, evalModelID, synthPromptID, managerModel, false, space, evalBundle, tools.NewRegistry(), evalMux, emitter); evalErr != nil {
+		if failErr := scope.Fail(ctx, "Manager synthesis evaluation failed: "+evalErr.Error(), evalErr.Error(), nil, ui); failErr != nil && e.logger != nil {
+			e.logger.ErrorContext(ctx, "failed recording synthesis evaluation error", "error", failErr)
+		}
+		return nil, fmt.Errorf("executing manager synthesis evaluation: %w", evalErr)
 	}
 
-	// 4. Final Resolution: Auto-accept only when verified + AutoAccept; otherwise always prompt user for [Accept]/[Reject]
+	mut := thinkgraph.MetadataMutation{Metadata: map[string]string{"agent_id": "manager"}}
+	mut.TargetID = evalModelID
+	mut.Type = thinkgraph.MutationMetadata
+	mut.Timestamp = time.Now().UTC()
+	if err := e.broadcaster.MutateAndStream(ctx, sig.FlowAddress, mut, evalModelID, ui); err != nil {
+		return nil, fmt.Errorf("mutating manager metadata on synthesis evaluation node: %w", err)
+	}
+
+	comparativeEval := strings.TrimSpace(evalMux.buffer.String())
+
+	// Stage 2: Execute the single synthesized candidate via SubAgentRunner.Run on the subgraph.
+	// DeferResolutionEvent prevents SubAgentRunner from writing "Proposal ACCEPTED" onto the
+	// subgraph before Stage 4 collects the user's Accept/Reject decision.
+	var digestBuilder strings.Builder
+	if strings.TrimSpace(sig.OriginalContext) != "" {
+		digestBuilder.WriteString(strings.TrimSpace(sig.OriginalContext))
+		digestBuilder.WriteString("\n\n")
+	}
+	if comparativeEval != "" {
+		digestBuilder.WriteString("### Manager Comparative Evaluation\n")
+		digestBuilder.WriteString(comparativeEval)
+	}
+
+	flowName := ""
+	if sig.FlowAddress != nil && sig.FlowAddress.SubGraph.Name != "" {
+		flowName = sig.FlowAddress.SubGraph.Name
+	} else {
+		flowName = fmt.Sprintf("flow-%s", uuid.NewV7().String())
+	}
+
+	flowContext := flows.FlowContext{
+		FlowID:         flowName,
+		SpaceID:        chatSession.ProjectID,
+		BaseAgentRules: space.Config().WorkerSystemPrompt(),
+		FlowSummary:    "Synthesizing refined solution",
+	}
+
+	synthTask := flows.SubAgentTask{
+		AgentID:       "synthesis",
+		ContextDigest: digestBuilder.String(),
+		Instruction:   synthesizePrompt,
+		RetryPrompt:   space.Config().Roles.Worker.RetryPrompt,
+	}
+
+	synthResult := e.runner.Run(ctx, SubAgentRunRequest{
+		ChatSession:          chatSession,
+		FlowAddress:          sig.FlowAddress,
+		Scope:                scope,
+		Space:                space,
+		FlowContext:          flowContext,
+		Task:                 synthTask,
+		AgentIndex:           len(candidates) + 1,
+		ParentNodeID:         evalModelID,
+		DeferResolutionEvent: true,
+		UI:                   ui,
+		Emitter:              emitter,
+	})
+
+	if synthResult.Err != nil || !synthResult.PatchApplied {
+		errMsg := "Synthesis failed to produce a patch."
+		if synthResult.Err != nil {
+			errMsg = synthResult.Err.Error()
+		} else if synthResult.Trace != "" {
+			errMsg = synthResult.Trace
+		}
+
+		if synthResult.GenNodeID != uuid.Nil() {
+			if resErr := e.appendSubgraphResolution(ctx, sig.FlowAddress, synthResult.GenNodeID, synthResult.CandidateID, false, errMsg, ui); resErr != nil {
+				return nil, resErr
+			}
+		}
+
+		// Never abandon the user: if surviving worker candidates exist, allow manual review on them
+		if len(candidates) > 0 && ui != nil {
+			acceptedCount := 0
+			for _, cand := range candidates {
+				accepted, userReason := ui.ReviewCandidate(cand.BranchRef())
+				if accepted {
+					acceptedCount++
+				}
+				reason := strings.TrimSpace(userReason)
+				if reason == "" {
+					if accepted {
+						reason = "Accepted by user after synthesis failure"
+					} else {
+						reason = "Rejected by user after synthesis failure"
+					}
+				}
+				if err := scope.ResolveCandidate(ctx, cand.ID, accepted, reason); err != nil {
+					return nil, fmt.Errorf("resolving surviving candidate %s: %w", cand.ID, err)
+				}
+			}
+
+			if acceptedCount > 0 {
+				if err := scope.Complete(ctx, fmt.Sprintf("Synthesis failed (%s); accepted %d surviving candidate(s).", errMsg, acceptedCount), nil, ui); err != nil {
+					return nil, err
+				}
+			} else {
+				if err := scope.Fail(ctx, "Synthesis failed and all surviving candidates were rejected.", errMsg, nil, ui); err != nil {
+					return nil, err
+				}
+			}
+			return &signals.SignalTerminal{}, nil
+		}
+
+		if failErr := scope.Fail(ctx, "Synthesis failed: "+errMsg, errMsg, nil, ui); failErr != nil && e.logger != nil {
+			e.logger.ErrorContext(ctx, "failed recording synthesis failure state", "error", failErr)
+		}
+		if synthResult.Err != nil {
+			return nil, fmt.Errorf("synthesis execution failed: %w", synthResult.Err)
+		}
+		return &signals.SignalTerminal{}, nil
+	}
+
+	// Stage 3: Main Timeline Manager Review Turn
+	// Stream and persist the Manager's final analysis of the synthesized proposal onto the main
+	// chat timeline before prompting the user for Accept/Reject.
+	renderedReviewPrompt := synthesisReviewPromptTmpl
+	if tmpl, parseErr := template.New("synthesis_review").Parse(synthesisReviewPromptTmpl); parseErr == nil {
+		var buf bytes.Buffer
+		reviewView := refineBranchView{
+			CandidateID: synthResult.Candidate.BranchRef(),
+			Passed:      synthResult.Passed,
+			Trace:       synthResult.Trace,
+			Diff:        synthResult.Diff,
+		}
+		if execErr := tmpl.Execute(&buf, reviewView); execErr == nil {
+			renderedReviewPrompt = buf.String()
+		} else if e.logger != nil {
+			e.logger.WarnContext(ctx, "failed executing synthesis_review_prompt template", "error", execErr)
+		}
+	} else if e.logger != nil {
+		e.logger.WarnContext(ctx, "failed parsing synthesis_review_prompt template", "error", parseErr)
+	}
+
+	reviewBundle := e.bundleAssembler.AssembleWorkerBundle(
+		ctx,
+		chatSession.ProjectID,
+		space,
+		space.Config().ManagerSystemPrompt(),
+		sig.OriginalContext,
+		renderedReviewPrompt,
+		nil,
+	)
+	reviewBundle.Rules.FormattingConstraints = ""
+
+	reviewNodeID := uuid.NewV7()
+	if _, reviewErr := e.turnExecutor.Execute(ctx, chatSession, reviewNodeID, sig.ParentNodeID, managerModel, true, space, reviewBundle, tools.NewRegistry(), ui, emitter); reviewErr != nil {
+		return nil, fmt.Errorf("executing main timeline synthesis review: %w", reviewErr)
+	}
+
+	// Stage 4: User Review & Resolution of the 1 synthesized candidate
+	// Always prompt the user on the synthesized result unless verification passed AND AutoAccept is enabled.
+	candidateID := synthResult.CandidateID
+	verified := synthResult.Passed
+	verifyTrace := synthResult.Trace
+
 	accepted := false
-	resolutionReason := verifyTrace
+	resolutionReason := "Synthesis verification passed."
+	if !verified {
+		resolutionReason = verifyTrace
+	}
 	var userDecisionNodeContent string
 
-	if patchApplied {
-		if verified && sig.AutoAccept {
-			accepted = true
-			resolutionReason = "Auto-accepted by Refine strategy"
-			if err := e.service.ResolveCandidate(ctx, chatSession, "synthesis-refine", true, resolutionReason); err != nil {
-				e.logger.ErrorContext(ctx, "failed to auto-accept synthesized candidate", "error", err)
-			}
-		} else if ui != nil {
-			var userReason string
-			accepted, userReason = ui.ReviewCandidate("candidate/synthesis-refine")
-			trimmedReason := strings.TrimSpace(userReason)
+	if verified && sig.AutoAccept {
+		accepted = true
+		resolutionReason = "Auto-accepted by Refine strategy"
+		if err := scope.ResolveCandidate(ctx, candidateID, true, resolutionReason); err != nil {
+			return nil, fmt.Errorf("auto-accepting synthesized candidate: %w", err)
+		}
+	} else if ui != nil {
+		var userReason string
+		accepted, userReason = ui.ReviewCandidate(synthResult.Candidate.BranchRef())
+		trimmedReason := strings.TrimSpace(userReason)
 
-			if accepted {
-				resolutionReason = trimmedReason
-				if resolutionReason == "" {
-					resolutionReason = "Accepted by user"
-				}
-				userDecisionNodeContent = fmt.Sprintf("accepted flow: %s", resolutionReason)
-			} else {
-				resolutionReason = trimmedReason
-				if resolutionReason == "" {
-					resolutionReason = "Rejected by user"
-				}
-				userDecisionNodeContent = fmt.Sprintf("rejected flow: %s", resolutionReason)
+		if accepted {
+			resolutionReason = trimmedReason
+			if resolutionReason == "" {
+				resolutionReason = "Accepted by user"
 			}
+			userDecisionNodeContent = fmt.Sprintf("accepted flow: %s", resolutionReason)
+		} else {
+			resolutionReason = trimmedReason
+			if resolutionReason == "" {
+				resolutionReason = "Rejected by user"
+			}
+			userDecisionNodeContent = fmt.Sprintf("rejected flow: %s", resolutionReason)
+		}
 
-			if err := e.service.ResolveCandidate(ctx, chatSession, "synthesis-refine", accepted, resolutionReason); err != nil {
-				e.logger.ErrorContext(ctx, "failed to resolve synthesized candidate", "error", err)
-			}
+		if err := scope.ResolveCandidate(ctx, candidateID, accepted, resolutionReason); err != nil {
+			return nil, fmt.Errorf("resolving synthesized candidate: %w", err)
 		}
 	}
 
-	// 5. Append formal EventCandidateResolution node to the subgraph after final decision
-	statusStr := "REJECTED"
-	if accepted {
-		statusStr = "ACCEPTED"
-	}
-	resEvent := thinkgraph.NewEvent(workspace.EventCandidateResolution, fmt.Sprintf("Synthesis Proposal %s. Reason: %s", statusStr, resolutionReason))
-	resEvent.Edges = map[string]string{"parent_id": synthResult.GenNodeID.String()}
-	resPayload := workspace.CandidateResolution{
-		CandidateID: "candidate/synthesis-refine",
-		Accepted:    accepted,
-		Reason:      resolutionReason,
-	}
-	resBytes, marshalErr := json.Marshal(resPayload)
-	if marshalErr != nil {
-		e.logger.ErrorContext(ctx, "failed to marshal synthesis candidate resolution payload", "error", marshalErr)
-	} else {
-		resEvent.Data = resBytes
+	if err := e.appendSubgraphResolution(ctx, sig.FlowAddress, synthResult.GenNodeID, candidateID, accepted, resolutionReason, ui); err != nil {
+		return nil, err
 	}
 
-	if err := e.broadcaster.AppendAndStream(ctx, sig.FlowAddress, resEvent, ui); err != nil {
-		e.logger.ErrorContext(ctx, "failed to append candidate resolution event", "error", err)
-	}
-
-	// 6. In manual review mode, append user decision + reason as a prompt node on the Main Timeline
-	// so ContextProjecter naturally collapses it with the user's next prompt.
 	if userDecisionNodeContent != "" {
 		decisionEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, userDecisionNodeContent)
 		decisionEvent.Edges = map[string]string{"parent_id": reviewNodeID.String()}
 
 		if err := e.broadcaster.AppendAndStream(ctx, chatSession, decisionEvent, ui); err != nil {
-			e.logger.ErrorContext(ctx, "failed to append user decision node to main timeline", "error", err)
+			return nil, fmt.Errorf("appending user decision node to main timeline: %w", err)
 		}
 	}
 
-	flowStatus := flows.FlowStatusCompleted
 	flowSummary := "Refined solution synthesized and accepted."
-	if !patchApplied {
-		flowStatus = flows.FlowStatusFailed
-		flowSummary = "Synthesis failed: " + verifyTrace
-	} else if accepted {
-		flowStatus = flows.FlowStatusCompleted
+	if accepted {
 		if !verified {
 			flowSummary = "Refined solution accepted despite verification failure."
 		}
+		if err := scope.Complete(ctx, flowSummary, nil, ui); err != nil {
+			return nil, err
+		}
 	} else if !verified {
-		flowStatus = flows.FlowStatusFailed
-		flowSummary = "Synthesis failed: " + verifyTrace
+		flowSummary = "Synthesis verification failed and candidate was rejected."
+		if err := scope.Fail(ctx, flowSummary, verifyTrace, nil, ui); err != nil {
+			return nil, err
+		}
 	} else {
-		flowStatus = flows.FlowStatusCompleted
 		flowSummary = "Refined solution rejected: " + resolutionReason
+		if err := scope.Complete(ctx, flowSummary, nil, ui); err != nil {
+			return nil, err
+		}
 	}
-
-	e.updateMainTimelineFlowCard(ctx, chatSession, sig.FlowAddress.GraphID.UUID, flowStatus, flowSummary, ui)
 
 	if emitter != nil {
 		emitter.Emit("manager", telemetry.Event{
@@ -309,49 +497,4 @@ func (e *SynthesizeEngine) Execute(
 	}
 
 	return &signals.SignalTerminal{}, nil
-}
-
-func (e *SynthesizeEngine) updateMainTimelineFlowCard(
-	ctx context.Context,
-	chatSession *thinkgraph.ChatAddress,
-	flowCardID uuid.UUID,
-	status flows.FlowStatus,
-	summary string,
-	ui UserInterface,
-) {
-	contentMut := thinkgraph.ContentMutation{Content: summary}
-	contentMut.TargetID = flowCardID
-	contentMut.Type = thinkgraph.MutationContent
-	contentMut.Timestamp = time.Now().UTC()
-
-	_ = e.broadcaster.MutateAndStream(ctx, chatSession, contentMut, flowCardID, nil)
-
-	var currentState flows.FlowExecutionState
-	if graph := e.service.Graph(); graph != nil {
-		nodes, err := graph.GetNodes(ctx, chatSession, []string{flowCardID.String()})
-		if err == nil && len(nodes) > 0 && len(nodes[0].MaterializedState) > 0 {
-			if unmarshalErr := json.Unmarshal(nodes[0].MaterializedState, &currentState); unmarshalErr != nil {
-				e.logger.WarnContext(ctx, "failed to unmarshal flow execution state for mutation", "error", unmarshalErr)
-			}
-		}
-	}
-
-	currentState.Status = status
-	currentState.Summary = summary
-	if status == flows.FlowStatusFailed {
-		currentState.Error = summary
-	}
-
-	stateBytes, err := json.Marshal(currentState)
-	if err != nil {
-		e.logger.ErrorContext(ctx, "failed to marshal updated flow state", "error", err)
-		return
-	}
-
-	stateMut := thinkgraph.StateMutation{State: stateBytes}
-	stateMut.TargetID = flowCardID
-	stateMut.Type = thinkgraph.MutationState
-	stateMut.Timestamp = time.Now().UTC()
-
-	_ = e.broadcaster.MutateAndStream(ctx, chatSession, stateMut, flowCardID, ui)
 }

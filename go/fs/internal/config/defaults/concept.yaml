@@ -15,7 +15,7 @@ concept:
 
   roles:
     manager:
-      model: "gemini-3.6-flash"
+      model: "gemini-3.8-flash"
       system_prompt: |
         You are the Lead Strategist and Editor.
         Your job is to ideate, answer questions, and delegate document writing to sub-agents.
@@ -46,7 +46,7 @@ concept:
           instruction_description: "Instructions for the background summarization agent detailing exactly what facts, decisions, and context to preserve in the digest."
 
     worker:
-      model: "gemini-3.5-flash"
+      model: "gemini-4-hydrogen"
       max_tokens: 8192
       system_prompt: |
         You are an automated Technical Writer sub-agent.

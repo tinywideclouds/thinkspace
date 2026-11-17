@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"uuid"
@@ -50,15 +52,34 @@ func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext
 		return ToolResponse{}, fmt.Errorf("invalid transition arguments schema: %w", err)
 	}
 
+	request.TargetThinkState = strings.TrimSpace(request.TargetThinkState)
 	if request.TargetThinkState == "" {
 		return ToolResponse{}, fmt.Errorf("target_think_state cannot be empty")
+	}
+
+	if len(t.validStates) > 0 && !slices.Contains(t.validStates, request.TargetThinkState) {
+		if executionContext.Emitter != nil {
+			executionContext.Emitter.Emit("manager", telemetry.Event{
+				ID:        uuid.NewV7(),
+				Type:      "system_intercept",
+				Timestamp: time.Now(),
+				Message:   fmt.Sprintf("Invalid transition target '%s' intercepted.", request.TargetThinkState),
+			})
+		}
+		if executionContext.Bundle != nil {
+			executionContext.Bundle.Trajectory.WorkingMemory = append(executionContext.Bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+				Role:    "user",
+				Content: fmt.Sprintf("[System: Think state '%s' does not exist. Valid states are: %s.]", request.TargetThinkState, strings.Join(t.validStates, ", ")),
+			})
+		}
+		return ToolResponse{}, nil
 	}
 
 	sig := signals.SignalTransition{
 		TargetThinkState: request.TargetThinkState,
 	}
 
-	if executionContext.UI.ConfirmTransition(request.TargetThinkState, request.Reasoning) {
+	if executionContext.UI != nil && executionContext.UI.ConfirmTransition(request.TargetThinkState, request.Reasoning) {
 		return ToolResponse{
 			Signal:  &sig,
 			Content: "", // Left entirely blank. Do not pollute the main timeline with a node!
@@ -75,10 +96,12 @@ func (t *TransitionThinkStateTool) Execute(ctx context.Context, executionContext
 		})
 	}
 
-	executionContext.Bundle.Trajectory.WorkingMemory = append(executionContext.Bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
-		Role:    "user",
-		Content: fmt.Sprintf("[System: Transition to '%s' was denied by user. Continue in current state.]", request.TargetThinkState),
-	})
+	if executionContext.Bundle != nil {
+		executionContext.Bundle.Trajectory.WorkingMemory = append(executionContext.Bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+			Role:    "user",
+			Content: fmt.Sprintf("[System: Transition to '%s' was denied by user. Continue in current state.]", request.TargetThinkState),
+		})
+	}
 
 	return ToolResponse{}, nil
 }

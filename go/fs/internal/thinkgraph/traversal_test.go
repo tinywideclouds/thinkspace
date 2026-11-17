@@ -201,6 +201,34 @@ func TestTraversalEngine_GetTimelinePage(t *testing.T) {
 	}
 }
 
+func TestTraversalEngine_GetTimelinePage_ExactTotalLimitHasNoMore(t *testing.T) {
+	ctx := context.Background()
+
+	mainNodes := make([]thinkgraph.Node, 3)
+	for i := 0; i < 3; i++ {
+		mainNodes[i] = thinkgraph.Node{Event: thinkgraph.NewEvent(thinkgraph.EventPrompt, fmt.Sprintf("main-%d", i))}
+	}
+
+	repo := &mockGraphRepoForTraversal{
+		nodesByBranch: map[string][]thinkgraph.Node{
+			"main": mainNodes,
+		},
+	}
+	engine := thinkgraph.NewTraversalEngine(repo)
+	chat := &thinkgraph.ChatAddress{ChatID: "c", ProjectID: "p", SubGraph: thinkgraph.SubGraph{Name: "main"}}
+
+	page, nextCursor, hasMore, err := engine.GetTimelinePage(ctx, chat, "", 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(page) != 3 {
+		t.Fatalf("expected 3 nodes, got %d", len(page))
+	}
+	if hasMore {
+		t.Errorf("expected hasMore to be false when total root nodes == limit, got true with cursor %q", nextCursor)
+	}
+}
+
 func TestTraversalEngine_GetFullTimeline(t *testing.T) {
 	ctx := context.Background()
 

@@ -2,6 +2,7 @@ package golang
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,12 +73,14 @@ func (s *GoThinkState) Initialize(ctx context.Context, directory string) error {
 	}
 
 	goModPath := filepath.Join(srcDir, "go.mod")
-	if _, err := os.Stat(goModPath); os.IsNotExist(err) {
+	if _, err := os.Stat(goModPath); errors.Is(err, os.ErrNotExist) {
 		cmd := exec.CommandContext(ctx, "go", "mod", "init", "thinkspace/app")
 		cmd.Dir = srcDir
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("initializing go module: %w", err)
+		if output, runErr := cmd.CombinedOutput(); runErr != nil {
+			return fmt.Errorf("initializing go module: %w (%s)", runErr, string(output))
 		}
+	} else if err != nil {
+		return fmt.Errorf("checking existing go.mod: %w", err)
 	}
 	return nil
 }
@@ -85,7 +88,6 @@ func (s *GoThinkState) Initialize(ctx context.Context, directory string) error {
 func (g *GoThinkState) EnrichBundle(ctx context.Context, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus, workspaceRoot string) error {
 	requiresDependencies := false
 
-	// Check if the current cognitive focus explicitly targets dependencies
 	for _, tag := range focus.PrimaryFocus {
 		if tag == "dependencies" || tag == "module" {
 			requiresDependencies = true
@@ -101,16 +103,25 @@ func (g *GoThinkState) EnrichBundle(ctx context.Context, bundle *cognition.Think
 		}
 	}
 
-	// If dependencies are in focus, proactively load the go.mod file into the Workbench
 	if requiresDependencies {
+		for _, item := range bundle.Workbench {
+			if item.Path == "src/go.mod" {
+				return nil
+			}
+		}
+
 		goModPath := filepath.Join(workspaceRoot, "src", "go.mod")
 		content, err := os.ReadFile(goModPath)
-		if err == nil {
-			bundle.Workbench = append(bundle.Workbench, cognition.WorkbenchItem{
-				Path:    "src/go.mod",
-				Content: string(content),
-			})
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("reading go.mod for bundle enrichment: %w", err)
 		}
+		bundle.Workbench = append(bundle.Workbench, cognition.WorkbenchItem{
+			Path:    "src/go.mod",
+			Content: string(content),
+		})
 	}
 
 	return nil

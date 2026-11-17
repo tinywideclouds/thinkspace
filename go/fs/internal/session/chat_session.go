@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,6 +23,8 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
+
+const maxSessionLedgerLineBytes = 10 * 1024 * 1024
 
 type ChatSession struct {
 	mu      sync.RWMutex
@@ -63,14 +66,20 @@ func NewChatSession(
 	}
 
 	if meta.ActiveThinkState == "" {
-		if spaceState, stateErr := workspaceManager.GetSpaceState(spaceID); stateErr == nil && spaceState.ThinkState != "" {
+		spaceState, stateErr := workspaceManager.GetSpaceState(spaceID)
+		if stateErr != nil && !errors.Is(stateErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("loading space state: %w", stateErr)
+		}
+		if stateErr == nil && spaceState.ThinkState != "" {
 			meta.ActiveThinkState = spaceState.ThinkState
 		} else {
 			meta.ActiveThinkState = "intake"
 		}
-		_ = workspaceManager.UpdateChatMeta(spaceID, chatID, func(m *workspace.ChatMeta) {
+		if err := workspaceManager.UpdateChatMeta(spaceID, chatID, func(m *workspace.ChatMeta) {
 			m.ActiveThinkState = meta.ActiveThinkState
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("persisting initial chat think state: %w", err)
+		}
 	}
 
 	workspaceService := workspaceManager.GetService(spaceID)
@@ -90,12 +99,22 @@ func NewChatSession(
 	}
 
 	for branch, rawID := range meta.BranchGraphIDs {
-		if parsed, parseErr := thinkgraph.ParseGraphID(rawID); parseErr == nil && !parsed.IsZero() {
+		if strings.TrimSpace(rawID) == "" {
+			continue
+		}
+		parsed, parseErr := thinkgraph.ParseGraphID(rawID)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parsing graph ID for branch %q: %w", branch, parseErr)
+		}
+		if !parsed.IsZero() {
 			session.graphIDs[branch] = parsed
 		}
 	}
 
-	address := session.GetActiveAddress()
+	address, err := session.resolveOrInitActiveAddress()
+	if err != nil {
+		return nil, fmt.Errorf("resolving active chat address: %w", err)
+	}
 	if err := workspaceService.InitializeChat(ctx, address); err != nil {
 		return nil, fmt.Errorf("initializing chat boundaries: %w", err)
 	}
@@ -151,16 +170,19 @@ func (s *ChatSession) flushMetaLocked() error {
 	})
 }
 
-func (s *ChatSession) resolvePersistedGraphID(branch string) (thinkgraph.GraphID, bool) {
+func (s *ChatSession) resolvePersistedGraphID(branch string) (thinkgraph.GraphID, bool, error) {
 	if s.workspaceService == nil {
-		return thinkgraph.GraphID{}, false
+		return thinkgraph.GraphID{}, false, nil
 	}
 
 	dirName := thinkgraph.ResolveLogDirName(branch)
 	logsDir := filepath.Join(s.workspaceService.WorkspaceRoot(), s.SpaceID, "chats", s.ChatID, "ledger", "logs", dirName)
 	entries, err := os.ReadDir(logsDir)
 	if err != nil {
-		return thinkgraph.GraphID{}, false
+		if errors.Is(err, os.ErrNotExist) {
+			return thinkgraph.GraphID{}, false, nil
+		}
+		return thinkgraph.GraphID{}, false, fmt.Errorf("reading branch logs directory %s: %w", logsDir, err)
 	}
 
 	var shards []string
@@ -170,43 +192,47 @@ func (s *ChatSession) resolvePersistedGraphID(branch string) (thinkgraph.GraphID
 		}
 	}
 	if len(shards) == 0 {
-		return thinkgraph.GraphID{}, false
+		return thinkgraph.GraphID{}, false, nil
 	}
 	sort.Strings(shards)
 
 	for _, shard := range shards {
-		file, err := os.Open(filepath.Join(logsDir, shard))
-		if err != nil {
-			continue
+		shardPath := filepath.Join(logsDir, shard)
+		file, openErr := os.Open(shardPath)
+		if openErr != nil {
+			return thinkgraph.GraphID{}, false, fmt.Errorf("opening shard %s: %w", shardPath, openErr)
 		}
 		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 64*1024), maxSessionLedgerLineBytes)
+		lineNum := 0
 		for scanner.Scan() {
+			lineNum++
 			line := scanner.Bytes()
 			if len(line) == 0 {
 				continue
 			}
 			var ev thinkgraph.Event
-			if json.Unmarshal(line, &ev) == nil && !ev.GraphID.IsZero() {
-				file.Close()
-				return ev.GraphID, true
+			if unmarshalErr := json.Unmarshal(line, &ev); unmarshalErr != nil {
+				_ = file.Close()
+				return thinkgraph.GraphID{}, false, fmt.Errorf("unmarshaling event in %s at line %d: %w", shardPath, lineNum, unmarshalErr)
+			}
+			if !ev.GraphID.IsZero() {
+				_ = file.Close()
+				return ev.GraphID, true, nil
 			}
 		}
 
 		scanErr := scanner.Err()
+		_ = file.Close()
 		if scanErr != nil {
-			slog.Debug("scanner fault", "err", scanErr)
-			continue
+			return thinkgraph.GraphID{}, false, fmt.Errorf("scanning shard %s: %w", shardPath, scanErr)
 		}
-
-		file.Close()
 	}
 
-	return thinkgraph.GraphID{}, false
+	return thinkgraph.GraphID{}, false, nil
 }
 
-// GetActiveAddress returns the canonical ChatAddress (including its resolved GraphID)
-// for the session's currently active branch.
-func (s *ChatSession) GetActiveAddress() *thinkgraph.ChatAddress {
+func (s *ChatSession) resolveOrInitActiveAddress() (*thinkgraph.ChatAddress, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -217,7 +243,11 @@ func (s *ChatSession) GetActiveAddress() *thinkgraph.ChatAddress {
 
 	gID, exists := s.graphIDs[activeBranch]
 	if !exists {
-		if persistedID, ok := s.resolvePersistedGraphID(activeBranch); ok {
+		persistedID, ok, err := s.resolvePersistedGraphID(activeBranch)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			gID = persistedID
 		} else {
 			gID = thinkgraph.NewGraphID(thinkgraph.PrefixChat)
@@ -227,8 +257,39 @@ func (s *ChatSession) GetActiveAddress() *thinkgraph.ChatAddress {
 			s.Meta.BranchGraphIDs = make(map[string]string)
 		}
 		s.Meta.BranchGraphIDs[activeBranch] = gID.String()
-		_ = s.flushMetaLocked()
+		if err := s.flushMetaLocked(); err != nil {
+			return nil, fmt.Errorf("persisting active branch graph ID: %w", err)
+		}
 	}
+
+	return &thinkgraph.ChatAddress{
+		ChatID:    s.ChatID,
+		ProjectID: s.SpaceID,
+		SubGraph: thinkgraph.SubGraph{
+			Name:    activeBranch,
+			GraphID: gID,
+		},
+	}, nil
+}
+
+// GetActiveAddress returns the canonical ChatAddress (including its resolved GraphID)
+// for the session's currently active branch.
+func (s *ChatSession) GetActiveAddress() *thinkgraph.ChatAddress {
+	addr, err := s.resolveOrInitActiveAddress()
+	if err != nil && s.logger != nil {
+		s.logger.Error("failed resolving active chat address", "chat_id", s.ChatID, "error", err)
+	}
+	if addr != nil {
+		return addr
+	}
+
+	s.mu.RLock()
+	activeBranch := s.Meta.ActiveBranch
+	if activeBranch == "" {
+		activeBranch = "main"
+	}
+	gID := s.graphIDs[activeBranch]
+	s.mu.RUnlock()
 
 	return &thinkgraph.ChatAddress{
 		ChatID:    s.ChatID,
@@ -246,7 +307,11 @@ func (s *ChatSession) GetSystemAddress() *thinkgraph.ChatAddress {
 
 	gID, exists := s.graphIDs[thinkgraph.SystemSubGraphName]
 	if !exists {
-		if persistedID, ok := s.resolvePersistedGraphID(thinkgraph.SystemSubGraphName); ok {
+		persistedID, ok, err := s.resolvePersistedGraphID(thinkgraph.SystemSubGraphName)
+		if err != nil && s.logger != nil {
+			s.logger.Error("failed resolving persisted system graph ID", "chat_id", s.ChatID, "error", err)
+		}
+		if ok {
 			gID = persistedID
 		} else {
 			gID = thinkgraph.NewGraphID(thinkgraph.PrefixSystem)
@@ -256,7 +321,9 @@ func (s *ChatSession) GetSystemAddress() *thinkgraph.ChatAddress {
 			s.Meta.BranchGraphIDs = make(map[string]string)
 		}
 		s.Meta.BranchGraphIDs[thinkgraph.SystemSubGraphName] = gID.String()
-		_ = s.flushMetaLocked()
+		if err := s.flushMetaLocked(); err != nil && s.logger != nil {
+			s.logger.Error("failed to persist system subgraph ID", "graph_id", gID.String(), "error", err)
+		}
 	}
 
 	return &thinkgraph.ChatAddress{
@@ -270,7 +337,10 @@ func (s *ChatSession) GetSystemAddress() *thinkgraph.ChatAddress {
 }
 
 func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, error) {
-	address := s.GetActiveAddress()
+	address, err := s.resolveOrInitActiveAddress()
+	if err != nil {
+		return nil, fmt.Errorf("resolving active address for graph data: %w", err)
+	}
 
 	s.mu.RLock()
 	activeThinkState := s.Meta.ActiveThinkState
@@ -278,7 +348,7 @@ func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, 
 	s.mu.RUnlock()
 
 	thinkState, ok := s.registry.GetThinkState(activeThinkState)
-	if !ok {
+	if !ok && s.logger != nil {
 		s.logger.WarnContext(ctx, "failed resolving think state for graph data", "thinkState", activeThinkState)
 	}
 
@@ -287,36 +357,54 @@ func (s *ChatSession) GetGraphData(ctx context.Context) (*thinkgraph.GraphData, 
 }
 
 func (s *ChatSession) RunTurn(ctx context.Context, promptText string, ui UserInterface, emitter telemetry.Emitter) error {
-	address := s.GetActiveAddress()
+	address, err := s.resolveOrInitActiveAddress()
+	if err != nil {
+		return fmt.Errorf("resolving active address for turn: %w", err)
+	}
 
 	if err := s.workspaceService.AppendUserPrompt(ctx, address, promptText); err != nil {
-		s.logger.ErrorContext(ctx, "failed appending user prompt to ledger", "chat_id", s.ChatID, "error", err)
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "failed appending user prompt to ledger", "chat_id", s.ChatID, "error", err)
+		}
 		return fmt.Errorf("appending user prompt: %w", err)
 	}
 
 	traversalEngine := thinkgraph.NewTraversalEngine(s.workspaceManager.GraphRepository())
 	timeline, _, _, err := traversalEngine.GetTimelinePage(ctx, address, "", 1)
-
-	var catalystID uuid.UUID
-	if err == nil && len(timeline) > 0 {
-		ui.StreamGraphEvent(address, timeline[0])
-		catalystID = timeline[0].ID
-	} else {
-		return fmt.Errorf("failed to anchor catalyst prompt to graph: %w", err)
+	if err != nil {
+		return fmt.Errorf("querying catalyst prompt from graph: %w", err)
 	}
+	if len(timeline) == 0 {
+		return fmt.Errorf("catalyst prompt not found on graph timeline after append")
+	}
+
+	if ui != nil {
+		ui.StreamGraphEvent(address, timeline[0])
+	}
+	catalystID := timeline[0].ID
 
 	turnID := uuid.NewV7()
 	var currentSignal signals.EngineSignal = &signals.SignalExecuteChat{}
+	var activeFlow signals.FlowHandle
+
+	defer func() {
+		if activeFlow != nil {
+			if finalizeErr := activeFlow.Finalize(ctx, "Turn terminated"); finalizeErr != nil && s.logger != nil {
+				s.logger.ErrorContext(ctx, "failed to finalize active flow scope on turn exit", "error", finalizeErr)
+			}
+		}
+	}()
 
 	for !currentSignal.IsTerminal() {
 		var engine TurnEngine
 
-		switch currentSignal.(type) {
+		switch sig := currentSignal.(type) {
 		case *signals.SignalExecuteChat:
 			engine = s.chatEngine
 		case *signals.SignalDispatchFlow:
 			engine = s.workerEngine
 		case *signals.SignalSynthesize:
+			activeFlow = sig.Flow
 			engine = s.synthesizeEngine
 		case *signals.SignalTransition:
 			engine = s.systemEngine

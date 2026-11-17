@@ -49,17 +49,29 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to init badger: %v", err)
 	}
-	t.Cleanup(func() { graphDB.Close() })
+	t.Cleanup(func() {
+		if closeErr := graphDB.Close(); closeErr != nil {
+			t.Errorf("failed closing badger graph: %v", closeErr)
+		}
+	})
 
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &csMockChatEngine{} }, graphDB, nil)
 
-	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755); err != nil {
+		t.Fatalf("failed creating space dir: %v", err)
+	}
 
 	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
-	_ = os.MkdirAll(chatDir, 0755)
-	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main"}`), 0644)
+	if err := os.MkdirAll(chatDir, 0755); err != nil {
+		t.Fatalf("failed creating chat dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main"}`), 0644); err != nil {
+		t.Fatalf("failed writing meta.json: %v", err)
+	}
 
-	_ = svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" })
+	if err := svcManager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
 
 	registry := config.NewRegistry()
 
@@ -74,7 +86,6 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 		spaceID,
 		chatID,
 	)
-
 	if err != nil {
 		t.Fatalf("Failed to initialize ChatSession: %v", err)
 	}
@@ -100,7 +111,6 @@ func TestChatSession_InitializationAndMetaFallback(t *testing.T) {
 		t.Fatalf("Failed to append initial prompt: %v", err)
 	}
 
-	// Verify GetActiveAddress recovers the exact same persisted GraphID on a fresh ChatSession instance
 	originalGraphID := chatSession.GetActiveAddress().GraphID
 	reloadedSession, err := session.NewChatSession(
 		ctx,
@@ -153,15 +163,28 @@ func TestChatSession_GetGraphData_MissingThinkState(t *testing.T) {
 	chatID := "chat-456"
 
 	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
-	graphDB, _ := db.NewBadgerGraph(opts)
-	t.Cleanup(func() { graphDB.Close() })
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := graphDB.Close(); closeErr != nil {
+			t.Errorf("failed closing badger graph: %v", closeErr)
+		}
+	})
 
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return &csMockChatEngine{} }, graphDB, nil)
-	_ = os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755)
+	if err := os.MkdirAll(filepath.Join(workspaceRoot, spaceID), 0755); err != nil {
+		t.Fatalf("failed creating space dir: %v", err)
+	}
 
 	chatDir := filepath.Join(workspaceRoot, spaceID, "chats", chatID)
-	_ = os.MkdirAll(chatDir, 0755)
-	_ = os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main"}`), 0644)
+	if err := os.MkdirAll(chatDir, 0755); err != nil {
+		t.Fatalf("failed creating chat dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "meta.json"), []byte(`{"id":"`+chatID+`", "name":"`+chatID+`", "active_branch": "main"}`), 0644); err != nil {
+		t.Fatalf("failed writing meta.json: %v", err)
+	}
 
 	registry := config.NewRegistry()
 

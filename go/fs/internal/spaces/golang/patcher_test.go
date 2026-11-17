@@ -34,7 +34,9 @@ func (m *mockPatcherSandbox) WriteFile(ctx context.Context, path string, data []
 	m.files[path] = data
 	if m.rootDir != "" {
 		full := m.ResolvePath(path)
-		_ = os.MkdirAll(filepath.Dir(full), 0755)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			return err
+		}
 		return os.WriteFile(full, data, 0644)
 	}
 	return nil
@@ -63,7 +65,7 @@ func TestGoASTPatcher_InvalidJSON(t *testing.T) {
 	sandbox := newMockPatcherSandbox("")
 	patcher := golang.NewGoASTPatcher("mock instructions", true)
 
-	invalidPayload := `{"patches": [{"file": "main.go", ` // missing closing brackets/quotes
+	invalidPayload := `{"patches": [{"file": "main.go", `
 
 	err := patcher.Apply(ctx, sandbox, invalidPayload)
 	if err == nil {
@@ -75,24 +77,45 @@ func TestGoASTPatcher_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestGoASTPatcher_HealsBackslashSpaceAndMarkdownFences(t *testing.T) {
+	ctx := context.Background()
+	sandbox := newMockPatcherSandbox(t.TempDir())
+	patcher := golang.NewGoASTPatcher("mock instructions", false)
+
+	rawOutput := "```json\n{\"thought\":\"Applying fix\",\"patches\":[{\"file\":\"src/main.go\",\"action\":\"full_replace\",\"code\":\"package main\\n// hello\\ world\"}]}\n```"
+	if err := patcher.Apply(ctx, sandbox, rawOutput); err != nil {
+		t.Fatalf("expected patcher to heal backslash-space escape and markdown fences, got: %v", err)
+	}
+
+	got := string(sandbox.files["src/main.go"])
+	if !strings.Contains(got, "// hello world") {
+		t.Errorf("expected healed Go source content, got:\n%s", got)
+	}
+}
+
 func TestGoASTPatcher_FormatImports_AddsMissingImportsAndFormats(t *testing.T) {
 	ctx := context.Background()
 	sandboxRoot := t.TempDir()
 	sandbox := newMockPatcherSandbox(sandboxRoot)
 
-	_ = sandbox.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n"))
+	if err := sandbox.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	patcher := golang.NewGoASTPatcher("mock instructions", true)
-	payloadBytes, _ := json.Marshal(map[string]any{
+	payloadBytes, err := json.Marshal(map[string]any{
 		"thought": "Write unformatted main without imports",
 		"patches": []map[string]string{
 			{
 				"file":   "src/main.go",
 				"action": "full_replace",
-				"code":   "package main\nfunc main(){fmt.Println(\"hello\")}",
+				"code":   "package main\nfunc main(){\nfmt.Println(\"hello\")\n}",
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
 
 	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
 		t.Fatalf("unexpected patcher error: %v", err)
@@ -113,7 +136,7 @@ func TestGoASTPatcher_FormatImports_DisabledLeavesSourceUntouched(t *testing.T) 
 	patcher := golang.NewGoASTPatcher("mock instructions", false)
 
 	rawCode := "package main\nfunc main(){fmt.Println(\"hello\")}"
-	payloadBytes, _ := json.Marshal(map[string]any{
+	payloadBytes, err := json.Marshal(map[string]any{
 		"thought": "Write raw code",
 		"patches": []map[string]string{
 			{
@@ -123,6 +146,9 @@ func TestGoASTPatcher_FormatImports_DisabledLeavesSourceUntouched(t *testing.T) 
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
 
 	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
 		t.Fatalf("unexpected patcher error: %v", err)
@@ -139,7 +165,7 @@ func TestGoASTPatcher_FormatImports_SyntaxErrorFallsBackToRaw(t *testing.T) {
 	patcher := golang.NewGoASTPatcher("mock instructions", true)
 
 	brokenCode := "package main\nfunc broken( {\n"
-	payloadBytes, _ := json.Marshal(map[string]any{
+	payloadBytes, err := json.Marshal(map[string]any{
 		"thought": "Broken syntax",
 		"patches": []map[string]string{
 			{
@@ -149,6 +175,9 @@ func TestGoASTPatcher_FormatImports_SyntaxErrorFallsBackToRaw(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
 
 	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
 		t.Fatalf("expected patcher to fall back gracefully on syntax error, got: %v", err)
@@ -162,11 +191,15 @@ func TestGoASTPatcher_FormatImports_SyntaxErrorFallsBackToRaw(t *testing.T) {
 func TestGoASTPatcher_ReplaceFunction_UpdatesImports(t *testing.T) {
 	ctx := context.Background()
 	sandbox := newMockPatcherSandbox(t.TempDir())
-	_ = sandbox.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n"))
-	_ = sandbox.WriteFile(ctx, "src/main.go", []byte("package main\n\nimport \"strings\"\n\nfunc greet() string {\n\treturn strings.ToUpper(\"hi\")\n}\n"))
+	if err := sandbox.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := sandbox.WriteFile(ctx, "src/main.go", []byte("package main\n\nimport \"strings\"\n\nfunc greet() string {\n\treturn strings.ToUpper(\"hi\")\n}\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
 
 	patcher := golang.NewGoASTPatcher("mock instructions", true)
-	payloadBytes, _ := json.Marshal(map[string]any{
+	payloadBytes, err := json.Marshal(map[string]any{
 		"thought": "Switch strings to fmt",
 		"patches": []map[string]string{
 			{
@@ -177,6 +210,9 @@ func TestGoASTPatcher_ReplaceFunction_UpdatesImports(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
 
 	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
 		t.Fatalf("unexpected patcher error: %v", err)
@@ -188,5 +224,46 @@ func TestGoASTPatcher_ReplaceFunction_UpdatesImports(t *testing.T) {
 	}
 	if strings.Contains(result, `"strings"`) {
 		t.Errorf("expected unused \"strings\" import to be pruned after replace_function, got:\n%s", result)
+	}
+}
+
+func TestGoASTPatcher_AddCodeAndValidationErrors(t *testing.T) {
+	ctx := context.Background()
+	sandbox := newMockPatcherSandbox(t.TempDir())
+	if err := sandbox.WriteFile(ctx, "src/main.go", []byte("package main\n")); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	patcher := golang.NewGoASTPatcher("mock instructions", false)
+
+	// add_code appends cleanly
+	addPayload, _ := json.Marshal(map[string]any{
+		"patches": []map[string]string{
+			{"file": "src/main.go", "action": "add_code", "code": "func helper() {}"},
+		},
+	})
+	if err := patcher.Apply(ctx, sandbox, string(addPayload)); err != nil {
+		t.Fatalf("add_code failed: %v", err)
+	}
+	if !strings.Contains(string(sandbox.files["src/main.go"]), "func helper() {}") {
+		t.Errorf("expected helper() to be appended, got:\n%s", string(sandbox.files["src/main.go"]))
+	}
+
+	// Unsupported action must return an error instead of silently succeeding
+	unknownActionPayload, _ := json.Marshal(map[string]any{
+		"patches": []map[string]string{
+			{"file": "src/main.go", "action": "delete_everything", "code": ""},
+		},
+	})
+	if err := patcher.Apply(ctx, sandbox, string(unknownActionPayload)); err == nil {
+		t.Errorf("expected error for unsupported patch action")
+	}
+
+	// Escaping path must return an error
+	traversalPayload, _ := json.Marshal(map[string]string{
+		"file": "../escape.go", "action": "full_replace", "code": "package main",
+	})
+	if err := patcher.Apply(ctx, sandbox, `{"patches":[`+string(traversalPayload)+`]}`); err == nil {
+		t.Errorf("expected error for path traversal in patch file")
 	}
 }

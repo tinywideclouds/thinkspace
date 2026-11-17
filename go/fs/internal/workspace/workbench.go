@@ -25,13 +25,13 @@ func (w *Workbench) Build(ctx context.Context, sandbox CandidateSandbox, targetF
 
 	for _, filePath := range targetFiles {
 		content, err := sandbox.ReadFile(ctx, filePath)
-		if err != nil || len(content) == 0 {
-			return nil, fmt.Errorf("fail-fast: requested target file '%s' does not exist or is empty", filePath)
+		if err != nil {
+			return nil, fmt.Errorf("fail-fast: requested target file '%s' does not exist or cannot be read: %w", filePath, err)
 		}
 		items = append(items, cognition.WorkbenchItem{
 			Path:       filePath,
 			Content:    string(content),
-			TokenCount: 0, // Placeholder for future token counting integration
+			TokenCount: 0,
 		})
 	}
 

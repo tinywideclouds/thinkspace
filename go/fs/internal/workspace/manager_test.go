@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
@@ -161,5 +162,118 @@ func TestServiceManager_SpaceSettingsManagement(t *testing.T) {
 	}
 	if !updated.ReviewPolicy.IncludePersona {
 		t.Errorf("Expected ReviewPolicy.IncludePersona to be true after update")
+	}
+}
+
+func TestServiceManager_SpaceStateAndErrorPropagation(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	baseRoot := t.TempDir()
+
+	manager := workspace.NewServiceManager(logger, baseRoot, func(r string) workspace.ChatVersioner { return nil }, nil, nil)
+	spaceID := "golang"
+
+	if err := manager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) {
+		s.ThinkState = "golang"
+	}); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
+
+	state, err := manager.GetSpaceState(spaceID)
+	if err != nil {
+		t.Fatalf("GetSpaceState failed: %v", err)
+	}
+	if state.ThinkState != "golang" {
+		t.Errorf("expected ThinkState 'golang', got %q", state.ThinkState)
+	}
+
+	// Corrupt space.json and verify UpdateSpaceState surfaces the error instead of overwriting it
+	spaceJSONPath := filepath.Join(baseRoot, spaceID, "space.json")
+	if err := os.WriteFile(spaceJSONPath, []byte("{corrupt json"), 0644); err != nil {
+		t.Fatalf("failed writing corrupt space.json: %v", err)
+	}
+	if err := manager.UpdateSpaceState(spaceID, func(s *workspace.SpaceState) {
+		s.ThinkState = "concept"
+	}); err == nil {
+		t.Errorf("expected UpdateSpaceState to fail on corrupt space.json rather than silently overwriting")
+	}
+
+	// Corrupt settings.json and verify UpdateSpaceSettings surfaces the error
+	settingsJSONPath := filepath.Join(baseRoot, spaceID, "settings.json")
+	if err := os.WriteFile(settingsJSONPath, []byte("{corrupt settings"), 0644); err != nil {
+		t.Fatalf("failed writing corrupt settings.json: %v", err)
+	}
+	if err := manager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
+		s.ReviewPolicy.Active = false
+	}); err == nil {
+		t.Errorf("expected UpdateSpaceSettings to fail on corrupt settings.json rather than silently overwriting")
+	}
+}
+
+func TestServiceManager_ChatMetaUpdateListSpacesAndConcurrentCreate(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	baseRoot := t.TempDir()
+	ctx := context.Background()
+
+	manager := workspace.NewServiceManager(logger, baseRoot, func(r string) workspace.ChatVersioner { return nil }, nil, nil)
+
+	const numConcurrent = 5
+	var wg sync.WaitGroup
+	errs := make(chan error, numConcurrent)
+	for i := 0; i < numConcurrent; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := manager.CreateChat(ctx, "golang", ""); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent CreateChat failed: %v", err)
+	}
+
+	chats, err := manager.ListChats(ctx, "golang")
+	if err != nil {
+		t.Fatalf("ListChats failed: %v", err)
+	}
+	if len(chats) != numConcurrent {
+		t.Fatalf("expected %d chats, got %d", numConcurrent, len(chats))
+	}
+	seenNames := make(map[string]bool)
+	for _, c := range chats {
+		if seenNames[c.Name] {
+			t.Errorf("duplicate auto-generated chat name %q created under concurrency", c.Name)
+		}
+		seenNames[c.Name] = true
+	}
+
+	targetChat := chats[0]
+	if err := manager.UpdateChatMeta("golang", targetChat.ID, func(m *workspace.ChatMeta) {
+		m.Name = "Renamed Chat"
+		m.ActiveThinkState = "concept"
+	}); err != nil {
+		t.Fatalf("UpdateChatMeta failed: %v", err)
+	}
+
+	loaded, err := manager.GetChatMeta("golang", targetChat.ID)
+	if err != nil {
+		t.Fatalf("GetChatMeta failed: %v", err)
+	}
+	if loaded.Name != "Renamed Chat" || loaded.ActiveThinkState != "concept" {
+		t.Errorf("unexpected updated ChatMeta: %+v", loaded)
+	}
+
+	// Hidden directories (like .graphdb) must be excluded by ListSpaces
+	if err := os.MkdirAll(filepath.Join(baseRoot, ".graphdb"), 0755); err != nil {
+		t.Fatalf("failed creating .graphdb: %v", err)
+	}
+	spaces, err := manager.ListSpaces(ctx)
+	if err != nil {
+		t.Fatalf("ListSpaces failed: %v", err)
+	}
+	if len(spaces) != 1 || spaces[0] != "golang" {
+		t.Errorf("expected spaces [golang], got %v", spaces)
 	}
 }

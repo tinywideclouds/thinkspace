@@ -47,6 +47,11 @@ func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionC
 		return ToolResponse{}, fmt.Errorf("invalid query_lens schema: %w", err)
 	}
 
+	request.Tag = strings.TrimSpace(request.Tag)
+	if request.Tag == "" {
+		return ToolResponse{}, fmt.Errorf("query_lens tag cannot be empty")
+	}
+
 	if executionContext.Emitter != nil {
 		executionContext.Emitter.Emit("manager", telemetry.Event{
 			ID:        uuid.NewV7(),
@@ -59,27 +64,33 @@ func (t *QueryLensTool) Execute(ctx context.Context, executionContext ExecutionC
 	var toolResponse strings.Builder
 	fmt.Fprintf(&toolResponse, "[System Tool Response: query_lens(%s)]\n", request.Tag)
 
-	graph := t.workspace.Graph()
-
-	if graph == nil {
+	if t.workspace == nil || t.workspace.Graph() == nil {
 		toolResponse.WriteString("Error: Graph database is not initialized.\n")
 	} else {
-		lensResult, err := graph.GetLenses(ctx, executionContext.Address, request.Tag)
-		if err != nil {
-			toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", err))
-		} else if len(lensResult.Nodes) == 0 && len(lensResult.Digests) == 0 {
+		lensResult, getErr := t.workspace.Graph().GetLenses(ctx, executionContext.Address, request.Tag)
+		if getErr != nil {
+			toolResponse.WriteString(fmt.Sprintf("Error fetching events: %v\n", getErr))
+		} else if len(lensResult.Nodes) == 0 && len(lensResult.Digests) == 0 && len(lensResult.SpaceContexts) == 0 {
 			toolResponse.WriteString("No historical events found for this tag.\n")
 		} else {
+			for _, sc := range lensResult.SpaceContexts {
+				fmt.Fprintf(&toolResponse, "- [Rule] %s\n", sc.Content)
+			}
+			for _, digest := range lensResult.Digests {
+				fmt.Fprintf(&toolResponse, "- [Digest] %s\n", digest.Summary)
+			}
 			for _, node := range lensResult.Nodes {
 				fmt.Fprintf(&toolResponse, "- [%s] %s: %s\n", node.Timestamp.Format("15:04:05"), node.Type, node.Content)
 			}
 		}
 	}
 
-	executionContext.Bundle.Trajectory.WorkingMemory = append(executionContext.Bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
-		Role:    "user",
-		Content: toolResponse.String(),
-	})
+	if executionContext.Bundle != nil {
+		executionContext.Bundle.Trajectory.WorkingMemory = append(executionContext.Bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+			Role:    "user",
+			Content: toolResponse.String(),
+		})
+	}
 
 	return ToolResponse{}, nil
 }

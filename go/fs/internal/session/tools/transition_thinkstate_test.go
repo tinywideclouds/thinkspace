@@ -99,6 +99,31 @@ func TestTransitionThinkStateTool_Execute_Denied(t *testing.T) {
 	}
 }
 
+func TestTransitionThinkStateTool_InvalidStateInterceptsForSelfCorrection(t *testing.T) {
+	tool := tools.NewTransitionThinkStateTool([]string{"golang", "concept"})
+	emitter := &mockToolEmitter{}
+	bundle := &cognition.ThinkBundle{}
+
+	result, err := tool.Execute(context.Background(), tools.ExecutionContext{
+		RawArguments: map[string]any{
+			tools.TargetThinkState: "rust",
+			tools.Reasoning:        "Write Rust",
+		},
+		UI:      &mockTransitionUI{confirmResult: true},
+		Bundle:  bundle,
+		Emitter: emitter,
+	})
+	if err != nil {
+		t.Fatalf("expected self-correction intercept rather than fatal error, got: %v", err)
+	}
+	if result.Signal != nil {
+		t.Errorf("expected nil signal for unknown target state, got %T", result.Signal)
+	}
+	if len(bundle.Trajectory.WorkingMemory) != 1 || !strings.Contains(bundle.Trajectory.WorkingMemory[0].Content, "golang, concept") {
+		t.Errorf("expected valid states guidance in WorkingMemory, got %+v", bundle.Trajectory.WorkingMemory)
+	}
+}
+
 func TestTransitionThinkStateTool_EmptyTarget(t *testing.T) {
 	tool := tools.NewTransitionThinkStateTool([]string{"golang", "concept"})
 

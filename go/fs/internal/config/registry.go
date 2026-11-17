@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -48,6 +49,8 @@ func (r *Registry) LoadFS(fsys fs.FS, dir string) error {
 		return err
 	}
 
+	var loadErrs []error
+
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
 			continue
@@ -56,11 +59,13 @@ func (r *Registry) LoadFS(fsys fs.FS, dir string) error {
 		path := filepath.Join(dir, entry.Name())
 		data, err := fs.ReadFile(fsys, path)
 		if err != nil {
+			loadErrs = append(loadErrs, fmt.Errorf("reading config file %s: %w", path, err))
 			continue
 		}
 
 		parsed, err := ParseConfigBytes(data)
 		if err != nil {
+			loadErrs = append(loadErrs, fmt.Errorf("parsing config file %s: %w", path, err))
 			continue
 		}
 
@@ -86,7 +91,7 @@ func (r *Registry) LoadFS(fsys fs.FS, dir string) error {
 
 	r.thinkStatesSummaries()
 
-	return nil
+	return errors.Join(loadErrs...)
 }
 
 // thinkStatesSummaries builds the markdown summary string exactly once.
@@ -147,6 +152,17 @@ func (r *Registry) DecodeFlowConfig(id string, dest any) error {
 		return fmt.Errorf("flow configuration not found: %s", id)
 	}
 	return node.Decode(dest)
+}
+
+func (r *Registry) GetFanOutConfig() (FanOutFlowConfig, error) {
+	var cfg FanOutFlowConfig
+	if err := r.DecodeFlowConfig("fanout", &cfg); err != nil {
+		return FanOutFlowConfig{}, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return FanOutFlowConfig{}, err
+	}
+	return cfg, nil
 }
 
 func (r *Registry) DecodeCoreConfig(id string, dest any) error {
