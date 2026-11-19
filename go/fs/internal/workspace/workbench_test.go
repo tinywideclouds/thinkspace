@@ -71,6 +71,9 @@ func TestWorkbench_Build(t *testing.T) {
 		if !strings.Contains(res[0].Content, "package main") {
 			t.Errorf("missing file content in output: %s", res[0].Content)
 		}
+		if res[0].TokenCount != 3 {
+			t.Errorf("expected TokenCount=3 for 12-byte file, got %d", res[0].TokenCount)
+		}
 	})
 
 	t.Run("Allows Existing Empty File", func(t *testing.T) {
@@ -78,8 +81,8 @@ func TestWorkbench_Build(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected existing empty file to succeed, got: %v", err)
 		}
-		if len(res) != 1 || res[0].Content != "" {
-			t.Errorf("expected 1 item with empty content, got %+v", res)
+		if len(res) != 1 || res[0].Content != "" || res[0].TokenCount != 0 {
+			t.Errorf("expected 1 item with empty content and 0 tokens, got %+v", res)
 		}
 	})
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"uuid"
@@ -17,6 +18,14 @@ func TestContextProjecter_Build(t *testing.T) {
 		ID:       stickyID,
 		Summary:  "Always remember the user prefers idiomatic Go.",
 		Promoted: true,
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	focusDigestID := uuid.NewV7()
+	manifest.Digests[focusDigestID] = thinkgraph.DigestMeta{
+		ID:       focusDigestID,
+		Summary:  "PostgreSQL connection pool configured in internal/db.",
+		Promoted: false,
 	}
 
 	ruleID := uuid.NewV7()
@@ -47,7 +56,8 @@ func TestContextProjecter_Build(t *testing.T) {
 			},
 		},
 		Focus: thinkgraph.AttentionFocus{
-			PrimaryFocus: []string{"golang"},
+			PrimaryFocus:  []string{"golang"},
+			DormantLenses: []string{"auth", "middleware"},
 		},
 		Amendments: map[string]thinkgraph.Node{
 			amendingNode.ID.String(): amendingNode,
@@ -60,12 +70,21 @@ func TestContextProjecter_Build(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(trajectory.LongTermMemory) != 3 {
-		t.Fatalf("Expected 3 long-term memory items (1 metadata + 1 sticky + 1 rule), got %d", len(trajectory.LongTermMemory))
+	if len(trajectory.LongTermMemory) != 4 {
+		t.Fatalf("Expected 4 long-term memory items (1 metadata + 1 rule + 1 sticky + 1 focus digest), got %d", len(trajectory.LongTermMemory))
 	}
 
 	if !strings.Contains(trajectory.LongTermMemory[0], "[CONTEXT HORIZON METADATA]") {
 		t.Errorf("Missing context horizon metadata in first slot")
+	}
+	if !strings.Contains(trajectory.LongTermMemory[0], "Dormant Memories Available via query_lens: auth, middleware") {
+		t.Errorf("Missing dormant lenses metadata in first slot, got: %s", trajectory.LongTermMemory[0])
+	}
+	if trajectory.LongTermMemory[2] != "Always remember the user prefers idiomatic Go." {
+		t.Errorf("Expected sticky digest in slot 2, got %q", trajectory.LongTermMemory[2])
+	}
+	if trajectory.LongTermMemory[3] != "PostgreSQL connection pool configured in internal/db." {
+		t.Errorf("Expected non-sticky focus digest in slot 3, got %q", trajectory.LongTermMemory[3])
 	}
 
 	if len(trajectory.WorkingMemory) != 2 {

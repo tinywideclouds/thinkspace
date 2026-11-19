@@ -1,12 +1,14 @@
 package session_test
 
 import (
+	"strings"
 	"testing"
 
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
@@ -84,5 +86,56 @@ func TestProjectTurnContext(t *testing.T) {
 	}
 	if len(turnContext.Focus.PrimaryFocus) != 1 || turnContext.Focus.PrimaryFocus[0] != "backend" {
 		t.Errorf("unexpected Focus: %v", turnContext.Focus)
+	}
+}
+
+func TestBuildBundledWorkerThinkBundleAndFormatMarkdown(t *testing.T) {
+	tasks := []flows.SubAgentTask{
+		{AgentID: "agent-1", Instruction: "Iterative approach"},
+		{AgentID: "agent-2", Instruction: "Recursive approach"},
+	}
+	bundles := []cognition.ThinkBundle{
+		{
+			Rules: cognition.SystemRules{Persona: "Worker rules", FormattingConstraints: "JSON patch"},
+			Trajectory: cognition.Trajectory{
+				LongTermMemory: []string{"Shared project digest"},
+				Catalyst:       cognition.TrajectoryEvent{Role: "user", Content: "Iterative approach"},
+			},
+			Workbench: []cognition.WorkbenchItem{
+				{Path: "src/main.go", Content: "package main", TokenCount: 3},
+			},
+		},
+		{
+			Rules: cognition.SystemRules{Persona: "Worker rules"},
+			Trajectory: cognition.Trajectory{
+				LongTermMemory: []string{"Shared project digest"},
+				Catalyst:       cognition.TrajectoryEvent{Role: "user", Content: "Recursive approach"},
+			},
+			Workbench: []cognition.WorkbenchItem{
+				{Path: "src/main.go", Content: "package main", TokenCount: 3},
+				{Path: "src/helper.go", Content: "package main\nfunc helper() {}", TokenCount: 7},
+			},
+		},
+	}
+
+	combined := session.BuildBundledWorkerThinkBundle(tasks, bundles)
+	if len(combined.Trajectory.LongTermMemory) != 1 {
+		t.Errorf("expected deduplicated LongTermMemory across bundled workers, got %d", len(combined.Trajectory.LongTermMemory))
+	}
+	if len(combined.Workbench) != 2 {
+		t.Fatalf("expected 2 deduplicated workbench files across bundled workers, got %d", len(combined.Workbench))
+	}
+	if len(combined.Trajectory.WorkingMemory) != 1 || combined.Trajectory.WorkingMemory[0].Role != "agent-1" {
+		t.Errorf("expected agent-1 instruction in WorkingMemory, got %+v", combined.Trajectory.WorkingMemory)
+	}
+	if combined.Trajectory.Catalyst.Role != "agent-2" || combined.Trajectory.Catalyst.Content != "Recursive approach" {
+		t.Errorf("expected agent-2 instruction as Catalyst, got %+v", combined.Trajectory.Catalyst)
+	}
+
+	md := session.FormatBundlePreviewMarkdown("Sub-Agent Bundle Preview", &combined)
+	for _, want := range []string{"# Sub-Agent Bundle Preview", "Worker rules", "JSON patch", "Shared project digest", "src/main.go", "src/helper.go", "Recursive approach"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("expected preview markdown to contain %q, got:\n%s", want, md)
+		}
 	}
 }

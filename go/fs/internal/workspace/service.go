@@ -457,3 +457,53 @@ func (s *Service) SaveSpaceContext(ctx context.Context, c *thinkgraph.ChatAddres
 func (s *Service) Dispatcher() *thinkgraph.Dispatcher {
 	return s.dispatcher
 }
+
+func (s *Service) SaveLLMContextDump(ctx context.Context, c *thinkgraph.ChatAddress, label string, content string) (string, error) {
+	if c == nil || c.ProjectID == "" || c.ChatID == "" {
+		return "", fmt.Errorf("invalid chat address for LLM context dump")
+	}
+
+	debugDir := filepath.Join(s.workspaceRoot, c.ProjectID, "chats", c.ChatID, "debug_llm")
+	if err := os.MkdirAll(debugDir, 0755); err != nil {
+		return "", fmt.Errorf("creating debug_llm directory: %w", err)
+	}
+
+	safeLabel := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, label)
+	if safeLabel == "" {
+		safeLabel = "turn"
+	}
+
+	filename := fmt.Sprintf("%s_%s.md", uuid.NewV7().String(), safeLabel)
+	path := filepath.Join(debugDir, filename)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return "", fmt.Errorf("writing LLM context dump: %w", err)
+	}
+
+	entries, err := os.ReadDir(debugDir)
+	if err != nil {
+		return path, fmt.Errorf("reading debug_llm directory for pruning: %w", err)
+	}
+
+	if len(entries) > 50 {
+		var files []string
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+				files = append(files, entry.Name())
+			}
+		}
+		sort.Strings(files)
+		for i := 0; i < len(files)-50; i++ {
+			oldDump := filepath.Join(debugDir, files[i])
+			if rmErr := os.Remove(oldDump); rmErr != nil && s.logger != nil {
+				s.logger.WarnContext(ctx, "failed to prune old LLM context dump", "path", oldDump, "error", rmErr)
+			}
+		}
+	}
+
+	return path, nil
+}

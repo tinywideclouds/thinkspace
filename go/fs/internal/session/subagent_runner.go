@@ -36,6 +36,11 @@ type SubAgentRunRequest struct {
 	ParentNodeID         uuid.UUID
 	MaxAttempts          int
 	DeferResolutionEvent bool
+	PrebuiltSandbox      workspace.CandidateSandbox
+	PrebuiltBundle       *cognition.ThinkBundle
+	SkipContextReview    bool
+	WorkerReviewPolicy   ContextReviewPolicy
+	WorkerPolicySettings workspace.ReviewPolicySettings
 	UI                   UserInterface
 	Emitter              telemetry.Emitter
 }
@@ -112,9 +117,14 @@ func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAge
 	}
 
 	candidateID := fmt.Sprintf("%s-%s-%s", req.ChatSession.ChatID, req.FlowContext.FlowID, req.Task.AgentID)
-	sandbox, err := r.service.SpawnSandbox(ctx, req.ChatSession.ChatID, candidateID)
-	if err != nil {
-		return SubAgentResult{CandidateID: candidateID, Err: err}
+
+	sandbox := req.PrebuiltSandbox
+	if sandbox == nil {
+		var err error
+		sandbox, err = r.service.SpawnSandbox(ctx, req.ChatSession.ChatID, candidateID)
+		if err != nil {
+			return SubAgentResult{CandidateID: candidateID, Err: err}
+		}
 	}
 	defer func() {
 		if tdErr := sandbox.TearDown(ctx); tdErr != nil && r.logger != nil {
@@ -122,21 +132,66 @@ func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAge
 		}
 	}()
 
-	workbench := workspace.NewWorkbench()
-	workbenchItems, err := workbench.Build(ctx, sandbox, req.Task.TargetFiles)
-	if err != nil {
-		return SubAgentResult{CandidateID: candidateID, Err: err}
+	var bundle cognition.ThinkBundle
+	if req.PrebuiltBundle != nil {
+		bundle = *req.PrebuiltBundle
+	} else {
+		workbench := workspace.NewWorkbench()
+		workbenchItems, err := workbench.Build(ctx, sandbox, req.Task.TargetFiles)
+		if err != nil {
+			return SubAgentResult{CandidateID: candidateID, Err: err}
+		}
+
+		bundle = r.bundleAssembler.AssembleWorkerBundle(
+			ctx,
+			req.ChatSession.ProjectID,
+			req.Space,
+			req.FlowContext.BaseAgentRules,
+			req.Task.ContextDigest,
+			req.Task.Instruction,
+			workbenchItems,
+		)
 	}
 
-	bundle := r.bundleAssembler.AssembleWorkerBundle(
-		ctx,
-		req.ChatSession.ProjectID,
-		req.Space,
-		req.FlowContext.BaseAgentRules,
-		req.Task.ContextDigest,
-		req.Task.Instruction,
-		workbenchItems,
-	)
+	if !req.SkipContextReview && req.WorkerPolicySettings.Active && req.UI != nil {
+		policy := req.WorkerReviewPolicy
+		if policy == nil {
+			policy = NewTokenThresholdPolicy()
+		}
+		reviewID := uuid.NewV7()
+		policyWrapper := workspace.SpaceSettings{ReviewPolicy: req.WorkerPolicySettings}
+		if policy.ShouldReview(policyWrapper, reviewID, &bundle, thinkgraph.AttentionFocus{}) {
+			turnContext := ProjectTurnContext(req.ChatSession.ProjectID, req.ChatSession.ChatID, reviewID, &bundle, thinkgraph.AttentionFocus{})
+			previewTitle := fmt.Sprintf("Sub-Agent Context Preview (%s)", req.Task.AgentID)
+			previewMarkdown := FormatBundlePreviewMarkdown(previewTitle, &bundle)
+			if previewID, err := r.service.SaveContextPreview(ctx, req.ChatSession, previewMarkdown); err != nil {
+				if r.logger != nil {
+					r.logger.WarnContext(ctx, "failed saving sub-agent context preview", "agent_id", req.Task.AgentID, "error", err)
+				}
+			} else {
+				turnContext.PreviewID = previewID
+			}
+
+			decision := req.UI.ReviewContext(turnContext)
+			if !decision.Approved {
+				return SubAgentResult{CandidateID: candidateID, Err: fmt.Errorf("sub-agent %s execution aborted by user during context review", req.Task.AgentID)}
+			}
+
+			if decision.RetainedFilePaths != nil {
+				retainedPaths := make(map[string]bool, len(decision.RetainedFilePaths))
+				for _, p := range decision.RetainedFilePaths {
+					retainedPaths[p] = true
+				}
+				var prunedWorkbench []cognition.WorkbenchItem
+				for _, item := range bundle.Workbench {
+					if retainedPaths[item.Path] {
+						prunedWorkbench = append(prunedWorkbench, item)
+					}
+				}
+				bundle.Workbench = prunedWorkbench
+			}
+		}
+	}
 
 	taskEvent := thinkgraph.NewEvent(thinkgraph.EventPrompt, req.Task.Instruction)
 	taskEvent.Metadata["agent_id"] = req.Task.AgentID

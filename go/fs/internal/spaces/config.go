@@ -58,10 +58,13 @@ type ToolCreateDigestConfig struct {
 	TopicNameDescription   string `yaml:"topic_name_description"`
 	TagsDescription        string `yaml:"tags_description"`
 	InstructionDescription string `yaml:"instruction_description"`
+	IsStickyDescription    string `yaml:"is_sticky_description"`
 }
 
 type ToolProposeChangeConfig struct {
 	Description              string `yaml:"description"`
+	IntentionDescription     string `yaml:"intention_description"`
+	AssignedTagsDescription  string `yaml:"assigned_tags_description"`
 	AgentCountDescription    string `yaml:"agent_count_description"`
 	ContextDigestDescription string `yaml:"context_digest_description"`
 	InstructionDescription   string `yaml:"instruction_description"`

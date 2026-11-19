@@ -20,8 +20,10 @@ const (
 	AgentCount        = "agent_count"
 	AgentInstructions = "agent_instructions"
 	Approach          = "approach"
+	AssignedTags      = "assigned_tags"
 	ContextDigest     = "context_digest"
 	Instruction       = "instruction"
+	Intention         = "intention"
 	TargetFiles       = "target_files"
 )
 
@@ -31,11 +33,31 @@ type AgentInstruction struct {
 }
 
 type ProposeChangeRequest struct {
+	Intention         string             `json:"intention"`
+	AssignedTags      []string           `json:"assigned_tags"`
 	AgentCount        int                `json:"agent_count"`
 	AgentInstructions []AgentInstruction `json:"agent_instructions"`
 	ContextDigest     string             `json:"context_digest"`
 	Instruction       string             `json:"instruction"`
 	TargetFiles       []string           `json:"target_files"`
+}
+
+func normalizeTags(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(raw))
+	var out []string
+	for _, t := range raw {
+		norm := strings.ToLower(strings.TrimSpace(t))
+		norm = strings.TrimPrefix(norm, "#")
+		if norm == "" || seen[norm] {
+			continue
+		}
+		seen[norm] = true
+		out = append(out, norm)
+	}
+	return out
 }
 
 type ProposeChangeTool struct{}
@@ -127,13 +149,18 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (T
 		}
 	}
 
-	leadSummary := strings.TrimSpace(request.Instruction)
+	intention := strings.TrimSpace(request.Intention)
+	leadSummary := intention
+	if leadSummary == "" {
+		leadSummary = strings.TrimSpace(request.Instruction)
+	}
 	if leadSummary == "" && len(request.AgentInstructions) > 0 {
 		leadSummary = strings.TrimSpace(request.AgentInstructions[0].Instruction)
 	}
+
 	content := fmt.Sprintf("Executing %d agent(s): %s", len(tasks), leadSummary)
-	if len(content) > 80 {
-		content = content[:77] + "..."
+	if len(content) > 160 {
+		content = content[:157] + "..."
 	}
 
 	if ec.Emitter != nil {
@@ -151,7 +178,11 @@ func (t *ProposeChangeTool) Execute(ctx context.Context, ec ExecutionContext) (T
 	}
 
 	return ToolResponse{
-		Signal:  &signals.SignalDispatchFlow{Tasks: tasks},
+		Signal: &signals.SignalDispatchFlow{
+			Intention: intention,
+			Tags:      normalizeTags(request.AssignedTags),
+			Tasks:     tasks,
+		},
 		Content: content,
 		Payload: payload,
 	}, nil

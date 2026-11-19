@@ -34,14 +34,15 @@ type ChatSession struct {
 
 	graphIDs map[string]thinkgraph.GraphID
 
-	logger           *slog.Logger
-	registry         *config.Registry
-	workspaceManager *workspace.ServiceManager
-	workspaceService *workspace.Service
-	modelClient      llm.ModelClient
-	bundleAssembler  *BundleAssembler
-	digestManager    *DigestManager
-	reviewPolicy     ContextReviewPolicy
+	logger             *slog.Logger
+	registry           *config.Registry
+	workspaceManager   *workspace.ServiceManager
+	workspaceService   *workspace.Service
+	modelClient        llm.ModelClient
+	bundleAssembler    *BundleAssembler
+	digestManager      *DigestManager
+	reviewPolicy       ContextReviewPolicy
+	workerReviewPolicy ContextReviewPolicy
 
 	chatEngine       *ChatEngine
 	workerEngine     *WorkerEngine
@@ -85,17 +86,18 @@ func NewChatSession(
 	workspaceService := workspaceManager.GetService(spaceID)
 
 	session := &ChatSession{
-		SpaceID:          spaceID,
-		ChatID:           chatID,
-		Meta:             meta,
-		graphIDs:         make(map[string]thinkgraph.GraphID),
-		logger:           logger,
-		registry:         registry,
-		workspaceManager: workspaceManager,
-		workspaceService: workspaceService,
-		modelClient:      modelClient,
-		digestManager:    digestManager,
-		reviewPolicy:     NewTokenThresholdPolicy(),
+		SpaceID:            spaceID,
+		ChatID:             chatID,
+		Meta:               meta,
+		graphIDs:           make(map[string]thinkgraph.GraphID),
+		logger:             logger,
+		registry:           registry,
+		workspaceManager:   workspaceManager,
+		workspaceService:   workspaceService,
+		modelClient:        modelClient,
+		digestManager:      digestManager,
+		reviewPolicy:       NewTokenThresholdPolicy(),
+		workerReviewPolicy: NewTokenThresholdPolicy(),
 	}
 
 	for branch, rawID := range meta.BranchGraphIDs {
@@ -149,6 +151,24 @@ func (s *ChatSession) SetReviewPolicy(policy ContextReviewPolicy) {
 		policy = NewTokenThresholdPolicy()
 	}
 	s.reviewPolicy = policy
+}
+
+func (s *ChatSession) SetWorkerReviewPolicy(policy ContextReviewPolicy) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if policy == nil {
+		policy = NewTokenThresholdPolicy()
+	}
+	s.workerReviewPolicy = policy
+}
+
+func (s *ChatSession) WorkerReviewPolicy() ContextReviewPolicy {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.workerReviewPolicy == nil {
+		return NewTokenThresholdPolicy()
+	}
+	return s.workerReviewPolicy
 }
 
 func (s *ChatSession) flushMetaLocked() error {

@@ -406,3 +406,54 @@ func TestBadgerGraph_GetLenses(t *testing.T) {
 		t.Errorf("Lens failed to return correct SpaceContext")
 	}
 }
+
+func TestBadgerGraph_Mutations_TagsAndLensReindex(t *testing.T) {
+	graph := setupTestGraph(t)
+	ctx := context.Background()
+	graphID := thinkgraph.NewGraphID(thinkgraph.PrefixChat)
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "chat-tag-mutations",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: graphID,
+		},
+	}
+
+	ev := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Add auth middleware")
+	ev.Tags = []string{"setup"}
+	ev.GraphID = graphID
+	if err := graph.AppendNode(ctx, chat, thinkgraph.Node{Event: ev}); err != nil {
+		t.Fatalf("AppendNode failed: %v", err)
+	}
+
+	mut := thinkgraph.TagsMutation{
+		BaseMutation: thinkgraph.BaseMutation{
+			TargetID:  ev.ID,
+			Type:      thinkgraph.MutationTags,
+			Timestamp: time.Now(),
+		},
+		Tags: []string{"auth", "middleware"},
+	}
+	if err := graph.SaveMutation(ctx, chat, mut); err != nil {
+		t.Fatalf("SaveMutation TagsMutation failed: %v", err)
+	}
+
+	nodes, err := graph.GetNodes(ctx, chat, []string{ev.ID.String()})
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("GetNodes failed: %v", err)
+	}
+	if len(nodes[0].Tags) != 2 || nodes[0].Tags[0] != "auth" || nodes[0].Tags[1] != "middleware" {
+		t.Errorf("expected updated tags [auth middleware], got %v", nodes[0].Tags)
+	}
+
+	authLens, err := graph.GetLenses(ctx, chat, "auth")
+	if err != nil || len(authLens.Nodes) != 1 || authLens.Nodes[0].ID != ev.ID {
+		t.Errorf("expected node to be indexed under new 'auth' lens, got %+v (err=%v)", authLens, err)
+	}
+
+	staleLens, err := graph.GetLenses(ctx, chat, "setup")
+	if err != nil || len(staleLens.Nodes) != 0 {
+		t.Errorf("expected stale 'setup' lens entry to be removed, got %+v (err=%v)", staleLens, err)
+	}
+}

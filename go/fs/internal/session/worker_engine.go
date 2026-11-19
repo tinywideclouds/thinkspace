@@ -10,6 +10,7 @@ import (
 
 	"uuid"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
@@ -20,13 +21,14 @@ import (
 )
 
 type WorkerEngine struct {
-	logger      *slog.Logger
-	session     *ChatSession
-	registry    *config.Registry
-	service     *workspace.Service
-	broadcaster *GraphBroadcaster
-	runner      *SubAgentRunner
-	flow        flows.Flow
+	logger          *slog.Logger
+	session         *ChatSession
+	registry        *config.Registry
+	service         *workspace.Service
+	broadcaster     *GraphBroadcaster
+	bundleAssembler *BundleAssembler
+	runner          *SubAgentRunner
+	flow            flows.Flow
 }
 
 func NewWorkerEngine(
@@ -57,14 +59,27 @@ func NewWorkerEngine(
 	runner := NewSubAgentRunner(logger, service, turnExecutor, assembler, broadcaster)
 
 	return &WorkerEngine{
-		logger:      logger,
-		session:     session,
-		registry:    registry,
-		service:     service,
-		broadcaster: broadcaster,
-		runner:      runner,
-		flow:        flow,
+		logger:          logger,
+		session:         session,
+		registry:        registry,
+		service:         service,
+		broadcaster:     broadcaster,
+		bundleAssembler: assembler,
+		runner:          runner,
+		flow:            flow,
 	}
+}
+
+func leanAgentRecords(records []flows.AgentRecord) []flows.AgentRecord {
+	lean := make([]flows.AgentRecord, len(records))
+	for i, r := range records {
+		lean[i] = flows.AgentRecord{
+			AgentID:     r.AgentID,
+			Passed:      r.Passed,
+			Instruction: r.Instruction,
+		}
+	}
+	return lean
 }
 
 func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, signal signals.EngineSignal, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
@@ -82,12 +97,17 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 		return nil, fmt.Errorf("think state configuration not found: %s", activeThinkState)
 	}
 
+	flowSummary := strings.TrimSpace(sig.Intention)
+	if flowSummary == "" {
+		flowSummary = fmt.Sprintf("Executing %d sub-agent tasks", len(sig.Tasks))
+	}
+
 	flowID := uuid.NewV7()
 	flowContext := flows.FlowContext{
 		FlowID:         fmt.Sprintf("flow-%s", flowID.String()),
 		SpaceID:        chatSession.ProjectID,
 		BaseAgentRules: space.Config().WorkerSystemPrompt(),
-		FlowSummary:    fmt.Sprintf("Executing %d sub-agent tasks", len(sig.Tasks)),
+		FlowSummary:    flowSummary,
 	}
 
 	state := flows.FlowState{
@@ -124,7 +144,7 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 
 		switch directive.Action {
 		case flows.ActionSpawnAgents:
-			ev := thinkgraph.NewEvent(flows.EventFlowLifecycle, fmt.Sprintf("Flow started: %s", flowContext.FlowSummary))
+			ev := thinkgraph.NewEvent(flows.EventFlowLifecycle, flowContext.FlowSummary)
 			ev.ID = flowID
 			ev.Edges = map[string]string{"parent_id": turnID.String()}
 
@@ -143,7 +163,7 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 				return nil, fmt.Errorf("failed to initialize flow anchor in graph: %w", err)
 			}
 
-			candidates, returnedJoinID, records, err := engine.spawnAgents(ctx, chatSession, flowAddress, scope, space, flowContext, directive.Tasks, turnID, ui, emitter)
+			candidates, returnedJoinID, records, err := engine.spawnAgents(ctx, chatSession, flowAddress, flowID, scope, space, flowContext, directive.Tasks, turnID, ui, emitter)
 			if err != nil {
 				return nil, err
 			}
@@ -270,10 +290,118 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 	return nil, fmt.Errorf("flow '%s' exceeded its maximum execution limit of %d steps without resolving", engine.flow.Name(), maxSteps)
 }
 
+type preparedSubAgent struct {
+	sandbox workspace.CandidateSandbox
+	bundle  cognition.ThinkBundle
+}
+
+func (engine *WorkerEngine) prepareAndReviewWorkers(
+	ctx context.Context,
+	chatSession *thinkgraph.ChatAddress,
+	flowID uuid.UUID,
+	space spaces.ThinkState,
+	flowContext flows.FlowContext,
+	tasks []flows.SubAgentTask,
+	ui UserInterface,
+) ([]preparedSubAgent, error) {
+	prepared := make([]preparedSubAgent, 0, len(tasks))
+	cleanupAll := func() {
+		for _, p := range prepared {
+			if p.sandbox != nil {
+				_ = p.sandbox.TearDown(ctx)
+			}
+		}
+	}
+
+	wb := workspace.NewWorkbench()
+	bundles := make([]cognition.ThinkBundle, 0, len(tasks))
+
+	for _, task := range tasks {
+		candidateID := fmt.Sprintf("%s-%s-%s", chatSession.ChatID, flowContext.FlowID, task.AgentID)
+		sandbox, err := engine.service.SpawnSandbox(ctx, chatSession.ChatID, candidateID)
+		if err != nil {
+			cleanupAll()
+			return nil, err
+		}
+
+		items, buildErr := wb.Build(ctx, sandbox, task.TargetFiles)
+		if buildErr != nil {
+			_ = sandbox.TearDown(ctx)
+			cleanupAll()
+			return nil, buildErr
+		}
+
+		bundle := engine.bundleAssembler.AssembleWorkerBundle(
+			ctx,
+			chatSession.ProjectID,
+			space,
+			flowContext.BaseAgentRules,
+			task.ContextDigest,
+			task.Instruction,
+			items,
+		)
+
+		prepared = append(prepared, preparedSubAgent{sandbox: sandbox, bundle: bundle})
+		bundles = append(bundles, bundle)
+	}
+
+	if ui == nil || engine.session == nil || engine.session.workspaceManager == nil {
+		return prepared, nil
+	}
+
+	settings, err := engine.session.workspaceManager.GetSpaceSettings(chatSession.ProjectID)
+	if err != nil {
+		cleanupAll()
+		return nil, fmt.Errorf("loading space settings for worker context review: %w", err)
+	}
+
+	policy := engine.session.WorkerReviewPolicy()
+	combinedBundle := BuildBundledWorkerThinkBundle(tasks, bundles)
+	policyWrapper := workspace.SpaceSettings{ReviewPolicy: settings.WorkerReviewPolicy}
+
+	if policy.ShouldReview(policyWrapper, flowID, &combinedBundle, thinkgraph.AttentionFocus{}) {
+		turnContext := ProjectTurnContext(chatSession.ProjectID, chatSession.ChatID, flowID, &combinedBundle, thinkgraph.AttentionFocus{})
+		previewTitle := fmt.Sprintf("Sub-Agent Batch Context Preview (%d agent(s))", len(tasks))
+		previewMarkdown := FormatBundlePreviewMarkdown(previewTitle, &combinedBundle)
+		if previewID, saveErr := engine.service.SaveContextPreview(ctx, chatSession, previewMarkdown); saveErr != nil {
+			if engine.logger != nil {
+				engine.logger.WarnContext(ctx, "failed saving bundled worker context preview", "error", saveErr)
+			}
+		} else {
+			turnContext.PreviewID = previewID
+		}
+
+		decision := ui.ReviewContext(turnContext)
+		if !decision.Approved {
+			cleanupAll()
+			return nil, fmt.Errorf("sub-agent execution aborted by user during context review")
+		}
+
+		if decision.RetainedFilePaths != nil {
+			retainedPaths := make(map[string]bool, len(decision.RetainedFilePaths))
+			for _, p := range decision.RetainedFilePaths {
+				retainedPaths[p] = true
+			}
+			for i := range prepared {
+				var prunedWorkbench []cognition.WorkbenchItem
+				for _, item := range prepared[i].bundle.Workbench {
+					if retainedPaths[item.Path] {
+						prunedWorkbench = append(prunedWorkbench, item)
+					}
+				}
+				prepared[i].bundle.Workbench = prunedWorkbench
+			}
+		}
+	}
+
+	return prepared, nil
+}
+
 func (engine *WorkerEngine) spawnAgents(
 	ctx context.Context,
 	chatSession *thinkgraph.ChatAddress,
 	flowAddress *thinkgraph.ChatAddress,
+	flowID uuid.UUID,
 	scope *FlowScope,
 	space spaces.ThinkState,
 	flowContext flows.FlowContext,
@@ -318,27 +446,40 @@ func (engine *WorkerEngine) spawnAgents(
 		})
 	}
 
-	if err := scope.SetRunning(ctx, "Agents initializing...", records, ui); err != nil {
+	if err := scope.SetRunning(ctx, "Agents initializing...", leanAgentRecords(records), ui); err != nil {
 		return nil, uuid.Nil(), records, err
+	}
+
+	prepared, prepErr := engine.prepareAndReviewWorkers(ctx, chatSession, flowID, space, flowContext, tasks, ui)
+	if prepErr != nil {
+		if failErr := scope.Fail(ctx, "Flow aborted before sub-agent execution.", prepErr.Error(), records, ui); failErr != nil && engine.logger != nil {
+			engine.logger.ErrorContext(ctx, "failed recording flow abort state", "error", failErr)
+		}
+		return nil, uuid.Nil(), records, fmt.Errorf("fatal system errors aborted execution: %w", prepErr)
 	}
 
 	results := make(chan SubAgentResult, len(tasks))
 
 	for i, task := range tasks {
-		go func(agentIndex int, t flows.SubAgentTask) {
+		prep := prepared[i]
+		go func(agentIndex int, t flows.SubAgentTask, p preparedSubAgent) {
+			bundleCopy := p.bundle
 			results <- engine.runner.Run(ctx, SubAgentRunRequest{
-				ChatSession:  chatSession,
-				FlowAddress:  flowAddress,
-				Scope:        scope,
-				Space:        space,
-				FlowContext:  flowContext,
-				Task:         t,
-				AgentIndex:   agentIndex,
-				ParentNodeID: managerNodeID,
-				UI:           ui,
-				Emitter:      emitter,
+				ChatSession:       chatSession,
+				FlowAddress:       flowAddress,
+				Scope:             scope,
+				Space:             space,
+				FlowContext:       flowContext,
+				Task:              t,
+				AgentIndex:        agentIndex,
+				ParentNodeID:      managerNodeID,
+				PrebuiltSandbox:   p.sandbox,
+				PrebuiltBundle:    &bundleCopy,
+				SkipContextReview: true,
+				UI:                ui,
+				Emitter:           emitter,
 			})
-		}(i+1, task)
+		}(i+1, task, prep)
 	}
 
 	for i := 0; i < len(tasks); i++ {
@@ -358,7 +499,7 @@ func (engine *WorkerEngine) spawnAgents(
 			}
 		}
 
-		if err := scope.SetRunning(ctx, "Agents executing...", records, ui); err != nil {
+		if err := scope.SetRunning(ctx, "Agents executing...", leanAgentRecords(records), ui); err != nil {
 			return nil, uuid.Nil(), records, err
 		}
 	}

@@ -60,8 +60,8 @@ type inlineDigestCommitter struct {
 	workerPrompt string
 }
 
-func (c *inlineDigestCommitter) CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error {
-	return c.dm.CreateManualDigest(ctx, c.ws, address, topicName, tags, instruction, contextData, c.workerModel, c.workerPrompt)
+func (c *inlineDigestCommitter) CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, isSticky bool, instruction string, contextData string) error {
+	return c.dm.CreateManualDigest(ctx, c.ws, address, topicName, tags, isSticky, instruction, contextData, c.workerModel, c.workerPrompt)
 }
 
 func (e *ChatEngine) Execute(ctx context.Context, address *thinkgraph.ChatAddress, turnID uuid.UUID, catalystID uuid.UUID, signal signals.EngineSignal, ui UserInterface, emitter telemetry.Emitter) (signals.EngineSignal, error) {
@@ -118,7 +118,7 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 	}
 
 	shouldReview := policy.ShouldReview(settings, turnID, &bundle, graphData.Focus)
-	if !e.contextReview(ctx, shouldReview, turnID, &bundle, graphData, ui) {
+	if !e.contextReview(ctx, address, shouldReview, turnID, &bundle, graphData, ui) {
 		return &signals.SignalTerminal{}, nil
 	}
 
@@ -159,7 +159,7 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 	return signal, err
 }
 
-func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, responseID uuid.UUID, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
+func (e *ChatEngine) contextReview(ctx context.Context, address *thinkgraph.ChatAddress, shouldReview bool, responseID uuid.UUID, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
 	if !shouldReview {
 		return true
 	}
@@ -168,6 +168,17 @@ func (e *ChatEngine) contextReview(ctx context.Context, shouldReview bool, respo
 	}
 
 	turnContext := ProjectTurnContext(e.session.SpaceID, e.session.ChatID, responseID, bundle, graphData.Focus)
+	if e.workspaceService != nil && address != nil {
+		previewMarkdown := FormatBundlePreviewMarkdown("Manager Turn Context Preview", bundle)
+		if previewID, err := e.workspaceService.SaveContextPreview(ctx, address, previewMarkdown); err != nil {
+			if e.logger != nil {
+				e.logger.WarnContext(ctx, "failed saving manager context preview", "error", err)
+			}
+		} else {
+			turnContext.PreviewID = previewID
+		}
+	}
+
 	decision := ui.ReviewContext(turnContext)
 	if !decision.Approved {
 		return false

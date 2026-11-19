@@ -44,7 +44,9 @@ func (s *SignalExecuteChat) IsTerminal() bool { return false }
 // SignalDispatchFlow indicates the ChatEngine wants to fan-out to sub-agents.
 // Note: Purely for routing. Display metadata is handled by ToolResponse.
 type SignalDispatchFlow struct {
-	Tasks []flows.SubAgentTask
+	Intention string
+	Tags      []string
+	Tasks     []flows.SubAgentTask
 }
 
 func (s *SignalDispatchFlow) IsTerminal() bool { return false }

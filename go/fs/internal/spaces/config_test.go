@@ -94,12 +94,18 @@ func TestThinkSpaceConfig_Timeouts(t *testing.T) {
 	}
 }
 
-func TestThinkSpaceConfig_DomainAgnosticOptions(t *testing.T) {
+func TestThinkSpaceConfig_DomainAgnosticOptionsAndToolDescriptions(t *testing.T) {
 	rawYAML := `
 name: literary-critique
 options:
   citation_style: chicago
   strict_meter_check: true
+roles:
+  manager:
+    tools:
+      propose_change:
+        description: "Delegate prose drafting"
+        intention_description: "Explain why drafting agents are being spawned"
 `
 	var cfg spaces.ThinkStateConfig
 	if err := yaml.Unmarshal([]byte(rawYAML), &cfg); err != nil {
@@ -111,5 +117,8 @@ options:
 	}
 	if cfg.Options["strict_meter_check"] != true {
 		t.Errorf("expected strict_meter_check true, got %v", cfg.Options["strict_meter_check"])
+	}
+	if cfg.Roles.Manager.Tools.ProposeChange.IntentionDescription != "Explain why drafting agents are being spawned" {
+		t.Errorf("unexpected IntentionDescription: %q", cfg.Roles.Manager.Tools.ProposeChange.IntentionDescription)
 	}
 }

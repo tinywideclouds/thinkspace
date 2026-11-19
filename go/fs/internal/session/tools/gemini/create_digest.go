@@ -12,6 +12,7 @@ func CompileCreateDigest(tool *tools.CreateDigestTool, config spaces.ThinkStateC
 	topicName := "Short descriptive name of the topic summarized."
 	instruction := "Guidance on critical constraints or facts that must be preserved."
 	tags := "Associated classification tags for future lens lookup."
+	isSticky := "Pin this digest unconditionally in every turn's context regardless of topic focus. Leave false for normal tag-sensitive digests."
 
 	if config.Roles.Manager.Tools.CreateDigest.Description != "" {
 		description = config.Roles.Manager.Tools.CreateDigest.Description
@@ -24,6 +25,9 @@ func CompileCreateDigest(tool *tools.CreateDigestTool, config spaces.ThinkStateC
 	}
 	if config.Roles.Manager.Tools.CreateDigest.TagsDescription != "" {
 		tags = config.Roles.Manager.Tools.CreateDigest.TagsDescription
+	}
+	if config.Roles.Manager.Tools.CreateDigest.IsStickyDescription != "" {
+		isSticky = config.Roles.Manager.Tools.CreateDigest.IsStickyDescription
 	}
 
 	return &genai.FunctionDeclaration{
@@ -44,6 +48,10 @@ func CompileCreateDigest(tool *tools.CreateDigestTool, config spaces.ThinkStateC
 					Type:        genai.TypeArray,
 					Items:       &genai.Schema{Type: genai.TypeString},
 					Description: tags,
+				},
+				tools.IsSticky: {
+					Type:        genai.TypeBoolean,
+					Description: isSticky,
 				},
 			},
 			Required: []string{tools.TopicName, tools.DigestInstruction},

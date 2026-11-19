@@ -396,3 +396,73 @@ func TestTurnExecutor_Execute_UnknownToolFeedbackAndMaxIterations(t *testing.T) 
 		t.Errorf("expected system error feedback for unknown tool in WorkingMemory, got %+v", client.capturedBundle.Trajectory.WorkingMemory)
 	}
 }
+
+func TestTurnExecutor_StampsAssignedTagsOnPromptAndModelNodes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	executor, wsService, client := setupExecutorTest(t, "golang", "test-tags-stamp")
+	address := &thinkgraph.ChatAddress{
+		ChatID:    "test-tags-stamp",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+
+	promptEv := thinkgraph.NewEvent(thinkgraph.EventPrompt, "Implement Bearer auth")
+	promptEv.GraphID = address.GraphID
+	if err := wsService.Dispatcher().AppendEvent(ctx, address, promptEv); err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	client.responses = []llm.StreamChunk{
+		{
+			ToolCalls: []llm.ToolCall{{
+				Name: "propose_change",
+				Args: map[string]any{
+					"intention":      "Add Bearer token authentication",
+					"assigned_tags":  []any{"auth", "middleware"},
+					"context_digest": "Auth context",
+					"agent_count":    1,
+					"agent_instructions": []any{
+						map[string]any{
+							"approach":    "middleware",
+							"instruction": "Write Bearer middleware",
+						},
+					},
+				},
+			}},
+		},
+	}
+
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewProposeChangeTool())
+
+	responseID := uuid.NewV7()
+	sig, err := executor.Execute(ctx, address, responseID, promptEv.ID, "test-manager", true, &teTestThinkSpace{}, cognition.ThinkBundle{}, registry, &teTestUI{}, nil)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	dispatchSig, ok := sig.(*signals.SignalDispatchFlow)
+	if !ok {
+		t.Fatalf("expected SignalDispatchFlow, got %T", sig)
+	}
+	if len(dispatchSig.Tags) != 2 || dispatchSig.Tags[0] != "auth" {
+		t.Errorf("expected SignalDispatchFlow.Tags [auth middleware], got %v", dispatchSig.Tags)
+	}
+
+	timeline, err := wsService.Graph().GetSubGraphTimeline(ctx, address, address.GraphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
+	if len(timeline) != 2 {
+		t.Fatalf("expected 2 nodes on timeline, got %d", len(timeline))
+	}
+	for i, n := range timeline {
+		if len(n.Tags) != 2 || n.Tags[0] != "auth" || n.Tags[1] != "middleware" {
+			t.Errorf("expected timeline[%d] (%s) to have tags [auth middleware], got %v", i, n.Type, n.Tags)
+		}
+	}
+}

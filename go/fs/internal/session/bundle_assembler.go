@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sort"
+	"strings"
 	"text/template"
 
 	"uuid"
@@ -16,6 +17,8 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
+
+const maxFallbackRecentDigests = 3
 
 // BundleAssembler handles the compilation of the active trajectory, knowledge graph digests,
 // and physical mapbook into a single ThinkBundle for the LLM.
@@ -46,7 +49,7 @@ func NewBundleAssembler(
 	}
 }
 
-// Assemble executes the graph traversal, context filtering, and persona template injection.
+// Assemble executes the graph traversal, tag-sensitive digest selection, and persona template injection.
 func (a *BundleAssembler) Assemble(
 	ctx context.Context,
 	chatObj *thinkgraph.ChatAddress,
@@ -72,7 +75,7 @@ func (a *BundleAssembler) Assemble(
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("gathering timeline: %w", err)
 	}
 
-	allStickyDigests, err := a.graphRepo.GetStickyDigests(ctx, chatObj)
+	allDigests, err := a.graphRepo.GetDigests(ctx, chatObj)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching digests: %w", err)
 	}
@@ -82,7 +85,7 @@ func (a *BundleAssembler) Assemble(
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching space contexts: %w", err)
 	}
 
-	activeDigests := filterActiveDigests(allStickyDigests, primaryTags, relatedTags)
+	activeDigests, dormantLenses := selectActiveDigests(allDigests, primaryTags, relatedTags)
 	activeContexts := filterActiveContexts(allSpaceContexts, primaryTags, relatedTags)
 
 	manifest := thinkgraph.NewChatManifest()
@@ -96,7 +99,7 @@ func (a *BundleAssembler) Assemble(
 	focus := thinkgraph.AttentionFocus{
 		PrimaryFocus:   mapKeys(primaryTags),
 		RelatedContext: mapKeys(relatedTags),
-		DormantLenses:  []string{},
+		DormantLenses:  dormantLenses,
 	}
 
 	var catalystNode *thinkgraph.Node
@@ -169,6 +172,7 @@ func (a *BundleAssembler) Assemble(
 		Mapbook:    cognition.Mapbook{Maps: stringMaps},
 		Trajectory: trajectory,
 		Workbench:  []cognition.WorkbenchItem{},
+		ActiveTags: focus.PrimaryFocus,
 	}
 
 	if err := thinkState.EnrichBundle(ctx, &bundle, focus, a.workspaceRoot); err != nil {
@@ -252,11 +256,15 @@ func (a *BundleAssembler) gatherTimeline(
 
 		if len(volatileEvents) <= focusDepth {
 			for _, tag := range node.Tags {
-				primaryTags[tag] = true
+				if norm := strings.ToLower(strings.TrimSpace(tag)); norm != "" {
+					primaryTags[norm] = true
+				}
 			}
 		} else {
 			for _, tag := range node.Tags {
-				relatedTags[tag] = true
+				if norm := strings.ToLower(strings.TrimSpace(tag)); norm != "" {
+					relatedTags[norm] = true
+				}
 			}
 		}
 
@@ -278,25 +286,95 @@ func (a *BundleAssembler) gatherTimeline(
 	return volatileEvents, primaryTags, relatedTags, nil
 }
 
-func filterActiveDigests(allDigests []thinkgraph.DigestMeta, primaryTags, relatedTags map[string]bool) []thinkgraph.DigestMeta {
-	var active []thinkgraph.DigestMeta
-	for _, d := range allDigests {
-		if len(d.Tags) == 0 {
-			active = append(active, d)
-			continue
-		}
-		isActive := false
-		for _, tag := range d.Tags {
-			if primaryTags[tag] || relatedTags[tag] {
-				isActive = true
-				break
+// selectActiveDigests partitions all chat digests into active digests for the current turn
+// and dormant tags for query_lens discovery:
+// - Sticky digests (Promoted: true) are always included regardless of active tags.
+// - Global digests (len(Tags) == 0) are always included.
+// - Non-sticky tagged digests are included if any tag matches primaryTags or relatedTags.
+// - If no focus tags are active yet, up to maxFallbackRecentDigests most recent digests are included.
+// - Tags belonging solely to unselected digests are returned as sorted dormant lenses.
+func selectActiveDigests(allDigests []thinkgraph.DigestMeta, primaryTags, relatedTags map[string]bool) ([]thinkgraph.DigestMeta, []string) {
+	if len(allDigests) == 0 {
+		return nil, nil
+	}
+
+	sorted := append([]thinkgraph.DigestMeta(nil), allDigests...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].ID.String() < sorted[j].ID.String()
+	})
+
+	hasFocus := len(primaryTags) > 0 || len(relatedTags) > 0
+
+	// When no focus tags exist yet on the timeline, allow the most recent non-sticky digests as a baseline window.
+	recentFallbackIDs := make(map[uuid.UUID]bool)
+	if !hasFocus {
+		nonStickyCount := 0
+		for i := len(sorted) - 1; i >= 0 && nonStickyCount < maxFallbackRecentDigests; i-- {
+			if !sorted[i].Promoted && len(sorted[i].Tags) > 0 {
+				recentFallbackIDs[sorted[i].ID] = true
+				nonStickyCount++
 			}
 		}
+	}
+
+	var active []thinkgraph.DigestMeta
+	activeTagSet := make(map[string]bool)
+	for t := range primaryTags {
+		activeTagSet[t] = true
+	}
+	for t := range relatedTags {
+		activeTagSet[t] = true
+	}
+
+	var dormantCandidates []thinkgraph.DigestMeta
+
+	for _, d := range sorted {
+		if d.Promoted || len(d.Tags) == 0 {
+			active = append(active, d)
+			for _, tag := range d.Tags {
+				if norm := strings.ToLower(strings.TrimSpace(tag)); norm != "" {
+					activeTagSet[norm] = true
+				}
+			}
+			continue
+		}
+
+		isActive := false
+		if hasFocus {
+			for _, tag := range d.Tags {
+				norm := strings.ToLower(strings.TrimSpace(tag))
+				if primaryTags[norm] || relatedTags[norm] {
+					isActive = true
+					break
+				}
+			}
+		} else {
+			isActive = recentFallbackIDs[d.ID]
+		}
+
 		if isActive {
 			active = append(active, d)
+			for _, tag := range d.Tags {
+				if norm := strings.ToLower(strings.TrimSpace(tag)); norm != "" {
+					activeTagSet[norm] = true
+				}
+			}
+		} else {
+			dormantCandidates = append(dormantCandidates, d)
 		}
 	}
-	return active
+
+	dormantMap := make(map[string]bool)
+	for _, d := range dormantCandidates {
+		for _, tag := range d.Tags {
+			norm := strings.ToLower(strings.TrimSpace(tag))
+			if norm != "" && !activeTagSet[norm] {
+				dormantMap[norm] = true
+			}
+		}
+	}
+
+	return active, mapKeys(dormantMap)
 }
 
 func filterActiveContexts(allContexts []thinkgraph.SpaceContext, primaryTags, relatedTags map[string]bool) []thinkgraph.SpaceContext {
@@ -308,7 +386,8 @@ func filterActiveContexts(allContexts []thinkgraph.SpaceContext, primaryTags, re
 		}
 		isActive := false
 		for _, tag := range sc.Tags {
-			if primaryTags[tag] || relatedTags[tag] {
+			norm := strings.ToLower(strings.TrimSpace(tag))
+			if primaryTags[norm] || relatedTags[norm] {
 				isActive = true
 				break
 			}

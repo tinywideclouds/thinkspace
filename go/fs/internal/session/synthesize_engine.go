@@ -271,8 +271,6 @@ func (e *SynthesizeEngine) Execute(
 	comparativeEval := strings.TrimSpace(evalMux.buffer.String())
 
 	// Stage 2: Execute the single synthesized candidate via SubAgentRunner.Run on the subgraph.
-	// DeferResolutionEvent prevents SubAgentRunner from writing "Proposal ACCEPTED" onto the
-	// subgraph before Stage 4 collects the user's Accept/Reject decision.
 	var digestBuilder strings.Builder
 	if strings.TrimSpace(sig.OriginalContext) != "" {
 		digestBuilder.WriteString(strings.TrimSpace(sig.OriginalContext))
@@ -304,6 +302,17 @@ func (e *SynthesizeEngine) Execute(
 		RetryPrompt:   space.Config().Roles.Worker.RetryPrompt,
 	}
 
+	var workerPolicy ContextReviewPolicy
+	var workerPolicySettings workspace.ReviewPolicySettings
+	if e.session != nil {
+		workerPolicy = e.session.WorkerReviewPolicy()
+		if e.session.workspaceManager != nil {
+			if st, stErr := e.session.workspaceManager.GetSpaceSettings(chatSession.ProjectID); stErr == nil {
+				workerPolicySettings = st.WorkerReviewPolicy
+			}
+		}
+	}
+
 	synthResult := e.runner.Run(ctx, SubAgentRunRequest{
 		ChatSession:          chatSession,
 		FlowAddress:          sig.FlowAddress,
@@ -314,6 +323,8 @@ func (e *SynthesizeEngine) Execute(
 		AgentIndex:           len(candidates) + 1,
 		ParentNodeID:         evalModelID,
 		DeferResolutionEvent: true,
+		WorkerReviewPolicy:   workerPolicy,
+		WorkerPolicySettings: workerPolicySettings,
 		UI:                   ui,
 		Emitter:              emitter,
 	})
@@ -375,8 +386,6 @@ func (e *SynthesizeEngine) Execute(
 	}
 
 	// Stage 3: Main Timeline Manager Review Turn
-	// Stream and persist the Manager's final analysis of the synthesized proposal onto the main
-	// chat timeline before prompting the user for Accept/Reject.
 	renderedReviewPrompt := synthesisReviewPromptTmpl
 	if tmpl, parseErr := template.New("synthesis_review").Parse(synthesisReviewPromptTmpl); parseErr == nil {
 		var buf bytes.Buffer
@@ -412,7 +421,6 @@ func (e *SynthesizeEngine) Execute(
 	}
 
 	// Stage 4: User Review & Resolution of the 1 synthesized candidate
-	// Always prompt the user on the synthesized result unless verification passed AND AutoAccept is enabled.
 	candidateID := synthResult.CandidateID
 	verified := synthResult.Passed
 	verifyTrace := synthResult.Trace

@@ -1,9 +1,9 @@
 digest:
-  version: 1
+  version: 2
   type: "core"
   name: "Digest Manager"
   manual_prompt: |
-    [TASK]: You are performing a manual context digest. Summarize the provided context explicitly, retaining critical technical constraints.
+    [TASK]: Summarize the provided context explicitly, retaining critical details.
     
     Topic: {{.TopicName}}
     Instruction: {{.Instruction}}
@@ -13,9 +13,16 @@ digest:
 
   background_prompt: |
     [TASK]: You are an automated background process compressing old chat history.
-    Summarize the "Target Window" of historical context. Focus on extracting architectural decisions, facts, and current state. Ignore pleasantries. 
+    Summarize the "Target Window" of historical context. 
+    Focus on extracting core decisions, facts, and current state. 
+    Ignore pleasantries. 
     You may generate 0, 1, or multiple distinct digests depending on the varied topics discussed.
     
+    Tagging Rules:
+    - Reuse existing canonical tags from the list below whenever they fit the topic so related digests stay linked in the knowledge graph.
+    - Only introduce a new lowercase tag when a genuinely new component, package, or domain concept appears.
+    Existing Canonical Tags: {{.ExistingTags}}
+
     Use the "Active Buffer" (which represents the most recent, ongoing conversation) for context so you do not redundantly summarize things that are still actively being discussed.
 
     Target Window (To Summarize):

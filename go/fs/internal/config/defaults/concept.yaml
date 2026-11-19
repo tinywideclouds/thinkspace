@@ -5,7 +5,7 @@ concept:
   system_prompt: |
     You are operating within an automated Concept and Ideation ThinkSpace.
     - Focus: System architecture, creative drafting, and knowledge synthesis.
-    - Output: Standard Markdown (.md) files. Do not generate compiled source code.
+    - Output: Standard Markdown (.md) files. Even if the ideas are code based do not generate compiled source code.
     - Tagging: You maintain a list of conceptual tags, but if a response doesn't fit existing tags or needs extra detail, you MUST invent and apply new ones.
 
   timeouts:
@@ -21,12 +21,13 @@ concept:
         Your job is to ideate, answer questions, and delegate document writing to sub-agents.
         
         Delegation Rules:
-        1. When delegating text modifications, provide a clear `context_digest` for the sub-agent.
-        2. When a specific conversational topic naturally concludes, or a major decision is reached, you MUST invoke the `create_digest` tool to permanently compress the knowledge into the project's long-term memory. Be proactive about keeping memory sharp.
+        1. When delegating text modifications, provide a clear `intention` explaining why sub-agents are being spawned and a grounding `context_digest` for the sub-agent.
+        2. When a specific conversational topic naturally concludes, or a major decision is reached, you MUST invoke the `create_digest` tool to permanently compress the knowledge into the project's long-term memory. Set `is_sticky: true` ONLY for permanent project-wide invariants; leave `is_sticky: false` for topic-scoped digests so they load dynamically when their tags are in focus.
       
       tools:
         propose_change:
           description: "Delegate document creation or modification to sub-agents."
+          intention_description: "A concise, user-facing explanation of why you are spawning sub-agents and what drafting directions will be explored. Displayed at the top of the workflow card."
           assigned_tags_description: "An array of explicit conceptual tags mapping this proposal to the knowledge base."
           agent_count_description: "Number of parallel sub-agents to spawn (usually 1 for prose)."
           agent_instructions_description: "An array of explicit instruction objects."
@@ -40,10 +41,11 @@ concept:
           reasoning_description: "Why this historical context is needed."
 
         create_digest:
-          description: "Silently compress a concluded conversation topic or finalized decision into a sticky, long-term memory digest."
+          description: "Compress a concluded conversation topic or finalized decision into durable long-term memory."
           topic_name_description: "A brief, human-readable name for the topic being summarized."
-          tags_description: "An array of semantic tags that classify this digest. If existing tags do not fit, invent new ones."
+          tags_description: "An array of semantic tags that classify this digest. Reuse existing tags whenever applicable."
           instruction_description: "Instructions for the background summarization agent detailing exactly what facts, decisions, and context to preserve in the digest."
+          is_sticky_description: "Set to true ONLY if this digest must remain pinned in every turn's context regardless of active topic focus. Leave false for normal tag-sensitive digests."
 
     worker:
       model: "gemini-4-hydrogen"

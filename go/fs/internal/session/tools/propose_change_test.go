@@ -15,6 +15,8 @@ func TestProposeChangeTool_Execute_DistinctAgentInstructions(t *testing.T) {
 	emitter := &mockToolEmitter{}
 
 	rawArgs := map[string]any{
+		tools.Intention:     "Compare iterative vs recursive traversal performance",
+		tools.AssignedTags:  []any{"Auth", "#middleware", "auth"},
 		tools.AgentCount:    float64(2),
 		tools.ContextDigest: "Testing context",
 		tools.TargetFiles:   []any{"src/main.go"},
@@ -48,6 +50,13 @@ func TestProposeChangeTool_Execute_DistinctAgentInstructions(t *testing.T) {
 		t.Fatalf("expected SignalDispatchFlow, got %T", result.Signal)
 	}
 
+	if signal.Intention != "Compare iterative vs recursive traversal performance" {
+		t.Errorf("expected SignalDispatchFlow.Intention to be preserved, got %q", signal.Intention)
+	}
+	if len(signal.Tags) != 2 || signal.Tags[0] != "auth" || signal.Tags[1] != "middleware" {
+		t.Errorf("expected normalized deduplicated tags [auth middleware], got %v", signal.Tags)
+	}
+
 	if len(signal.Tasks) != 2 {
 		t.Fatalf("expected 2 distinct agent tasks, got %d", len(signal.Tasks))
 	}
@@ -68,8 +77,8 @@ func TestProposeChangeTool_Execute_DistinctAgentInstructions(t *testing.T) {
 		t.Errorf("expected target_files to map correctly, got %v", signal.Tasks[0].TargetFiles)
 	}
 
-	if !strings.Contains(result.Content, "Executing 2 agent(s)") {
-		t.Errorf("expected generated content to describe the execution, got %q", result.Content)
+	if !strings.Contains(result.Content, "Executing 2 agent(s): Compare iterative vs recursive traversal performance") {
+		t.Errorf("expected generated content to include Manager intention, got %q", result.Content)
 	}
 
 	foundDispatch := false

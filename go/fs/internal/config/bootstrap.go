@@ -61,6 +61,10 @@ func ApplyDevSkeleton(logger *slog.Logger, manager *workspace.ServiceManager) {
 				Active:    true,
 				MinTokens: 200,
 			},
+			WorkerReviewPolicy: workspace.ReviewPolicySettings{
+				Active:    true,
+				MinTokens: 200,
+			},
 		}
 
 		if settingsBytes, err := json.MarshalIndent(settings, "", "  "); err == nil {

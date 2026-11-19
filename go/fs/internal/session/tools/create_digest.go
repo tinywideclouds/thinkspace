@@ -20,16 +20,18 @@ const (
 	TopicName         = "topic_name"
 	DigestInstruction = "instruction"
 	Tags              = "tags"
+	IsSticky          = "is_sticky"
 )
 
 type CreateDigestRequest struct {
 	TopicName   string   `json:"topic_name"`
 	Instruction string   `json:"instruction"`
 	Tags        []string `json:"tags"`
+	IsSticky    bool     `json:"is_sticky"`
 }
 
 type DigestCommitter interface {
-	CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error
+	CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, isSticky bool, instruction string, contextData string) error
 }
 
 type CreateDigestTool struct {
@@ -81,7 +83,8 @@ func (t *CreateDigestTool) Execute(ctx context.Context, executionContext Executi
 		ctx,
 		executionContext.Address,
 		request.TopicName,
-		request.Tags,
+		normalizeTags(request.Tags),
+		request.IsSticky,
 		request.Instruction,
 		sb.String(),
 	)

@@ -240,6 +240,20 @@ func (g *BadgerGraph) SaveMutation(ctx context.Context, c *thinkgraph.ChatAddres
 					for k, v := range m.Metadata {
 						node.Metadata[k] = v
 					}
+				case thinkgraph.TagsMutation:
+					for _, oldTag := range node.Tags {
+						oldLensKey := fmt.Appendf(nil, "%s:%s:%s:%s:%s", nsLens, c.ProjectID, c.ChatID, oldTag, node.ID.String())
+						if delErr := txn.Delete(oldLensKey); delErr != nil && !errors.Is(delErr, badger.ErrKeyNotFound) {
+							return fmt.Errorf("deleting stale lens index %s: %w", string(oldLensKey), delErr)
+						}
+					}
+					node.Tags = append([]string(nil), m.Tags...)
+					for _, tag := range node.Tags {
+						lensKey := fmt.Appendf(nil, "%s:%s:%s:%s:%s", nsLens, c.ProjectID, c.ChatID, tag, node.ID.String())
+						if setErr := txn.Set(lensKey, nil); setErr != nil {
+							return fmt.Errorf("setting lens index %s: %w", string(lensKey), setErr)
+						}
+					}
 				}
 
 				data, marshalErr := json.Marshal(node)

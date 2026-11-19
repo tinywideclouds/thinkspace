@@ -1,6 +1,7 @@
 package gemini_test
 
 import (
+	"slices"
 	"testing"
 
 	"google.golang.org/genai"
@@ -17,8 +18,10 @@ func TestCompileCoreTools_OverridesDescriptionsNotSchema(t *testing.T) {
 			Manager: spaces.ManagerConfig{
 				Tools: spaces.ToolsConfig{
 					ProposeChange: spaces.ToolProposeChangeConfig{
-						Description:            "Custom Propose",
-						InstructionDescription: "Custom Instruction",
+						Description:             "Custom Propose",
+						IntentionDescription:    "Custom Intention",
+						AssignedTagsDescription: "Custom Tags",
+						InstructionDescription:  "Custom Instruction",
 					},
 					QueryLens: spaces.ToolQueryLensConfig{
 						Description: "Custom Query",
@@ -64,6 +67,23 @@ func TestCompileCoreTools_OverridesDescriptionsNotSchema(t *testing.T) {
 	proposeDecl := decls[1]
 	if proposeDecl.Description != "Custom Propose" {
 		t.Errorf("YAML config failed to override ProposeChange description")
+	}
+	intentionProp, ok := proposeDecl.Parameters.Properties[tools.Intention]
+	if !ok || intentionProp.Type != genai.TypeString {
+		t.Fatalf("Schema lock failed: expected string property 'intention' on ProposeChange")
+	}
+	if intentionProp.Description != "Custom Intention" {
+		t.Errorf("YAML config failed to override Intention description, got %q", intentionProp.Description)
+	}
+	tagsProp, ok := proposeDecl.Parameters.Properties[tools.AssignedTags]
+	if !ok || tagsProp.Type != genai.TypeArray {
+		t.Fatalf("Schema lock failed: expected array property 'assigned_tags' on ProposeChange")
+	}
+	if tagsProp.Description != "Custom Tags" {
+		t.Errorf("YAML config failed to override AssignedTags description, got %q", tagsProp.Description)
+	}
+	if !slices.Contains(proposeDecl.Parameters.Required, tools.Intention) || !slices.Contains(proposeDecl.Parameters.Required, tools.AssignedTags) {
+		t.Errorf("Expected 'intention' and 'assigned_tags' to be in ProposeChange required parameters, got %v", proposeDecl.Parameters.Required)
 	}
 	instructionProp := proposeDecl.Parameters.Properties[tools.Instruction]
 	if instructionProp.Description != "Custom Instruction" {

@@ -9,6 +9,7 @@ import (
 	"uuid"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
+	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
@@ -58,6 +59,105 @@ func ProjectTurnContext(spaceID, chatID string, responseID uuid.UUID, bundle *co
 	}
 
 	return turnContext
+}
+
+// BuildBundledWorkerThinkBundle merges multiple parallel sub-agent ThinkBundles into a single
+// aggregate ThinkBundle for unified context review and token estimation.
+func BuildBundledWorkerThinkBundle(tasks []flows.SubAgentTask, bundles []cognition.ThinkBundle) cognition.ThinkBundle {
+	if len(bundles) == 0 {
+		return cognition.ThinkBundle{}
+	}
+
+	combined := cognition.ThinkBundle{
+		Rules:   bundles[0].Rules,
+		Mapbook: bundles[0].Mapbook,
+	}
+
+	seenDigests := make(map[string]bool)
+	seenPaths := make(map[string]bool)
+
+	for i, b := range bundles {
+		for _, ltm := range b.Trajectory.LongTermMemory {
+			if ltm != "" && !seenDigests[ltm] {
+				seenDigests[ltm] = true
+				combined.Trajectory.LongTermMemory = append(combined.Trajectory.LongTermMemory, ltm)
+			}
+		}
+
+		agentLabel := fmt.Sprintf("agent-%d", i+1)
+		if i < len(tasks) && strings.TrimSpace(tasks[i].AgentID) != "" {
+			agentLabel = tasks[i].AgentID
+		}
+		if b.Trajectory.Catalyst.Content != "" {
+			combined.Trajectory.WorkingMemory = append(combined.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
+				Role:    agentLabel,
+				Content: b.Trajectory.Catalyst.Content,
+			})
+		}
+
+		for _, item := range b.Workbench {
+			if !seenPaths[item.Path] {
+				seenPaths[item.Path] = true
+				combined.Workbench = append(combined.Workbench, item)
+			}
+		}
+	}
+
+	if len(combined.Trajectory.WorkingMemory) > 0 {
+		last := combined.Trajectory.WorkingMemory[len(combined.Trajectory.WorkingMemory)-1]
+		combined.Trajectory.WorkingMemory = combined.Trajectory.WorkingMemory[:len(combined.Trajectory.WorkingMemory)-1]
+		combined.Trajectory.Catalyst = last
+	}
+
+	return combined
+}
+
+// FormatBundlePreviewMarkdown renders a human-readable Markdown snapshot of a ThinkBundle
+// for persistence via Service.SaveContextPreview.
+func FormatBundlePreviewMarkdown(title string, bundle *cognition.ThinkBundle) string {
+	if bundle == nil {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", title)
+
+	b.WriteString("## System Persona\n\n```text\n")
+	b.WriteString(bundle.Rules.Persona)
+	b.WriteString("\n```\n\n")
+
+	if bundle.Rules.FormattingConstraints != "" {
+		b.WriteString("## Formatting Constraints\n\n```text\n")
+		b.WriteString(bundle.Rules.FormattingConstraints)
+		b.WriteString("\n```\n\n")
+	}
+
+	if len(bundle.Trajectory.LongTermMemory) > 0 {
+		b.WriteString("## Long-Term Memory / Context Digests\n\n")
+		for i, item := range bundle.Trajectory.LongTermMemory {
+			fmt.Fprintf(&b, "### Digest %d\n\n%s\n\n", i+1, item)
+		}
+	}
+
+	if len(bundle.Trajectory.WorkingMemory) > 0 {
+		b.WriteString("## Working Memory\n\n")
+		for _, ev := range bundle.Trajectory.WorkingMemory {
+			fmt.Fprintf(&b, "- **[%s]**: %s\n", ev.Role, ev.Content)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(bundle.Workbench) > 0 {
+		b.WriteString("## Materialized Workbench Files\n\n")
+		for _, item := range bundle.Workbench {
+			fmt.Fprintf(&b, "### `%s` (~%d tokens)\n\n```\n%s\n```\n\n", item.Path, item.TokenCount, item.Content)
+		}
+	}
+
+	if bundle.Trajectory.Catalyst.Content != "" {
+		fmt.Fprintf(&b, "## Catalyst (`%s`)\n\n%s\n", bundle.Trajectory.Catalyst.Role, bundle.Trajectory.Catalyst.Content)
+	}
+
+	return b.String()
 }
 
 func extractMapbookFileContexts(maps map[string]string, alreadySeen map[string]bool) []FileContext {

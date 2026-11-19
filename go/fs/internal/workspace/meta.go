@@ -54,6 +54,7 @@ type BundleSettings struct {
 
 // SpaceSettings stores user workflow and UI preferences for a physical ThinkSpace.
 type SpaceSettings struct {
-	ReviewPolicy ReviewPolicySettings `json:"review_policy"`
-	Bundle       BundleSettings       `json:"bundle,omitempty"`
+	ReviewPolicy       ReviewPolicySettings `json:"review_policy"`
+	WorkerReviewPolicy ReviewPolicySettings `json:"worker_review_policy"`
+	Bundle             BundleSettings       `json:"bundle,omitempty"`
 }

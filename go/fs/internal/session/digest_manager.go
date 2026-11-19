@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -37,12 +38,57 @@ func NewDigestManager(logger *slog.Logger, client llm.ModelClient, config Digest
 	}
 }
 
+func normalizeDigestTags(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(raw))
+	var out []string
+	for _, t := range raw {
+		norm := strings.ToLower(strings.TrimSpace(t))
+		norm = strings.TrimPrefix(norm, "#")
+		if norm == "" || seen[norm] {
+			continue
+		}
+		seen[norm] = true
+		out = append(out, norm)
+	}
+	return out
+}
+
+func (m *DigestManager) existingCanonicalTags(ctx context.Context, svc *workspace.Service, chatSession *thinkgraph.ChatAddress) []string {
+	if svc == nil || svc.Graph() == nil || chatSession == nil {
+		return nil
+	}
+	digests, err := svc.Graph().GetDigests(ctx, chatSession)
+	if err != nil {
+		if m.logger != nil {
+			m.logger.WarnContext(ctx, "failed fetching existing digests for tag reuse", "error", err)
+		}
+		return nil
+	}
+	seen := make(map[string]bool)
+	var tags []string
+	for _, d := range digests {
+		for _, t := range d.Tags {
+			norm := strings.ToLower(strings.TrimSpace(t))
+			if norm != "" && !seen[norm] {
+				seen[norm] = true
+				tags = append(tags, norm)
+			}
+		}
+	}
+	sort.Strings(tags)
+	return tags
+}
+
 func (m *DigestManager) CreateManualDigest(
 	ctx context.Context,
 	svc *workspace.Service,
 	chatSession *thinkgraph.ChatAddress,
 	topicName string,
 	tags []string,
+	isSticky bool,
 	instruction string,
 	contextData string,
 	model string,
@@ -59,7 +105,7 @@ func (m *DigestManager) CreateManualDigest(
 	}
 
 	if m.logger != nil {
-		m.logger.InfoContext(ctx, "Creating manual context digest", "topic", topicName)
+		m.logger.InfoContext(ctx, "Creating manual context digest", "topic", topicName, "is_sticky", isSticky)
 	}
 
 	tmpl, err := template.New("manual").Parse(m.config.ManualPrompt)
@@ -103,7 +149,7 @@ func (m *DigestManager) CreateManualDigest(
 		return fmt.Errorf("manual digest generation returned empty string")
 	}
 
-	return svc.AppendDigest(ctx, chatSession, summary, tags, true, nil)
+	return svc.AppendDigest(ctx, chatSession, summary, normalizeDigestTags(tags), isSticky, nil)
 }
 
 type generatedDigest struct {
@@ -156,6 +202,12 @@ func (m *DigestManager) CreateBackgroundDigest(
 		bufferSb.WriteString(fmt.Sprintf("[%s]: %s\n", ev.Type, ev.Content))
 	}
 
+	existingTags := m.existingCanonicalTags(ctx, svc, chatSession)
+	existingTagsStr := "None yet"
+	if len(existingTags) > 0 {
+		existingTagsStr = strings.Join(existingTags, ", ")
+	}
+
 	tmpl, err := template.New("background").Parse(m.config.BackgroundPrompt)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse background digest prompt: %w", err)
@@ -165,8 +217,14 @@ func (m *DigestManager) CreateBackgroundDigest(
 	if err := tmpl.Execute(&promptBuf, map[string]string{
 		"TargetWindow": targetSb.String(),
 		"ActiveBuffer": bufferSb.String(),
+		"ExistingTags": existingTagsStr,
 	}); err != nil {
 		return 0, fmt.Errorf("failed to execute background digest prompt: %w", err)
+	}
+
+	promptStr := promptBuf.String()
+	if len(existingTags) > 0 && !strings.Contains(m.config.BackgroundPrompt, ".ExistingTags") {
+		promptStr += fmt.Sprintf("\n\nExisting Canonical Tags (reuse whenever applicable): %s", existingTagsStr)
 	}
 
 	schemaInstruction := "\n\n[FORMATTING]: You MUST reply with ONLY a JSON object matching this schema: {\"thought\": \"...\", \"digests\": [{\"topic_name\": \"...\", \"tags\": [\"...\"], \"summary\": \"...\"}]}"
@@ -178,7 +236,7 @@ func (m *DigestManager) CreateBackgroundDigest(
 		Trajectory: cognition.Trajectory{
 			Catalyst: cognition.TrajectoryEvent{
 				Role:    "user",
-				Content: promptBuf.String(),
+				Content: promptStr,
 			},
 		},
 	}
@@ -213,7 +271,7 @@ func (m *DigestManager) CreateBackgroundDigest(
 		if strings.TrimSpace(d.Summary) == "" {
 			continue
 		}
-		if err := svc.AppendDigest(ctx, chatSession, d.Summary, d.Tags, false, targetIDs); err != nil {
+		if err := svc.AppendDigest(ctx, chatSession, d.Summary, normalizeDigestTags(d.Tags), false, targetIDs); err != nil {
 			return count, fmt.Errorf("failed to append background digest: %w", err)
 		}
 		count++

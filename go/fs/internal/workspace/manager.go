@@ -20,13 +20,18 @@ import (
 
 type EngineFactory func(repoRoot string) ChatVersioner
 
+type serviceEntry struct {
+	ready   chan struct{}
+	service *Service
+}
+
 type ServiceManager struct {
 	logger        *slog.Logger
 	baseRoot      string
 	engineFactory EngineFactory
 	graphRepo     thinkgraph.GraphRepository
 	emitter       telemetry.Emitter
-	services      map[string]*Service
+	services      map[string]*serviceEntry
 	mu            sync.RWMutex
 }
 
@@ -43,7 +48,7 @@ func NewServiceManager(
 		engineFactory: factory,
 		graphRepo:     graphRepo,
 		emitter:       emitter,
-		services:      make(map[string]*Service),
+		services:      make(map[string]*serviceEntry),
 	}
 }
 
@@ -57,18 +62,22 @@ func (manager *ServiceManager) GraphRepository() thinkgraph.GraphRepository {
 
 func (manager *ServiceManager) GetService(spaceID string) *Service {
 	manager.mu.RLock()
-	if service, exists := manager.services[spaceID]; exists {
-		manager.mu.RUnlock()
-		return service
-	}
+	entry, exists := manager.services[spaceID]
 	manager.mu.RUnlock()
+	if exists {
+		<-entry.ready
+		return entry.service
+	}
 
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
-
-	if service, exists := manager.services[spaceID]; exists {
-		return service
+	if entry, exists = manager.services[spaceID]; exists {
+		manager.mu.Unlock()
+		<-entry.ready
+		return entry.service
 	}
+	entry = &serviceEntry{ready: make(chan struct{})}
+	manager.services[spaceID] = entry
+	manager.mu.Unlock()
 
 	spaceRoot := filepath.Join(manager.baseRoot, spaceID)
 	workspaceDir := filepath.Join(spaceRoot, "workspace")
@@ -88,9 +97,9 @@ func (manager *ServiceManager) GetService(spaceID string) *Service {
 		dispatcher = thinkgraph.NewDispatcher(graphStore, ledger)
 	}
 
-	service := NewService(manager.logger, engine, manager.baseRoot, dispatcher, manager.emitter)
-	manager.services[spaceID] = service
-	return service
+	entry.service = NewService(manager.logger, engine, manager.baseRoot, dispatcher, manager.emitter)
+	close(entry.ready)
+	return entry.service
 }
 
 func (manager *ServiceManager) ListSpaces(ctx context.Context) ([]string, error) {
@@ -154,28 +163,37 @@ func (manager *ServiceManager) UpdateSpaceState(spaceID string, updateFn func(*S
 	return nil
 }
 
+func defaultSpaceSettings() SpaceSettings {
+	return SpaceSettings{
+		ReviewPolicy: ReviewPolicySettings{
+			Active:         true,
+			MinTokens:      200,
+			IncludePersona: false,
+		},
+		WorkerReviewPolicy: ReviewPolicySettings{
+			Active:         true,
+			MinTokens:      200,
+			IncludePersona: false,
+		},
+		Bundle: BundleSettings{
+			MaxWorkingMemoryEvents: 50,
+			IncludeMapbookOnBoot:   true,
+		},
+	}
+}
+
 func (manager *ServiceManager) getSpaceSettingsLocked(spaceID string) (SpaceSettings, error) {
-	var settings SpaceSettings
+	settings := defaultSpaceSettings()
 	path := filepath.Join(manager.baseRoot, spaceID, "settings.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return SpaceSettings{
-				ReviewPolicy: ReviewPolicySettings{
-					Active:         true,
-					MinTokens:      200,
-					IncludePersona: false,
-				},
-				Bundle: BundleSettings{
-					MaxWorkingMemoryEvents: 50,
-					IncludeMapbookOnBoot:   true,
-				},
-			}, nil
+			return settings, nil
 		}
-		return settings, err
+		return SpaceSettings{}, err
 	}
 	if err := json.Unmarshal(data, &settings); err != nil {
-		return settings, fmt.Errorf("unmarshaling space settings: %w", err)
+		return SpaceSettings{}, fmt.Errorf("unmarshaling space settings: %w", err)
 	}
 	return settings, nil
 }

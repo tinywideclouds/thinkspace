@@ -30,13 +30,15 @@ func (m *mockToolEmitter) Emit(channel string, event telemetry.Event) {
 type mockDigestCommitter struct {
 	lastTopic       string
 	lastTags        []string
+	lastIsSticky    bool
 	lastInstruction string
 	lastContext     string
 }
 
-func (m *mockDigestCommitter) CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, instruction string, contextData string) error {
+func (m *mockDigestCommitter) CommitDigest(ctx context.Context, address *thinkgraph.ChatAddress, topicName string, tags []string, isSticky bool, instruction string, contextData string) error {
 	m.lastTopic = topicName
 	m.lastTags = tags
+	m.lastIsSticky = isSticky
 	m.lastInstruction = instruction
 	m.lastContext = contextData
 	return nil
@@ -86,8 +88,25 @@ func TestCreateDigestTool_Execute(t *testing.T) {
 	if len(committer.lastTags) != 2 || committer.lastTags[0] != "database" {
 		t.Errorf("expected tags [database, architecture], got %v", committer.lastTags)
 	}
+	if committer.lastIsSticky {
+		t.Errorf("expected IsSticky to default to false when omitted")
+	}
 	if committer.lastContext == "" {
 		t.Errorf("expected context data to be built from working memory")
+	}
+
+	// Explicit is_sticky: true pins the digest
+	stickyArgs := map[string]any{
+		tools.TopicName:         "Invariant",
+		tools.DigestInstruction: "Pin rule",
+		tools.Tags:              []any{"rules"},
+		tools.IsSticky:          true,
+	}
+	if _, err := tool.Execute(context.Background(), tools.ExecutionContext{RawArguments: stickyArgs, UI: &mockUI{}}); err != nil {
+		t.Fatalf("sticky Execute failed: %v", err)
+	}
+	if !committer.lastIsSticky {
+		t.Errorf("expected IsSticky=true when explicitly requested")
 	}
 }
 

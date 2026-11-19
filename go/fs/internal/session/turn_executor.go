@@ -40,6 +40,23 @@ func NewTurnExecutor(
 	}
 }
 
+func mergeUniqueTags(groups ...[]string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, g := range groups {
+		for _, raw := range g {
+			norm := strings.ToLower(strings.TrimSpace(raw))
+			norm = strings.TrimPrefix(norm, "#")
+			if norm == "" || seen[norm] {
+				continue
+			}
+			seen[norm] = true
+			out = append(out, norm)
+		}
+	}
+	return out
+}
+
 func inspectBundleContext(bundle cognition.ThinkBundle) (workbenchFiles []string, mapbookLayers []string, mapbookLayerBytes map[string]int, hasGolangAST bool) {
 	workbenchFiles = make([]string, 0, len(bundle.Workbench))
 	for _, item := range bundle.Workbench {
@@ -62,6 +79,17 @@ func inspectBundleContext(bundle cognition.ThinkBundle) (workbenchFiles []string
 	}
 	sort.Strings(mapbookLayers)
 	return workbenchFiles, mapbookLayers, mapbookLayerBytes, hasGolangAST
+}
+
+func (e *TurnExecutor) applyNodeTags(ctx context.Context, address *thinkgraph.ChatAddress, nodeID uuid.UUID, tags []string, ui any) error {
+	if nodeID == uuid.Nil() || len(tags) == 0 {
+		return nil
+	}
+	mut := thinkgraph.TagsMutation{Tags: tags}
+	mut.TargetID = nodeID
+	mut.Type = thinkgraph.MutationTags
+	mut.Timestamp = time.Now().UTC()
+	return e.broadcaster.MutateAndStream(ctx, address, mut, nodeID, ui)
 }
 
 func (e *TurnExecutor) Execute(
@@ -176,6 +204,12 @@ func (e *TurnExecutor) Execute(
 				return nil, fmt.Errorf("persisting model response: %w", err)
 			}
 
+			if anticipateResponse && len(bundle.ActiveTags) > 0 {
+				if tagErr := e.applyNodeTags(ctx, address, responseID, bundle.ActiveTags, nil); tagErr != nil && e.logger != nil {
+					e.logger.WarnContext(ctx, "failed applying inherited focus tags to model response", "error", tagErr)
+				}
+			}
+
 			bundle.Trajectory.WorkingMemory = append(bundle.Trajectory.WorkingMemory, cognition.TrajectoryEvent{
 				Role:    "model",
 				Content: fullModelResponse.String(),
@@ -232,6 +266,34 @@ func (e *TurnExecutor) Execute(
 				})
 			}
 
+			var dispatchTags []string
+			if tr.Signal != nil {
+				if e.logger != nil {
+					e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", tr.Signal))
+				}
+				if dispatchSig, ok := tr.Signal.(*signals.SignalDispatchFlow); ok {
+					dispatchTags = dispatchSig.Tags
+					if mergedDispatch == nil {
+						mergedDispatch = &signals.SignalDispatchFlow{}
+					}
+					if dispatchSig.Intention != "" {
+						if mergedDispatch.Intention == "" {
+							mergedDispatch.Intention = dispatchSig.Intention
+						} else if mergedDispatch.Intention != dispatchSig.Intention {
+							mergedDispatch.Intention += " ; " + dispatchSig.Intention
+						}
+					}
+					mergedDispatch.Tags = mergeUniqueTags(mergedDispatch.Tags, dispatchSig.Tags)
+					for _, task := range dispatchSig.Tasks {
+						task.AgentID = fmt.Sprintf("agent-%d", len(mergedDispatch.Tasks)+1)
+						mergedDispatch.Tasks = append(mergedDispatch.Tasks, task)
+					}
+					yieldedSignal = mergedDispatch
+				} else if yieldedSignal == nil {
+					yieldedSignal = tr.Signal
+				}
+			}
+
 			if tr.Payload != nil || tr.Content != "" {
 				toolNodeID := responseID
 				if fullModelResponse.Len() > 0 {
@@ -240,6 +302,11 @@ func (e *TurnExecutor) Execute(
 
 				ev := thinkgraph.NewEvent(thinkgraph.EventModel, tr.Content)
 				ev.ID = toolNodeID
+				if len(dispatchTags) > 0 {
+					ev.Tags = dispatchTags
+				} else if anticipateResponse && len(bundle.ActiveTags) > 0 {
+					ev.Tags = bundle.ActiveTags
+				}
 
 				if tr.Payload != nil {
 					data, err := tr.Payload.GraphData()
@@ -263,27 +330,14 @@ func (e *TurnExecutor) Execute(
 					return nil, fmt.Errorf("persisting tool response node: %w", err)
 				}
 			}
-
-			if tr.Signal != nil {
-				if e.logger != nil {
-					e.logger.InfoContext(ctx, "tool yielded control to supervisor", "signal_type", fmt.Sprintf("%T", tr.Signal))
-				}
-				if dispatchSig, ok := tr.Signal.(*signals.SignalDispatchFlow); ok {
-					if mergedDispatch == nil {
-						mergedDispatch = &signals.SignalDispatchFlow{}
-					}
-					for _, task := range dispatchSig.Tasks {
-						task.AgentID = fmt.Sprintf("agent-%d", len(mergedDispatch.Tasks)+1)
-						mergedDispatch.Tasks = append(mergedDispatch.Tasks, task)
-					}
-					yieldedSignal = mergedDispatch
-				} else if yieldedSignal == nil {
-					yieldedSignal = tr.Signal
-				}
-			}
 		}
 
 		if yieldedSignal != nil {
+			if mergedDispatch != nil && len(mergedDispatch.Tags) > 0 && anticipateResponse && parentID != uuid.Nil() {
+				if tagErr := e.applyNodeTags(ctx, address, parentID, mergedDispatch.Tags, streamer); tagErr != nil && e.logger != nil {
+					e.logger.WarnContext(ctx, "failed applying assigned tags to catalyst prompt", "error", tagErr)
+				}
+			}
 			return yieldedSignal, nil
 		}
 	}

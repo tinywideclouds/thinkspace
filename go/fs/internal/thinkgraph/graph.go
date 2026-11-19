@@ -27,6 +27,7 @@ const (
 	MutationContent   MutationType = "content"
 	MutationState     MutationType = "state"
 	MutationMetadata  MutationType = "metadata"
+	MutationTags      MutationType = "tags"
 )
 
 // Mutator defines the polymorphic interface for all graph projection updates.
@@ -75,6 +76,12 @@ type MetadataMutation struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
+// TagsMutation updates the semantic tags attached to a graph node and its lens indices.
+type TagsMutation struct {
+	BaseMutation
+	Tags []string `json:"tags"`
+}
+
 // UnmarshalMutation acts as a factory to rehydrate the correct concrete Mutator from disk.
 func UnmarshalMutation(data []byte) (Mutator, error) {
 	var base BaseMutation
@@ -101,6 +108,10 @@ func UnmarshalMutation(data []byte) (Mutator, error) {
 		return m, err
 	case MutationMetadata:
 		var m MetadataMutation
+		err := json.Unmarshal(data, &m)
+		return m, err
+	case MutationTags:
+		var m TagsMutation
 		err := json.Unmarshal(data, &m)
 		return m, err
 	default:

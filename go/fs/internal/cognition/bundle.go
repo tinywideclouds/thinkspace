@@ -40,4 +40,5 @@ type ThinkBundle struct {
 	Mapbook    Mapbook
 	Trajectory Trajectory
 	Workbench  []WorkbenchItem
+	ActiveTags []string
 }

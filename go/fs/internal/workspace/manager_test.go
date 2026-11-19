@@ -140,11 +140,20 @@ func TestServiceManager_SpaceSettingsManagement(t *testing.T) {
 	if settings.ReviewPolicy.IncludePersona {
 		t.Errorf("Expected default ReviewPolicy.IncludePersona to be false")
 	}
+	if !settings.WorkerReviewPolicy.Active {
+		t.Errorf("Expected default WorkerReviewPolicy.Active to be true")
+	}
+	if settings.WorkerReviewPolicy.MinTokens != 200 {
+		t.Errorf("Expected default WorkerReviewPolicy.MinTokens to be 200, got %d", settings.WorkerReviewPolicy.MinTokens)
+	}
 
 	err = manager.UpdateSpaceSettings(spaceID, func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = false
 		s.ReviewPolicy.MinTokens = 500
 		s.ReviewPolicy.IncludePersona = true
+		s.WorkerReviewPolicy.Active = true
+		s.WorkerReviewPolicy.MinTokens = 50
+		s.WorkerReviewPolicy.IncludePersona = true
 	})
 	if err != nil {
 		t.Fatalf("UpdateSpaceSettings failed: %v", err)
@@ -162,6 +171,9 @@ func TestServiceManager_SpaceSettingsManagement(t *testing.T) {
 	}
 	if !updated.ReviewPolicy.IncludePersona {
 		t.Errorf("Expected ReviewPolicy.IncludePersona to be true after update")
+	}
+	if !updated.WorkerReviewPolicy.Active || updated.WorkerReviewPolicy.MinTokens != 50 || !updated.WorkerReviewPolicy.IncludePersona {
+		t.Errorf("Expected independent WorkerReviewPolicy update, got %+v", updated.WorkerReviewPolicy)
 	}
 }
 

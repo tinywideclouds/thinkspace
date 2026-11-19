@@ -251,7 +251,8 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	}
 
 	dispatchSignal := &signals.SignalDispatchFlow{
-		Tasks: tasks,
+		Intention: "Adding Bearer token authentication middleware to protected endpoints",
+		Tasks:     tasks,
 	}
 
 	turnID := uuid.NewV7()
@@ -304,6 +305,16 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	}
 	if flowCard.Edges["parent_id"] != turnID.String() {
 		t.Errorf("Expected Flow Card to point parent_id to Manager Node (turnID), got %v", flowCard.Edges)
+	}
+	if flowCard.Content != "Adding Bearer token authentication middleware to protected endpoints" {
+		t.Errorf("Expected Flow Card content to display Manager intention, got %q", flowCard.Content)
+	}
+	var flowData flows.FlowData
+	if err := json.Unmarshal(flowCard.Data, &flowData); err != nil {
+		t.Fatalf("Failed to unmarshal FlowData: %v", err)
+	}
+	if flowData.TaskPrompt != "Adding Bearer token authentication middleware to protected endpoints" {
+		t.Errorf("Expected FlowData.TaskPrompt to carry Manager intention for Flow Card header, got %q", flowData.TaskPrompt)
 	}
 
 	var flowExecState flows.FlowExecutionState
@@ -606,5 +617,137 @@ func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "fatal system errors") {
 		t.Errorf("expected fatal system error string, got: %v", err)
+	}
+}
+
+type workerReviewCapturingUI struct {
+	weMockUI
+	reviewCalls       []session.TurnContext
+	retainedFilePaths []string
+	capturedBundles   []cognition.ThinkBundle
+}
+
+func (u *workerReviewCapturingUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
+	u.reviewCalls = append(u.reviewCalls, ctxData)
+	return session.ContextApprovalDecision{
+		Approved:          u.reviewToReturn,
+		RetainedFilePaths: u.retainedFilePaths,
+	}
+}
+
+type bundleRecordingModelClient struct {
+	mu              sync.Mutex
+	capturedBundles []cognition.ThinkBundle
+}
+
+func (c *bundleRecordingModelClient) GenerateContentStream(
+	ctx context.Context,
+	model string,
+	bundle cognition.ThinkBundle,
+	registry *tools.Registry,
+	config spaces.ThinkStateConfig,
+) iter.Seq2[llm.StreamChunk, error] {
+	c.mu.Lock()
+	c.capturedBundles = append(c.capturedBundles, bundle)
+	c.mu.Unlock()
+	return func(yield func(llm.StreamChunk, error) bool) {
+		yield(llm.StreamChunk{Text: "Sub-agent output."}, nil)
+	}
+}
+
+func TestWorkerEngine_BundledWorkerContextReviewAndFilePruning(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	engine := &weMockChatEngine{}
+	workspaceRoot := t.TempDir()
+
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	defer graphDB.Close()
+
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return engine }, graphDB, nil)
+	service := svcManager.GetService("golang")
+
+	chatSession := &thinkgraph.ChatAddress{
+		ChatID:    "chat-worker-review",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	if err := service.InitializeChat(ctx, chatSession); err != nil {
+		t.Fatalf("InitializeChat failed: %v", err)
+	}
+
+	// Disable Manager review policy while enabling WorkerReviewPolicy with low threshold
+	if err := svcManager.UpdateSpaceSettings("golang", func(s *workspace.SpaceSettings) {
+		s.ReviewPolicy.Active = false
+		s.WorkerReviewPolicy.Active = true
+		s.WorkerReviewPolicy.MinTokens = 1
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
+
+	registry := config.NewRegistry()
+	mockSpace := &weMockThinkSpace{}
+	registry.RegisterThinkState("golang", mockSpace)
+	registry.RegisterConfig("golang", mockSpace.Config())
+	if err := svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
+	scaffoldChat(t, workspaceRoot, "golang", "chat-worker-review")
+
+	recordingClient := &bundleRecordingModelClient{}
+	turnExecutor := session.NewTurnExecutor(logger, recordingClient, service)
+	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
+
+	sessionManager := session.NewManager(logger, registry, svcManager, recordingClient, fanOutFlow, nil)
+	chatSupervisor, err := sessionManager.GetSession(ctx, "golang", "chat-worker-review")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+
+	workerEngine := session.NewWorkerEngine(logger, chatSupervisor, registry, service, turnExecutor, service.Dispatcher(), fanOutFlow)
+
+	ui := &workerReviewCapturingUI{
+		weMockUI:          weMockUI{strategyToReturn: flows.StrategySkip, reviewToReturn: true},
+		retainedFilePaths: []string{"src/keep.go"},
+	}
+
+	dispatchSignal := &signals.SignalDispatchFlow{
+		Intention: "Explore two routing designs",
+		Tasks: []flows.SubAgentTask{
+			{AgentID: "agent-1", ContextDigest: "Project overview", Instruction: "Approach 1", TargetFiles: []string{"src/keep.go", "src/drop.go"}},
+			{AgentID: "agent-2", ContextDigest: "Project overview", Instruction: "Approach 2", TargetFiles: []string{"src/keep.go"}},
+		},
+	}
+
+	if _, err := workerEngine.Execute(ctx, chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, ui, nil); err != nil {
+		t.Fatalf("WorkerEngine.Execute failed: %v", err)
+	}
+
+	// Both parallel agents must be bundled into a SINGLE ReviewContext call
+	if len(ui.reviewCalls) != 1 {
+		t.Fatalf("expected 1 bundled ReviewContext call for 2 parallel agents, got %d", len(ui.reviewCalls))
+	}
+	if ui.reviewCalls[0].PreviewID == "" {
+		t.Errorf("expected PreviewID to be populated on bundled worker TurnContext")
+	}
+	if _, err := service.GetContextPreview(ctx, chatSession, ui.reviewCalls[0].PreviewID); err != nil {
+		t.Errorf("expected saved context preview %s to be readable from disk: %v", ui.reviewCalls[0].PreviewID, err)
+	}
+
+	// Verify unchecked file src/drop.go was pruned from all worker bundles before LLM execution
+	if len(recordingClient.capturedBundles) != 2 {
+		t.Fatalf("expected 2 worker LLM executions, got %d", len(recordingClient.capturedBundles))
+	}
+	for i, b := range recordingClient.capturedBundles {
+		if len(b.Workbench) != 1 || b.Workbench[0].Path != "src/keep.go" {
+			t.Errorf("worker %d expected only retained file 'src/keep.go', got %+v", i+1, b.Workbench)
+		}
 	}
 }

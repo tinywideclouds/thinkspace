@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
@@ -66,14 +67,26 @@ func (a *ContextProjecter) Build(ctx context.Context, req ContextRequest) (cogni
 	trajectory.LongTermMemory = append(trajectory.LongTermMemory, metadata.String())
 
 	if req.Manifest != nil {
+		contexts := make([]SpaceContext, 0, len(req.Manifest.SpaceContexts))
 		for _, sc := range req.Manifest.SpaceContexts {
+			contexts = append(contexts, sc)
+		}
+		sort.Slice(contexts, func(i, j int) bool {
+			return contexts[i].ID.String() < contexts[j].ID.String()
+		})
+		for _, sc := range contexts {
 			trajectory.LongTermMemory = append(trajectory.LongTermMemory, sc.Content)
 		}
 
+		digests := make([]DigestMeta, 0, len(req.Manifest.Digests))
 		for _, d := range req.Manifest.Digests {
-			if d.Promoted {
-				trajectory.LongTermMemory = append(trajectory.LongTermMemory, d.Summary)
-			}
+			digests = append(digests, d)
+		}
+		sort.Slice(digests, func(i, j int) bool {
+			return digests[i].ID.String() < digests[j].ID.String()
+		})
+		for _, d := range digests {
+			trajectory.LongTermMemory = append(trajectory.LongTermMemory, d.Summary)
 		}
 	}
 

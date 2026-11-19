@@ -9,6 +9,8 @@ import (
 
 func CompileProposeChange(tool *tools.ProposeChangeTool, config spaces.ThinkStateConfig) *genai.FunctionDeclaration {
 	description := tool.DefaultDescription()
+	intention := "Concise, user-facing explanation of why you are spawning sub-agents and what approaches they will explore."
+	assignedTags := "Semantic tags categorizing this work (reuse existing tags from active context whenever applicable)."
 	agentCount := "Number of parallel sub-agents to spawn."
 	agentInstructions := "An array of explicit instruction objects, exactly matching the agent_count."
 	contextDigest := "Contextual background explaining why this work is needed."
@@ -18,13 +20,15 @@ func CompileProposeChange(tool *tools.ProposeChangeTool, config spaces.ThinkStat
 	if config.Roles.Manager.Tools.ProposeChange.Description != "" {
 		description = config.Roles.Manager.Tools.ProposeChange.Description
 	}
+	if config.Roles.Manager.Tools.ProposeChange.IntentionDescription != "" {
+		intention = config.Roles.Manager.Tools.ProposeChange.IntentionDescription
+	}
+	if config.Roles.Manager.Tools.ProposeChange.AssignedTagsDescription != "" {
+		assignedTags = config.Roles.Manager.Tools.ProposeChange.AssignedTagsDescription
+	}
 	if config.Roles.Manager.Tools.ProposeChange.AgentCountDescription != "" {
 		agentCount = config.Roles.Manager.Tools.ProposeChange.AgentCountDescription
 	}
-	// Fallback description as the field doesn't exist yet on spaces.ThinkStateConfig
-	// if config.Roles.Manager.Tools.ProposeChange.AgentInstructionsDescription != "" {
-	// 	agentInstructions = config.Roles.Manager.Tools.ProposeChange.AgentInstructionsDescription
-	// }
 	if config.Roles.Manager.Tools.ProposeChange.ContextDigestDescription != "" {
 		contextDigest = config.Roles.Manager.Tools.ProposeChange.ContextDigestDescription
 	}
@@ -41,6 +45,15 @@ func CompileProposeChange(tool *tools.ProposeChangeTool, config spaces.ThinkStat
 		Parameters: &genai.Schema{
 			Type: genai.TypeObject,
 			Properties: map[string]*genai.Schema{
+				tools.Intention: {
+					Type:        genai.TypeString,
+					Description: intention,
+				},
+				tools.AssignedTags: {
+					Type:        genai.TypeArray,
+					Items:       &genai.Schema{Type: genai.TypeString},
+					Description: assignedTags,
+				},
 				tools.Instruction: {
 					Type:        genai.TypeString,
 					Description: instruction,
@@ -77,7 +90,7 @@ func CompileProposeChange(tool *tools.ProposeChangeTool, config spaces.ThinkStat
 					},
 				},
 			},
-			Required: []string{tools.ContextDigest, tools.AgentCount, tools.AgentInstructions},
+			Required: []string{tools.Intention, tools.AssignedTags, tools.ContextDigest, tools.AgentCount, tools.AgentInstructions},
 		},
 	}
 }
