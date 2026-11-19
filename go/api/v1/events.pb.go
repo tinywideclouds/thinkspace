@@ -181,6 +181,55 @@ func (FlowStatus) EnumDescriptor() ([]byte, []int) {
 	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{2}
 }
 
+type ContextStage int32
+
+const (
+	ContextStage_CONTEXT_STAGE_UNSPECIFIED ContextStage = 0
+	ContextStage_CONTEXT_STAGE_MANAGER     ContextStage = 1
+	ContextStage_CONTEXT_STAGE_WORKER      ContextStage = 2
+)
+
+// Enum value maps for ContextStage.
+var (
+	ContextStage_name = map[int32]string{
+		0: "CONTEXT_STAGE_UNSPECIFIED",
+		1: "CONTEXT_STAGE_MANAGER",
+		2: "CONTEXT_STAGE_WORKER",
+	}
+	ContextStage_value = map[string]int32{
+		"CONTEXT_STAGE_UNSPECIFIED": 0,
+		"CONTEXT_STAGE_MANAGER":     1,
+		"CONTEXT_STAGE_WORKER":      2,
+	}
+)
+
+func (x ContextStage) Enum() *ContextStage {
+	p := new(ContextStage)
+	*p = x
+	return p
+}
+
+func (x ContextStage) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ContextStage) Descriptor() protoreflect.EnumDescriptor {
+	return file_src_thinkspace_api_v1_events_proto_enumTypes[3].Descriptor()
+}
+
+func (ContextStage) Type() protoreflect.EnumType {
+	return &file_src_thinkspace_api_v1_events_proto_enumTypes[3]
+}
+
+func (x ContextStage) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ContextStage.Descriptor instead.
+func (ContextStage) EnumDescriptor() ([]byte, []int) {
+	return file_src_thinkspace_api_v1_events_proto_rawDescGZIP(), []int{3}
+}
+
 // --- Shared Types ---
 type SpaceInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1578,10 +1627,11 @@ type PreviewContext struct {
 	ChatId              string                 `protobuf:"bytes,2,opt,name=chat_id,json=chatId,proto3" json:"chat_id,omitempty"`
 	PreviewId           string                 `protobuf:"bytes,3,opt,name=preview_id,json=previewId,proto3" json:"preview_id,omitempty"`
 	ManagerSystemPrompt string                 `protobuf:"bytes,4,opt,name=manager_system_prompt,json=managerSystemPrompt,proto3" json:"manager_system_prompt,omitempty"`
-	StickyDigests       []string               `protobuf:"bytes,5,rep,name=sticky_digests,json=stickyDigests,proto3" json:"sticky_digests,omitempty"`
+	LongTermMemory      []string               `protobuf:"bytes,5,rep,name=long_term_memory,json=longTermMemory,proto3" json:"long_term_memory,omitempty"`
 	RecentHistory       []string               `protobuf:"bytes,6,rep,name=recent_history,json=recentHistory,proto3" json:"recent_history,omitempty"`
 	FileContexts        []*FileContextMetaData `protobuf:"bytes,7,rep,name=file_contexts,json=fileContexts,proto3" json:"file_contexts,omitempty"`
 	Focus               *AttentionFocus        `protobuf:"bytes,8,opt,name=focus,proto3" json:"focus,omitempty"`
+	Stage               ContextStage           `protobuf:"varint,9,opt,name=stage,proto3,enum=thinkspace.api.v1.ContextStage" json:"stage,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -1644,9 +1694,9 @@ func (x *PreviewContext) GetManagerSystemPrompt() string {
 	return ""
 }
 
-func (x *PreviewContext) GetStickyDigests() []string {
+func (x *PreviewContext) GetLongTermMemory() []string {
 	if x != nil {
-		return x.StickyDigests
+		return x.LongTermMemory
 	}
 	return nil
 }
@@ -1670,6 +1720,13 @@ func (x *PreviewContext) GetFocus() *AttentionFocus {
 		return x.Focus
 	}
 	return nil
+}
+
+func (x *PreviewContext) GetStage() ContextStage {
+	if x != nil {
+		return x.Stage
+	}
+	return ContextStage_CONTEXT_STAGE_UNSPECIFIED
 }
 
 type FileContextMetaData struct {
@@ -3622,17 +3679,18 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x12target_think_state\x18\x01 \x01(\tR\x10targetThinkState\x12\x1c\n" +
 	"\treasoning\x18\x02 \x01(\tR\treasoning\"G\n" +
 	"\x0fAvailableSpaces\x124\n" +
-	"\x06spaces\x18\x01 \x03(\v2\x1c.thinkspace.api.v1.SpaceInfoR\x06spaces\"\xeb\x02\n" +
+	"\x06spaces\x18\x01 \x03(\v2\x1c.thinkspace.api.v1.SpaceInfoR\x06spaces\"\xa5\x03\n" +
 	"\x0ePreviewContext\x12\x19\n" +
 	"\bspace_id\x18\x01 \x01(\tR\aspaceId\x12\x17\n" +
 	"\achat_id\x18\x02 \x01(\tR\x06chatId\x12\x1d\n" +
 	"\n" +
 	"preview_id\x18\x03 \x01(\tR\tpreviewId\x122\n" +
-	"\x15manager_system_prompt\x18\x04 \x01(\tR\x13managerSystemPrompt\x12%\n" +
-	"\x0esticky_digests\x18\x05 \x03(\tR\rstickyDigests\x12%\n" +
+	"\x15manager_system_prompt\x18\x04 \x01(\tR\x13managerSystemPrompt\x12(\n" +
+	"\x10long_term_memory\x18\x05 \x03(\tR\x0elongTermMemory\x12%\n" +
 	"\x0erecent_history\x18\x06 \x03(\tR\rrecentHistory\x12K\n" +
 	"\rfile_contexts\x18\a \x03(\v2&.thinkspace.api.v1.FileContextMetaDataR\ffileContexts\x127\n" +
-	"\x05focus\x18\b \x01(\v2!.thinkspace.api.v1.AttentionFocusR\x05focus\"`\n" +
+	"\x05focus\x18\b \x01(\v2!.thinkspace.api.v1.AttentionFocusR\x05focus\x125\n" +
+	"\x05stage\x18\t \x01(\x0e2\x1f.thinkspace.api.v1.ContextStageR\x05stage\"`\n" +
 	"\x13FileContextMetaData\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\tR\x05level\x12\x1f\n" +
@@ -3792,7 +3850,11 @@ const file_src_thinkspace_api_v1_events_proto_rawDesc = "" +
 	"\x17FLOW_STATUS_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13FLOW_STATUS_RUNNING\x10\x01\x12\x19\n" +
 	"\x15FLOW_STATUS_COMPLETED\x10\x02\x12\x16\n" +
-	"\x12FLOW_STATUS_FAILED\x10\x03B4Z2github.com/tinywideclouds/thinkspace/api/v1;api_v1b\x06proto3"
+	"\x12FLOW_STATUS_FAILED\x10\x03*b\n" +
+	"\fContextStage\x12\x1d\n" +
+	"\x19CONTEXT_STAGE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15CONTEXT_STAGE_MANAGER\x10\x01\x12\x18\n" +
+	"\x14CONTEXT_STAGE_WORKER\x10\x02B4Z2github.com/tinywideclouds/thinkspace/api/v1;api_v1b\x06proto3"
 
 var (
 	file_src_thinkspace_api_v1_events_proto_rawDescOnce sync.Once
@@ -3806,119 +3868,121 @@ func file_src_thinkspace_api_v1_events_proto_rawDescGZIP() []byte {
 	return file_src_thinkspace_api_v1_events_proto_rawDescData
 }
 
-var file_src_thinkspace_api_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_src_thinkspace_api_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
 var file_src_thinkspace_api_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_src_thinkspace_api_v1_events_proto_goTypes = []any{
 	(DelegationStrategy)(0),            // 0: thinkspace.api.v1.DelegationStrategy
 	(MessageType)(0),                   // 1: thinkspace.api.v1.MessageType
 	(FlowStatus)(0),                    // 2: thinkspace.api.v1.FlowStatus
-	(*SpaceInfo)(nil),                  // 3: thinkspace.api.v1.SpaceInfo
-	(*Message)(nil),                    // 4: thinkspace.api.v1.Message
-	(*CandidateProposal)(nil),          // 5: thinkspace.api.v1.CandidateProposal
-	(*CandidateResolution)(nil),        // 6: thinkspace.api.v1.CandidateResolution
-	(*FlowExecution)(nil),              // 7: thinkspace.api.v1.FlowExecution
-	(*AgentRecord)(nil),                // 8: thinkspace.api.v1.AgentRecord
-	(*FileDelta)(nil),                  // 9: thinkspace.api.v1.FileDelta
-	(*GraphEvent)(nil),                 // 10: thinkspace.api.v1.GraphEvent
-	(*DigestMeta)(nil),                 // 11: thinkspace.api.v1.DigestMeta
-	(*AttentionFocus)(nil),             // 12: thinkspace.api.v1.AttentionFocus
-	(*ChatStream)(nil),                 // 13: thinkspace.api.v1.ChatStream
-	(*StreamedGraphEvent)(nil),         // 14: thinkspace.api.v1.StreamedGraphEvent
-	(*SyncHistory)(nil),                // 15: thinkspace.api.v1.SyncHistory
-	(*SyncSubGraph)(nil),               // 16: thinkspace.api.v1.SyncSubGraph
-	(*LoadHistory)(nil),                // 17: thinkspace.api.v1.LoadHistory
-	(*LoadSubGraph)(nil),               // 18: thinkspace.api.v1.LoadSubGraph
-	(*RequestStrategy)(nil),            // 19: thinkspace.api.v1.RequestStrategy
-	(*RequestReview)(nil),              // 20: thinkspace.api.v1.RequestReview
-	(*RequestTransition)(nil),          // 21: thinkspace.api.v1.RequestTransition
-	(*AvailableSpaces)(nil),            // 22: thinkspace.api.v1.AvailableSpaces
-	(*PreviewContext)(nil),             // 23: thinkspace.api.v1.PreviewContext
-	(*FileContextMetaData)(nil),        // 24: thinkspace.api.v1.FileContextMetaData
-	(*FlowTelemetryPayload)(nil),       // 25: thinkspace.api.v1.FlowTelemetryPayload
-	(*AgentTelemetryPayload)(nil),      // 26: thinkspace.api.v1.AgentTelemetryPayload
-	(*TransitionTelemetryPayload)(nil), // 27: thinkspace.api.v1.TransitionTelemetryPayload
-	(*TelemetryData)(nil),              // 28: thinkspace.api.v1.TelemetryData
-	(*TelemetryEvent)(nil),             // 29: thinkspace.api.v1.TelemetryEvent
-	(*FanOut)(nil),                     // 30: thinkspace.api.v1.FanOut
-	(*Manager)(nil),                    // 31: thinkspace.api.v1.Manager
-	(*SubmitPrompt)(nil),               // 32: thinkspace.api.v1.SubmitPrompt
-	(*SelectStrategy)(nil),             // 33: thinkspace.api.v1.SelectStrategy
-	(*ReviewDecision)(nil),             // 34: thinkspace.api.v1.ReviewDecision
-	(*ApproveContext)(nil),             // 35: thinkspace.api.v1.ApproveContext
-	(*TransitionDecision)(nil),         // 36: thinkspace.api.v1.TransitionDecision
-	(*ForkChat)(nil),                   // 37: thinkspace.api.v1.ForkChat
-	(*InlineEdit)(nil),                 // 38: thinkspace.api.v1.InlineEdit
-	(*SwitchBranch)(nil),               // 39: thinkspace.api.v1.SwitchBranch
-	(*SystemRules)(nil),                // 40: thinkspace.api.v1.SystemRules
-	(*Mapbook)(nil),                    // 41: thinkspace.api.v1.Mapbook
-	(*TrajectoryEvent)(nil),            // 42: thinkspace.api.v1.TrajectoryEvent
-	(*Trajectory)(nil),                 // 43: thinkspace.api.v1.Trajectory
-	(*WorkbenchItem)(nil),              // 44: thinkspace.api.v1.WorkbenchItem
-	(*ThinkBundle)(nil),                // 45: thinkspace.api.v1.ThinkBundle
-	(*WSEvent)(nil),                    // 46: thinkspace.api.v1.WSEvent
-	nil,                                // 47: thinkspace.api.v1.GraphEvent.EdgesEntry
-	nil,                                // 48: thinkspace.api.v1.GraphEvent.MetadataEntry
-	nil,                                // 49: thinkspace.api.v1.SyncHistory.DigestsEntry
-	nil,                                // 50: thinkspace.api.v1.Mapbook.MapsEntry
+	(ContextStage)(0),                  // 3: thinkspace.api.v1.ContextStage
+	(*SpaceInfo)(nil),                  // 4: thinkspace.api.v1.SpaceInfo
+	(*Message)(nil),                    // 5: thinkspace.api.v1.Message
+	(*CandidateProposal)(nil),          // 6: thinkspace.api.v1.CandidateProposal
+	(*CandidateResolution)(nil),        // 7: thinkspace.api.v1.CandidateResolution
+	(*FlowExecution)(nil),              // 8: thinkspace.api.v1.FlowExecution
+	(*AgentRecord)(nil),                // 9: thinkspace.api.v1.AgentRecord
+	(*FileDelta)(nil),                  // 10: thinkspace.api.v1.FileDelta
+	(*GraphEvent)(nil),                 // 11: thinkspace.api.v1.GraphEvent
+	(*DigestMeta)(nil),                 // 12: thinkspace.api.v1.DigestMeta
+	(*AttentionFocus)(nil),             // 13: thinkspace.api.v1.AttentionFocus
+	(*ChatStream)(nil),                 // 14: thinkspace.api.v1.ChatStream
+	(*StreamedGraphEvent)(nil),         // 15: thinkspace.api.v1.StreamedGraphEvent
+	(*SyncHistory)(nil),                // 16: thinkspace.api.v1.SyncHistory
+	(*SyncSubGraph)(nil),               // 17: thinkspace.api.v1.SyncSubGraph
+	(*LoadHistory)(nil),                // 18: thinkspace.api.v1.LoadHistory
+	(*LoadSubGraph)(nil),               // 19: thinkspace.api.v1.LoadSubGraph
+	(*RequestStrategy)(nil),            // 20: thinkspace.api.v1.RequestStrategy
+	(*RequestReview)(nil),              // 21: thinkspace.api.v1.RequestReview
+	(*RequestTransition)(nil),          // 22: thinkspace.api.v1.RequestTransition
+	(*AvailableSpaces)(nil),            // 23: thinkspace.api.v1.AvailableSpaces
+	(*PreviewContext)(nil),             // 24: thinkspace.api.v1.PreviewContext
+	(*FileContextMetaData)(nil),        // 25: thinkspace.api.v1.FileContextMetaData
+	(*FlowTelemetryPayload)(nil),       // 26: thinkspace.api.v1.FlowTelemetryPayload
+	(*AgentTelemetryPayload)(nil),      // 27: thinkspace.api.v1.AgentTelemetryPayload
+	(*TransitionTelemetryPayload)(nil), // 28: thinkspace.api.v1.TransitionTelemetryPayload
+	(*TelemetryData)(nil),              // 29: thinkspace.api.v1.TelemetryData
+	(*TelemetryEvent)(nil),             // 30: thinkspace.api.v1.TelemetryEvent
+	(*FanOut)(nil),                     // 31: thinkspace.api.v1.FanOut
+	(*Manager)(nil),                    // 32: thinkspace.api.v1.Manager
+	(*SubmitPrompt)(nil),               // 33: thinkspace.api.v1.SubmitPrompt
+	(*SelectStrategy)(nil),             // 34: thinkspace.api.v1.SelectStrategy
+	(*ReviewDecision)(nil),             // 35: thinkspace.api.v1.ReviewDecision
+	(*ApproveContext)(nil),             // 36: thinkspace.api.v1.ApproveContext
+	(*TransitionDecision)(nil),         // 37: thinkspace.api.v1.TransitionDecision
+	(*ForkChat)(nil),                   // 38: thinkspace.api.v1.ForkChat
+	(*InlineEdit)(nil),                 // 39: thinkspace.api.v1.InlineEdit
+	(*SwitchBranch)(nil),               // 40: thinkspace.api.v1.SwitchBranch
+	(*SystemRules)(nil),                // 41: thinkspace.api.v1.SystemRules
+	(*Mapbook)(nil),                    // 42: thinkspace.api.v1.Mapbook
+	(*TrajectoryEvent)(nil),            // 43: thinkspace.api.v1.TrajectoryEvent
+	(*Trajectory)(nil),                 // 44: thinkspace.api.v1.Trajectory
+	(*WorkbenchItem)(nil),              // 45: thinkspace.api.v1.WorkbenchItem
+	(*ThinkBundle)(nil),                // 46: thinkspace.api.v1.ThinkBundle
+	(*WSEvent)(nil),                    // 47: thinkspace.api.v1.WSEvent
+	nil,                                // 48: thinkspace.api.v1.GraphEvent.EdgesEntry
+	nil,                                // 49: thinkspace.api.v1.GraphEvent.MetadataEntry
+	nil,                                // 50: thinkspace.api.v1.SyncHistory.DigestsEntry
+	nil,                                // 51: thinkspace.api.v1.Mapbook.MapsEntry
 }
 var file_src_thinkspace_api_v1_events_proto_depIdxs = []int32{
 	1,  // 0: thinkspace.api.v1.Message.type:type_name -> thinkspace.api.v1.MessageType
 	2,  // 1: thinkspace.api.v1.FlowExecution.status:type_name -> thinkspace.api.v1.FlowStatus
-	8,  // 2: thinkspace.api.v1.FlowExecution.agents:type_name -> thinkspace.api.v1.AgentRecord
-	47, // 3: thinkspace.api.v1.GraphEvent.edges:type_name -> thinkspace.api.v1.GraphEvent.EdgesEntry
-	48, // 4: thinkspace.api.v1.GraphEvent.metadata:type_name -> thinkspace.api.v1.GraphEvent.MetadataEntry
-	4,  // 5: thinkspace.api.v1.GraphEvent.message:type_name -> thinkspace.api.v1.Message
-	5,  // 6: thinkspace.api.v1.GraphEvent.candidate_proposal:type_name -> thinkspace.api.v1.CandidateProposal
-	6,  // 7: thinkspace.api.v1.GraphEvent.candidate_resolution:type_name -> thinkspace.api.v1.CandidateResolution
-	7,  // 8: thinkspace.api.v1.GraphEvent.flow_execution:type_name -> thinkspace.api.v1.FlowExecution
-	9,  // 9: thinkspace.api.v1.GraphEvent.file_delta:type_name -> thinkspace.api.v1.FileDelta
-	10, // 10: thinkspace.api.v1.StreamedGraphEvent.event:type_name -> thinkspace.api.v1.GraphEvent
-	10, // 11: thinkspace.api.v1.SyncHistory.recent_events:type_name -> thinkspace.api.v1.GraphEvent
-	49, // 12: thinkspace.api.v1.SyncHistory.digests:type_name -> thinkspace.api.v1.SyncHistory.DigestsEntry
-	12, // 13: thinkspace.api.v1.SyncHistory.focus:type_name -> thinkspace.api.v1.AttentionFocus
-	10, // 14: thinkspace.api.v1.SyncSubGraph.events:type_name -> thinkspace.api.v1.GraphEvent
-	3,  // 15: thinkspace.api.v1.AvailableSpaces.spaces:type_name -> thinkspace.api.v1.SpaceInfo
-	24, // 16: thinkspace.api.v1.PreviewContext.file_contexts:type_name -> thinkspace.api.v1.FileContextMetaData
-	12, // 17: thinkspace.api.v1.PreviewContext.focus:type_name -> thinkspace.api.v1.AttentionFocus
-	25, // 18: thinkspace.api.v1.TelemetryData.flow_payload:type_name -> thinkspace.api.v1.FlowTelemetryPayload
-	26, // 19: thinkspace.api.v1.TelemetryData.agent_payload:type_name -> thinkspace.api.v1.AgentTelemetryPayload
-	27, // 20: thinkspace.api.v1.TelemetryData.transition_payload:type_name -> thinkspace.api.v1.TransitionTelemetryPayload
-	28, // 21: thinkspace.api.v1.TelemetryEvent.event:type_name -> thinkspace.api.v1.TelemetryData
-	0,  // 22: thinkspace.api.v1.SelectStrategy.strategy_id:type_name -> thinkspace.api.v1.DelegationStrategy
-	50, // 23: thinkspace.api.v1.Mapbook.maps:type_name -> thinkspace.api.v1.Mapbook.MapsEntry
-	42, // 24: thinkspace.api.v1.Trajectory.working_memory:type_name -> thinkspace.api.v1.TrajectoryEvent
-	42, // 25: thinkspace.api.v1.Trajectory.catalyst:type_name -> thinkspace.api.v1.TrajectoryEvent
-	40, // 26: thinkspace.api.v1.ThinkBundle.rules:type_name -> thinkspace.api.v1.SystemRules
-	41, // 27: thinkspace.api.v1.ThinkBundle.mapbook:type_name -> thinkspace.api.v1.Mapbook
-	43, // 28: thinkspace.api.v1.ThinkBundle.trajectory:type_name -> thinkspace.api.v1.Trajectory
-	44, // 29: thinkspace.api.v1.ThinkBundle.workbench:type_name -> thinkspace.api.v1.WorkbenchItem
-	13, // 30: thinkspace.api.v1.WSEvent.chat_stream:type_name -> thinkspace.api.v1.ChatStream
-	29, // 31: thinkspace.api.v1.WSEvent.telemetry_event:type_name -> thinkspace.api.v1.TelemetryEvent
-	14, // 32: thinkspace.api.v1.WSEvent.streamed_graph_event:type_name -> thinkspace.api.v1.StreamedGraphEvent
-	19, // 33: thinkspace.api.v1.WSEvent.request_strategy:type_name -> thinkspace.api.v1.RequestStrategy
-	20, // 34: thinkspace.api.v1.WSEvent.request_review:type_name -> thinkspace.api.v1.RequestReview
-	21, // 35: thinkspace.api.v1.WSEvent.request_transition:type_name -> thinkspace.api.v1.RequestTransition
-	22, // 36: thinkspace.api.v1.WSEvent.available_spaces:type_name -> thinkspace.api.v1.AvailableSpaces
-	15, // 37: thinkspace.api.v1.WSEvent.sync_history:type_name -> thinkspace.api.v1.SyncHistory
-	16, // 38: thinkspace.api.v1.WSEvent.sync_sub_graph:type_name -> thinkspace.api.v1.SyncSubGraph
-	23, // 39: thinkspace.api.v1.WSEvent.preview_context:type_name -> thinkspace.api.v1.PreviewContext
-	45, // 40: thinkspace.api.v1.WSEvent.think_bundle:type_name -> thinkspace.api.v1.ThinkBundle
-	32, // 41: thinkspace.api.v1.WSEvent.submit_prompt:type_name -> thinkspace.api.v1.SubmitPrompt
-	33, // 42: thinkspace.api.v1.WSEvent.select_strategy:type_name -> thinkspace.api.v1.SelectStrategy
-	34, // 43: thinkspace.api.v1.WSEvent.review_decision:type_name -> thinkspace.api.v1.ReviewDecision
-	35, // 44: thinkspace.api.v1.WSEvent.approve_context:type_name -> thinkspace.api.v1.ApproveContext
-	36, // 45: thinkspace.api.v1.WSEvent.transition_decision:type_name -> thinkspace.api.v1.TransitionDecision
-	17, // 46: thinkspace.api.v1.WSEvent.load_history:type_name -> thinkspace.api.v1.LoadHistory
-	18, // 47: thinkspace.api.v1.WSEvent.load_sub_graph:type_name -> thinkspace.api.v1.LoadSubGraph
-	37, // 48: thinkspace.api.v1.WSEvent.fork_chat:type_name -> thinkspace.api.v1.ForkChat
-	38, // 49: thinkspace.api.v1.WSEvent.inline_edit:type_name -> thinkspace.api.v1.InlineEdit
-	39, // 50: thinkspace.api.v1.WSEvent.switch_branch:type_name -> thinkspace.api.v1.SwitchBranch
-	11, // 51: thinkspace.api.v1.SyncHistory.DigestsEntry.value:type_name -> thinkspace.api.v1.DigestMeta
-	52, // [52:52] is the sub-list for method output_type
-	52, // [52:52] is the sub-list for method input_type
-	52, // [52:52] is the sub-list for extension type_name
-	52, // [52:52] is the sub-list for extension extendee
-	0,  // [0:52] is the sub-list for field type_name
+	9,  // 2: thinkspace.api.v1.FlowExecution.agents:type_name -> thinkspace.api.v1.AgentRecord
+	48, // 3: thinkspace.api.v1.GraphEvent.edges:type_name -> thinkspace.api.v1.GraphEvent.EdgesEntry
+	49, // 4: thinkspace.api.v1.GraphEvent.metadata:type_name -> thinkspace.api.v1.GraphEvent.MetadataEntry
+	5,  // 5: thinkspace.api.v1.GraphEvent.message:type_name -> thinkspace.api.v1.Message
+	6,  // 6: thinkspace.api.v1.GraphEvent.candidate_proposal:type_name -> thinkspace.api.v1.CandidateProposal
+	7,  // 7: thinkspace.api.v1.GraphEvent.candidate_resolution:type_name -> thinkspace.api.v1.CandidateResolution
+	8,  // 8: thinkspace.api.v1.GraphEvent.flow_execution:type_name -> thinkspace.api.v1.FlowExecution
+	10, // 9: thinkspace.api.v1.GraphEvent.file_delta:type_name -> thinkspace.api.v1.FileDelta
+	11, // 10: thinkspace.api.v1.StreamedGraphEvent.event:type_name -> thinkspace.api.v1.GraphEvent
+	11, // 11: thinkspace.api.v1.SyncHistory.recent_events:type_name -> thinkspace.api.v1.GraphEvent
+	50, // 12: thinkspace.api.v1.SyncHistory.digests:type_name -> thinkspace.api.v1.SyncHistory.DigestsEntry
+	13, // 13: thinkspace.api.v1.SyncHistory.focus:type_name -> thinkspace.api.v1.AttentionFocus
+	11, // 14: thinkspace.api.v1.SyncSubGraph.events:type_name -> thinkspace.api.v1.GraphEvent
+	4,  // 15: thinkspace.api.v1.AvailableSpaces.spaces:type_name -> thinkspace.api.v1.SpaceInfo
+	25, // 16: thinkspace.api.v1.PreviewContext.file_contexts:type_name -> thinkspace.api.v1.FileContextMetaData
+	13, // 17: thinkspace.api.v1.PreviewContext.focus:type_name -> thinkspace.api.v1.AttentionFocus
+	3,  // 18: thinkspace.api.v1.PreviewContext.stage:type_name -> thinkspace.api.v1.ContextStage
+	26, // 19: thinkspace.api.v1.TelemetryData.flow_payload:type_name -> thinkspace.api.v1.FlowTelemetryPayload
+	27, // 20: thinkspace.api.v1.TelemetryData.agent_payload:type_name -> thinkspace.api.v1.AgentTelemetryPayload
+	28, // 21: thinkspace.api.v1.TelemetryData.transition_payload:type_name -> thinkspace.api.v1.TransitionTelemetryPayload
+	29, // 22: thinkspace.api.v1.TelemetryEvent.event:type_name -> thinkspace.api.v1.TelemetryData
+	0,  // 23: thinkspace.api.v1.SelectStrategy.strategy_id:type_name -> thinkspace.api.v1.DelegationStrategy
+	51, // 24: thinkspace.api.v1.Mapbook.maps:type_name -> thinkspace.api.v1.Mapbook.MapsEntry
+	43, // 25: thinkspace.api.v1.Trajectory.working_memory:type_name -> thinkspace.api.v1.TrajectoryEvent
+	43, // 26: thinkspace.api.v1.Trajectory.catalyst:type_name -> thinkspace.api.v1.TrajectoryEvent
+	41, // 27: thinkspace.api.v1.ThinkBundle.rules:type_name -> thinkspace.api.v1.SystemRules
+	42, // 28: thinkspace.api.v1.ThinkBundle.mapbook:type_name -> thinkspace.api.v1.Mapbook
+	44, // 29: thinkspace.api.v1.ThinkBundle.trajectory:type_name -> thinkspace.api.v1.Trajectory
+	45, // 30: thinkspace.api.v1.ThinkBundle.workbench:type_name -> thinkspace.api.v1.WorkbenchItem
+	14, // 31: thinkspace.api.v1.WSEvent.chat_stream:type_name -> thinkspace.api.v1.ChatStream
+	30, // 32: thinkspace.api.v1.WSEvent.telemetry_event:type_name -> thinkspace.api.v1.TelemetryEvent
+	15, // 33: thinkspace.api.v1.WSEvent.streamed_graph_event:type_name -> thinkspace.api.v1.StreamedGraphEvent
+	20, // 34: thinkspace.api.v1.WSEvent.request_strategy:type_name -> thinkspace.api.v1.RequestStrategy
+	21, // 35: thinkspace.api.v1.WSEvent.request_review:type_name -> thinkspace.api.v1.RequestReview
+	22, // 36: thinkspace.api.v1.WSEvent.request_transition:type_name -> thinkspace.api.v1.RequestTransition
+	23, // 37: thinkspace.api.v1.WSEvent.available_spaces:type_name -> thinkspace.api.v1.AvailableSpaces
+	16, // 38: thinkspace.api.v1.WSEvent.sync_history:type_name -> thinkspace.api.v1.SyncHistory
+	17, // 39: thinkspace.api.v1.WSEvent.sync_sub_graph:type_name -> thinkspace.api.v1.SyncSubGraph
+	24, // 40: thinkspace.api.v1.WSEvent.preview_context:type_name -> thinkspace.api.v1.PreviewContext
+	46, // 41: thinkspace.api.v1.WSEvent.think_bundle:type_name -> thinkspace.api.v1.ThinkBundle
+	33, // 42: thinkspace.api.v1.WSEvent.submit_prompt:type_name -> thinkspace.api.v1.SubmitPrompt
+	34, // 43: thinkspace.api.v1.WSEvent.select_strategy:type_name -> thinkspace.api.v1.SelectStrategy
+	35, // 44: thinkspace.api.v1.WSEvent.review_decision:type_name -> thinkspace.api.v1.ReviewDecision
+	36, // 45: thinkspace.api.v1.WSEvent.approve_context:type_name -> thinkspace.api.v1.ApproveContext
+	37, // 46: thinkspace.api.v1.WSEvent.transition_decision:type_name -> thinkspace.api.v1.TransitionDecision
+	18, // 47: thinkspace.api.v1.WSEvent.load_history:type_name -> thinkspace.api.v1.LoadHistory
+	19, // 48: thinkspace.api.v1.WSEvent.load_sub_graph:type_name -> thinkspace.api.v1.LoadSubGraph
+	38, // 49: thinkspace.api.v1.WSEvent.fork_chat:type_name -> thinkspace.api.v1.ForkChat
+	39, // 50: thinkspace.api.v1.WSEvent.inline_edit:type_name -> thinkspace.api.v1.InlineEdit
+	40, // 51: thinkspace.api.v1.WSEvent.switch_branch:type_name -> thinkspace.api.v1.SwitchBranch
+	12, // 52: thinkspace.api.v1.SyncHistory.DigestsEntry.value:type_name -> thinkspace.api.v1.DigestMeta
+	53, // [53:53] is the sub-list for method output_type
+	53, // [53:53] is the sub-list for method input_type
+	53, // [53:53] is the sub-list for extension type_name
+	53, // [53:53] is the sub-list for extension extendee
+	0,  // [0:53] is the sub-list for field type_name
 }
 
 func init() { file_src_thinkspace_api_v1_events_proto_init() }
@@ -3966,7 +4030,7 @@ func file_src_thinkspace_api_v1_events_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_src_thinkspace_api_v1_events_proto_rawDesc), len(file_src_thinkspace_api_v1_events_proto_rawDesc)),
-			NumEnums:      3,
+			NumEnums:      4,
 			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   0,

@@ -161,7 +161,7 @@ func (g *BadgerGraph) SaveDigest(ctx context.Context, c *thinkgraph.ChatAddress,
 		return fmt.Errorf("failed to marshal digest: %w", err)
 	}
 
-	slog.InfoContext(ctx, "BadgerDB saving digest", "key", string(nodeKey), "promoted", digest.Promoted)
+	slog.InfoContext(ctx, "BadgerDB saving digest", "key", string(nodeKey), "is_sticky", digest.IsSticky)
 
 	return g.db.Update(func(txn *badger.Txn) error {
 		if err := txn.Set(nodeKey, nodeData); err != nil {
@@ -666,7 +666,7 @@ func (g *BadgerGraph) GetStickyDigests(ctx context.Context, c *thinkgraph.ChatAd
 	err := g.db.View(func(txn *badger.Txn) error {
 		var err error
 		digests, err = scanPrefix[thinkgraph.DigestMeta](ctx, txn, fmt.Appendf(nil, "%s:%s:%s:", nsDigest, c.ProjectID, c.ChatID), func(d thinkgraph.DigestMeta) bool {
-			return d.Promoted
+			return d.IsSticky
 		})
 		return err
 	})

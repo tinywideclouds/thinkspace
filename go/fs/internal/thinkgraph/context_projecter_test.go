@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"uuid"
+
+	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
 func TestContextProjecter_Build(t *testing.T) {
@@ -17,7 +18,7 @@ func TestContextProjecter_Build(t *testing.T) {
 	manifest.Digests[stickyID] = thinkgraph.DigestMeta{
 		ID:       stickyID,
 		Summary:  "Always remember the user prefers idiomatic Go.",
-		Promoted: true,
+		IsSticky: true,
 	}
 
 	time.Sleep(2 * time.Millisecond)
@@ -25,7 +26,7 @@ func TestContextProjecter_Build(t *testing.T) {
 	manifest.Digests[focusDigestID] = thinkgraph.DigestMeta{
 		ID:       focusDigestID,
 		Summary:  "PostgreSQL connection pool configured in internal/db.",
-		Promoted: false,
+		IsSticky: false,
 	}
 
 	ruleID := uuid.NewV7()

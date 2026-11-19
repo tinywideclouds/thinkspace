@@ -33,7 +33,7 @@ func (policy *TokenThresholdPolicy) estimateTokens(turnContext TurnContext, incl
 		totalCharacters += len(turnContext.ManagerSystemPrompt)
 	}
 
-	for _, digest := range turnContext.StickyDigests {
+	for _, digest := range turnContext.LongTermMemory {
 		totalCharacters += len(digest)
 	}
 

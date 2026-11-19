@@ -104,7 +104,7 @@ func (l *FileLedger) SaveDigest(ctx context.Context, c *ChatAddress, digest Dige
 	}
 
 	isSticky := "false"
-	if digest.Promoted {
+	if digest.IsSticky {
 		isSticky = "true"
 	}
 

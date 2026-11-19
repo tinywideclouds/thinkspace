@@ -12,8 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dgraph-io/badger/v4"
 	"uuid"
+
+	"github.com/dgraph-io/badger/v4"
 
 	"github.com/tinywideclouds.com/thinkspace/internal/db"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
@@ -306,7 +307,7 @@ func TestService_AppendDigest(t *testing.T) {
 	if len(digests) != 1 {
 		t.Fatalf("expected 1 digest, got %d", len(digests))
 	}
-	if digests[0].Summary != "HTTP server architecture" || !digests[0].Promoted {
+	if digests[0].Summary != "HTTP server architecture" || !digests[0].IsSticky {
 		t.Errorf("unexpected digest metadata: %+v", digests[0])
 	}
 }

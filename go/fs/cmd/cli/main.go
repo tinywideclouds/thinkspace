@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/db"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
+	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
@@ -30,6 +33,7 @@ func main() {
 	engineType := flag.String("engine", "gogit", "State engine backend to use ('gogit' or 'exec')")
 	spaceName := flag.String("space", "sandbox", "The think space to use")
 	thinkStateName := flag.String("thinkstate", "intake", "The ThinkState configuration to load")
+	debugLLM := flag.Bool("debug-llm", false, "DEV SHORTCUT: Record full compiled ThinkBundle context to temp Markdown files on every LLM call")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -42,7 +46,11 @@ func main() {
 		logger.Error("Failed to initialize GenAI client", "error", err)
 		os.Exit(1)
 	}
-	modelClient := gemini.NewAdapter(client)
+	var modelClient llm.ModelClient = gemini.NewAdapter(client)
+	if *debugLLM {
+		logger.Info("🔍 LLM debug recording enabled: compiled ThinkBundle contexts will be saved to temp files")
+		modelClient = llm.NewLoggingModelClient(logger, "", modelClient)
+	}
 
 	homeDirectory, err := os.UserHomeDir()
 	if err != nil {
@@ -76,7 +84,11 @@ func main() {
 		logger.Error("Failed to initialize BadgerDB", "error", err)
 		os.Exit(1)
 	}
-	defer graphDB.Close()
+	defer func() {
+		if closeErr := graphDB.Close(); closeErr != nil {
+			logger.Error("Failed to close BadgerDB", "error", closeErr)
+		}
+	}()
 
 	engineFactory := func(repoRoot string) workspace.ChatVersioner {
 		if *engineType == "exec" {
@@ -94,9 +106,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	_ = serviceManager.UpdateSpaceState(*spaceName, func(s *workspace.SpaceState) {
+	if err := serviceManager.UpdateSpaceState(*spaceName, func(s *workspace.SpaceState) {
 		s.ThinkState = *thinkStateName
-	})
+	}); err != nil {
+		logger.Error("Failed to update space state", "error", err)
+		os.Exit(1)
+	}
 
 	fmt.Printf("📂 Workspace root: %s\n", repositoryRoot)
 	if *engineType == "exec" {
@@ -115,9 +130,12 @@ func main() {
 			os.Exit(1)
 		}
 
-		_ = serviceManager.UpdateChatMeta(*spaceName, meta.ID, func(m *workspace.ChatMeta) {
+		if err := serviceManager.UpdateChatMeta(*spaceName, meta.ID, func(m *workspace.ChatMeta) {
 			m.ActiveThinkState = *thinkStateName
-		})
+		}); err != nil {
+			logger.Error("Failed to persist initial chat think state", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	var promptText string
@@ -130,7 +148,11 @@ func main() {
 
 		fmt.Print("\n> ")
 		reader := bufio.NewReader(os.Stdin)
-		input, _ := reader.ReadString('\n')
+		input, readErr := reader.ReadString('\n')
+		if readErr != nil && (!errors.Is(readErr, io.EOF) || input == "") {
+			logger.Error("Failed reading prompt from stdin", "error", readErr)
+			os.Exit(1)
+		}
 		promptText = strings.TrimSpace(input)
 
 		if promptText == "" {

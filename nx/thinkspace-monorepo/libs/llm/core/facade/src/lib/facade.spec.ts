@@ -1,8 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { create } from '@bufbuild/protobuf';
-import { WSEventSchema, DelegationStrategy as ProtoDelegationStrategy, MessageType, FlowStatus } from '@org/llm-core-protos';
+import {
+  WSEventSchema,
+  DelegationStrategy as ProtoDelegationStrategy,
+  MessageType,
+  FlowStatus,
+  ContextStage as ProtoContextStage
+} from '@org/llm-core-protos';
 import { LlmFacade } from './facade';
-import { DelegationStrategy } from './domain-models';
+import { ContextStage, DelegationStrategy } from './domain-models';
 
 describe('LlmFacade', () => {
   describe('toDomain (Inbound)', () => {
@@ -313,16 +319,17 @@ describe('LlmFacade', () => {
       });
     });
 
-    it('should map a preview context event correctly including previewId', () => {
-      const protocolBufferEvent = create(WSEventSchema, {
+    it('should map a preview context event correctly including previewId, longTermMemory, and typed ContextStage', () => {
+      const managerEvent = create(WSEventSchema, {
         payload: {
           case: 'previewContext',
           value: {
             spaceId: 'golang',
             chatId: 'chat-1',
             previewId: 'prev-123',
+            stage: ProtoContextStage.MANAGER,
             managerSystemPrompt: 'Test rules',
-            stickyDigests: ['Sticky memory'],
+            longTermMemory: ['Active memory'],
             fileContexts: [
               { path: 'src/main.go', level: 'structural', tokenCount: 100 }
             ],
@@ -335,15 +342,15 @@ describe('LlmFacade', () => {
         }
       });
 
-      const domainEvent = LlmFacade.toDomain(protocolBufferEvent);
-      expect(domainEvent).toEqual({
+      expect(LlmFacade.toDomain(managerEvent)).toEqual({
         type: 'preview_context',
         context: {
           spaceId: 'golang',
           chatId: 'chat-1',
           previewId: 'prev-123',
+          stage: ContextStage.MANAGER,
           managerSystemPrompt: 'Test rules',
-          stickyDigests: ['Sticky memory'],
+          longTermMemory: ['Active memory'],
           recentHistory: [],
           fileContexts: [
             { path: 'src/main.go', level: 'structural', tokenCount: 100 }
@@ -355,6 +362,31 @@ describe('LlmFacade', () => {
           }
         }
       });
+
+      const workerEvent = create(WSEventSchema, {
+        payload: {
+          case: 'previewContext',
+          value: {
+            spaceId: 'golang',
+            chatId: 'chat-1',
+            previewId: 'prev-456',
+            stage: ProtoContextStage.WORKER,
+            managerSystemPrompt: 'Worker rules',
+            longTermMemory: ['Context digest'],
+            recentHistory: ['[agent-1] Implement handler'],
+            fileContexts: [
+              { path: 'src/handler.go', level: 'injected', tokenCount: 250 }
+            ]
+          }
+        }
+      });
+
+      const mappedWorker = LlmFacade.toDomain(workerEvent);
+      expect(mappedWorker?.type).toBe('preview_context');
+      if (mappedWorker?.type === 'preview_context') {
+        expect(mappedWorker.context.stage).toBe(ContextStage.WORKER);
+        expect(mappedWorker.context.longTermMemory).toEqual(['Context digest']);
+      }
     });
 
     it('should map a request transition event correctly', () => {

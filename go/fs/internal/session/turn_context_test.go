@@ -58,8 +58,8 @@ func TestProjectTurnContext(t *testing.T) {
 	if turnContext.ManagerSystemPrompt != "System instructions" {
 		t.Errorf("expected ManagerSystemPrompt 'System instructions', got %s", turnContext.ManagerSystemPrompt)
 	}
-	if len(turnContext.StickyDigests) != 1 || turnContext.StickyDigests[0] != "Sticky digest entry" {
-		t.Errorf("unexpected StickyDigests: %v", turnContext.StickyDigests)
+	if len(turnContext.LongTermMemory) != 1 || turnContext.LongTermMemory[0] != "Sticky digest entry" {
+		t.Errorf("unexpected StickyDigests: %v", turnContext.LongTermMemory)
 	}
 	if len(turnContext.RecentHistory) != 3 {
 		t.Fatalf("expected 3 history entries (including catalyst), got %d", len(turnContext.RecentHistory))

@@ -6,7 +6,7 @@ type DigestMeta struct {
 	ID               uuid.UUID   `json:"id"`
 	Summary          string      `json:"summary"`
 	Tags             []string    `json:"tags,omitempty"`
-	Promoted         bool        `json:"promoted"`
+	IsSticky         bool        `json:"is_sticky"`
 	SummarizedEvents []uuid.UUID `json:"summarized_events,omitempty"`
 	Tombstoned       bool        `json:"tombstoned"`
 }

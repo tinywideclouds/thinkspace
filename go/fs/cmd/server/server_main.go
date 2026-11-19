@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/joho/godotenv"
@@ -17,6 +18,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/db"
 	"github.com/tinywideclouds.com/thinkspace/internal/gitfs"
+	"github.com/tinywideclouds.com/thinkspace/internal/llm"
 	"github.com/tinywideclouds.com/thinkspace/internal/llm/gemini"
 	"github.com/tinywideclouds.com/thinkspace/internal/session"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
@@ -31,6 +33,7 @@ func main() {
 
 	useSkeleton := flag.Bool("use-skeleton", false, "DEV SHORTCUT: Seed local directories using the internal skeleton configuration")
 	cleanDB := flag.Bool("clean", false, "DEV SHORTCUT: Wipe local BadgerDB graph index on startup for a fresh clean state")
+	debugLLM := flag.Bool("debug-llm", false, "DEV SHORTCUT: Record full compiled ThinkBundle context to temp Markdown files on every LLM call")
 	flag.Parse()
 
 	rootMode := true
@@ -45,7 +48,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	modelClient := gemini.NewAdapter(client)
+	var modelClient llm.ModelClient = gemini.NewAdapter(client)
+	if *debugLLM {
+		logger.Info("🔍 LLM debug recording enabled: compiled ThinkBundle contexts will be saved to temp files")
+		modelClient = llm.NewLoggingModelClient(logger, "", modelClient)
+	}
 
 	homeDirectory, err := os.UserHomeDir()
 	if err != nil {
@@ -64,7 +71,10 @@ func main() {
 		}
 	}
 
-	_ = os.MkdirAll(configurationsDirectory, 0755)
+	if err := os.MkdirAll(configurationsDirectory, 0755); err != nil {
+		logger.Error("Failed to create configurations directory", "error", err)
+		os.Exit(1)
+	}
 	if err := os.MkdirAll(dbPath, 0755); err != nil {
 		logger.Error("Failed to create database directory", "error", err)
 		os.Exit(1)
@@ -78,7 +88,11 @@ func main() {
 		logger.Error("Failed to initialize BadgerDB", "error", err)
 		os.Exit(1)
 	}
-	defer graphDB.Close()
+	defer func() {
+		if closeErr := graphDB.Close(); closeErr != nil {
+			logger.Error("Failed to close BadgerDB", "error", closeErr)
+		}
+	}()
 
 	factory := func(repoRoot string) workspace.ChatVersioner {
 		if *engineType == "exec" {
@@ -99,10 +113,12 @@ func main() {
 		config.ApplyDevSkeleton(logger, serviceManager)
 	}
 
-	var supportedDomains []string
-	for domain := range registry.GetAllConfigs() {
+	allConfigs := registry.GetAllConfigs()
+	supportedDomains := make([]string, 0, len(allConfigs))
+	for domain := range allConfigs {
 		supportedDomains = append(supportedDomains, domain)
 	}
+	sort.Strings(supportedDomains)
 	appConfig := workspace.AppConfig{
 		SupportedDomains: supportedDomains,
 	}

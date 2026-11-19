@@ -266,7 +266,7 @@ func (r *Rehydrator) parseDigestMarkdown(filename, content string) (DigestMeta, 
 			meta.Summary = strings.TrimSpace(parts[2])
 
 			if strings.Contains(frontmatter, "sticky: true") {
-				meta.Promoted = true
+				meta.IsSticky = true
 			}
 			if strings.Contains(frontmatter, "tombstoned: true") {
 				meta.Tombstoned = true

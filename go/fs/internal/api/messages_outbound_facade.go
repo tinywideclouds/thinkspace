@@ -21,7 +21,7 @@ func MarshalSyncHistory(recentEvents []thinkgraph.Node, digests []thinkgraph.Dig
 		pbDigests[d.ID.String()] = &pb.DigestMeta{
 			Id:       d.ID.String(),
 			Summary:  d.Summary,
-			IsSticky: d.Promoted,
+			IsSticky: d.IsSticky,
 		}
 	}
 
@@ -199,7 +199,7 @@ func MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
 				ChatId:              ctxData.ChatID,
 				PreviewId:           ctxData.PreviewID,
 				ManagerSystemPrompt: ctxData.ManagerSystemPrompt,
-				StickyDigests:       ctxData.StickyDigests,
+				LongTermMemory:      ctxData.LongTermMemory,
 				RecentHistory:       ctxData.RecentHistory,
 				FileContexts:        fileContexts,
 				Focus:               pbFocus,

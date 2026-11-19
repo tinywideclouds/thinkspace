@@ -26,6 +26,12 @@ enum FlowStatus {
   FLOW_STATUS_FAILED = 3;
 }
 
+enum ContextStage {
+  CONTEXT_STAGE_UNSPECIFIED = 0;
+  CONTEXT_STAGE_MANAGER = 1;
+  CONTEXT_STAGE_WORKER = 2;
+}
+
 // --- Shared Types ---
 message SpaceInfo {
   string id = 1;
@@ -177,10 +183,11 @@ message PreviewContext {
   string chat_id = 2;
   string preview_id = 3; 
   string manager_system_prompt = 4;
-  repeated string sticky_digests = 5;
+  repeated string long_term_memory = 5;
   repeated string recent_history = 6;
   repeated FileContextMetaData file_contexts = 7;
   AttentionFocus focus = 8;
+  ContextStage stage = 9;
 }
 
 message FileContextMetaData {

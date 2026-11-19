@@ -55,7 +55,7 @@ func ProjectTurnContext(spaceID, chatID string, responseID uuid.UUID, bundle *co
 
 	if bundle != nil {
 		turnContext.ManagerSystemPrompt = bundle.Rules.Persona
-		turnContext.StickyDigests = bundle.Trajectory.LongTermMemory
+		turnContext.LongTermMemory = bundle.Trajectory.LongTermMemory
 	}
 
 	return turnContext

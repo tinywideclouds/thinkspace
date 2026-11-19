@@ -288,7 +288,7 @@ func (a *BundleAssembler) gatherTimeline(
 
 // selectActiveDigests partitions all chat digests into active digests for the current turn
 // and dormant tags for query_lens discovery:
-// - Sticky digests (Promoted: true) are always included regardless of active tags.
+// - Sticky digests are always included regardless of active tags.
 // - Global digests (len(Tags) == 0) are always included.
 // - Non-sticky tagged digests are included if any tag matches primaryTags or relatedTags.
 // - If no focus tags are active yet, up to maxFallbackRecentDigests most recent digests are included.
@@ -310,7 +310,7 @@ func selectActiveDigests(allDigests []thinkgraph.DigestMeta, primaryTags, relate
 	if !hasFocus {
 		nonStickyCount := 0
 		for i := len(sorted) - 1; i >= 0 && nonStickyCount < maxFallbackRecentDigests; i-- {
-			if !sorted[i].Promoted && len(sorted[i].Tags) > 0 {
+			if !sorted[i].IsSticky && len(sorted[i].Tags) > 0 {
 				recentFallbackIDs[sorted[i].ID] = true
 				nonStickyCount++
 			}
@@ -329,7 +329,7 @@ func selectActiveDigests(allDigests []thinkgraph.DigestMeta, primaryTags, relate
 	var dormantCandidates []thinkgraph.DigestMeta
 
 	for _, d := range sorted {
-		if d.Promoted || len(d.Tags) == 0 {
+		if d.IsSticky || len(d.Tags) == 0 {
 			active = append(active, d)
 			for _, tag := range d.Tags {
 				if norm := strings.ToLower(strings.TrimSpace(tag)); norm != "" {

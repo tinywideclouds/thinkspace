@@ -18,7 +18,7 @@ type ModelResponse struct {
 
 type Digest struct {
 	Summary          string      `json:"summary"`
-	Promoted         bool        `json:"promoted"`
+	IsSticky         bool        `json:"is_sticky"`
 	SummarizedEvents []uuid.UUID `json:"summarized_events,omitempty"`
 }
 

@@ -435,7 +435,7 @@ func (s *Service) AppendDigest(ctx context.Context, c *thinkgraph.ChatAddress, s
 		ID:               uuid.NewV7(),
 		Summary:          summary,
 		Tags:             tags,
-		Promoted:         isSticky,
+		IsSticky:         isSticky,
 		SummarizedEvents: summarized,
 	})
 }

@@ -26,7 +26,7 @@ When `ChatEngine.runStandard` starts a turn, it invokes `BundleAssembler.Assembl
 * Reverses the collected slice into chronological order[cite: 1].
 
 ### 2. Long-Term Memory Filtering (`BundleAssembler.Assemble`)
-* Queries `GetStickyDigests` (promoted digests) and `GetSpaceContexts` from `GraphRepository`[cite: 1].
+* Queries `GetStickyDigests` and `GetSpaceContexts` from `GraphRepository`[cite: 1].
 * Keeps items that either have **no tags** (global rules/anchors) or share at least one tag with `PrimaryFocus` or `RelatedContext`[cite: 1].
 
 ### 3. Catalyst Resolution & Deduplication
@@ -35,7 +35,7 @@ When `ChatEngine.runStandard` starts a turn, it invokes `BundleAssembler.Assembl
 
 ### 4. Trajectory Projection (`thinkgraph.ContextProjecter.Build`)
 `ContextProjecter` converts the `ContextRequest` into a `cognition.Trajectory`[cite: 1]:
-1. **Long-Term Memory:** Prepends a `[CONTEXT HORIZON METADATA]` block listing `PrimaryFocus`, `RelatedContext`, and `DormantLenses`, followed by active `SpaceContexts` and promoted `Digests`[cite: 1].
+1. **Long-Term Memory:** Prepends a `[CONTEXT HORIZON METADATA]` block listing `PrimaryFocus`, `RelatedContext`, and `DormantLenses`, followed by active `SpaceContexts` and sticky `Digests`[cite: 1].
 2. **Working Memory:** Iterates through `RecentEvents`[cite: 1]:
    * Skips `EventSystem` nodes[cite: 1].
    * Maps `EventModel` to role `"model"` and user/flow events to role `"user"`[cite: 1].

@@ -36,7 +36,7 @@ func (m *baMockGraphRepo) WalkSubGraphReverse(ctx context.Context, c *thinkgraph
 func (m *baMockGraphRepo) GetStickyDigests(ctx context.Context, c *thinkgraph.ChatAddress) ([]thinkgraph.DigestMeta, error) {
 	var sticky []thinkgraph.DigestMeta
 	for _, d := range m.digests {
-		if d.Promoted {
+		if d.IsSticky {
 			sticky = append(sticky, d)
 		}
 	}
@@ -159,21 +159,21 @@ func TestBundleAssembler_Assemble_DynamicTagSensitiveDigestsAndDormantLenses(t *
 		ID:       uuid.NewV7(),
 		Summary:  "Pinned architecture invariant",
 		Tags:     []string{"core-invariant"},
-		Promoted: true,
+		IsSticky: true,
 	}
 	time.Sleep(2 * time.Millisecond)
 	authDigest := thinkgraph.DigestMeta{
 		ID:       uuid.NewV7(),
 		Summary:  "Bearer auth middleware implemented",
 		Tags:     []string{"auth", "middleware"},
-		Promoted: false,
+		IsSticky: false,
 	}
 	time.Sleep(2 * time.Millisecond)
 	mathDigest := thinkgraph.DigestMeta{
 		ID:       uuid.NewV7(),
 		Summary:  "Internal math package handles arithmetic",
 		Tags:     []string{"internal/math", "routing"},
-		Promoted: false,
+		IsSticky: false,
 	}
 
 	mockNodes := []thinkgraph.Node{
@@ -233,7 +233,7 @@ func TestBundleAssembler_SelectActiveDigests(t *testing.T) {
 	backendDigest := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{"backend", "performance"}}
 	uiDigest := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{"ui"}}
 	unrelatedDigest := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{"marketing"}}
-	stickyUnrelated := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{"policy"}, Promoted: true}
+	stickyUnrelated := thinkgraph.DigestMeta{ID: uuid.NewV7(), Tags: []string{"policy"}, IsSticky: true}
 
 	allDigests := []thinkgraph.DigestMeta{globalDigest, backendDigest, uiDigest, unrelatedDigest, stickyUnrelated}
 
@@ -262,7 +262,7 @@ func TestBundleAssembler_SelectActiveDigests(t *testing.T) {
 		t.Errorf("Global digest (no tags) should always be active")
 	}
 	if !foundSticky {
-		t.Errorf("Sticky digest (Promoted: true) should always be active regardless of tags")
+		t.Errorf("Sticky digest should always be active regardless of tags")
 	}
 	if foundUnrelated {
 		t.Errorf("Unrelated non-sticky digest should have been filtered out")

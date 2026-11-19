@@ -93,7 +93,7 @@ func TestMarshalPreviewContext(t *testing.T) {
 		ChatID:              "chat-123",
 		PreviewID:           "uuid-v7",
 		ManagerSystemPrompt: "Test rules",
-		StickyDigests:       []string{"Sticky memory"},
+		LongTermMemory:      []string{"Sticky memory"},
 		RecentHistory:       []string{"[prompt] Test"},
 		FileContexts: []session.FileContext{
 			{Path: "src/main.go", Level: "structural", TokenCount: 100},
@@ -262,7 +262,7 @@ func TestMarshalSyncHistory(t *testing.T) {
 		{
 			ID:       digestID,
 			Summary:  "Sticky context",
-			Promoted: true,
+			IsSticky: true,
 		},
 	}
 

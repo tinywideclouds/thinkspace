@@ -20,7 +20,7 @@ type TurnContext struct {
 	ResponseID          uuid.UUID
 	PreviewID           string
 	ManagerSystemPrompt string
-	StickyDigests       []string
+	LongTermMemory      []string
 	RecentHistory       []string
 	FileContexts        []FileContext
 	Focus               thinkgraph.AttentionFocus

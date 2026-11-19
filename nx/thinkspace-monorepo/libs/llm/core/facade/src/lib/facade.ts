@@ -4,11 +4,13 @@ import {
   WSEventSchema,
   MessageType,
   FlowStatus,
+  ContextStage as ProtoContextStage,
   DelegationStrategy as ProtoDelegationStrategy,
   GraphEvent as ProtoGraphEvent
 } from '@org/llm-core-protos';
 import { 
   AppEvent, 
+  ContextStage,
   DelegationStrategy, 
   DigestMeta, 
   GraphEvent,
@@ -23,6 +25,14 @@ export class LlmFacade {
       case FlowStatus.COMPLETED: return 'COMPLETED';
       case FlowStatus.FAILED: return 'FAILED';
       default: return 'UNSPECIFIED';
+    }
+  }
+
+  private static mapContextStage(stage: ProtoContextStage): ContextStage {
+    switch (stage) {
+      case ProtoContextStage.MANAGER: return ContextStage.MANAGER;
+      case ProtoContextStage.WORKER: return ContextStage.WORKER;
+      default: return ContextStage.UNSPECIFIED;
     }
   }
 
@@ -192,8 +202,9 @@ export class LlmFacade {
             spaceId: protocolBufferEvent.payload.value.spaceId || '',
             chatId: protocolBufferEvent.payload.value.chatId || '',
             previewId: protocolBufferEvent.payload.value.previewId || '',
+            stage: this.mapContextStage(protocolBufferEvent.payload.value.stage),
             managerSystemPrompt: protocolBufferEvent.payload.value.managerSystemPrompt || '',
-            stickyDigests: protocolBufferEvent.payload.value.stickyDigests || [],
+            longTermMemory: protocolBufferEvent.payload.value.longTermMemory || [],
             recentHistory: protocolBufferEvent.payload.value.recentHistory || [],
             fileContexts: (protocolBufferEvent.payload.value.fileContexts || []).map(context => ({
               path: context.path,

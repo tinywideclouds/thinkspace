@@ -175,7 +175,7 @@ func TestFileLedger_DigestAndSpaceContextRoundTrip(t *testing.T) {
 		ID:               uuid.NewV7(),
 		Summary:          "Multi-line\ndigest summary",
 		Tags:             []string{"arch", "go"},
-		Promoted:         true,
+		IsSticky:         true,
 		SummarizedEvents: []uuid.UUID{sumID1, sumID2},
 	}
 	if err := ledger.SaveDigest(ctx, chat, digest); err != nil {
@@ -207,7 +207,7 @@ func TestFileLedger_DigestAndSpaceContextRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDigests failed: %v", err)
 	}
-	if len(digests) != 1 || digests[0].ID != digest.ID || !digests[0].Promoted || len(digests[0].SummarizedEvents) != 2 {
+	if len(digests) != 1 || digests[0].ID != digest.ID || !digests[0].IsSticky || len(digests[0].SummarizedEvents) != 2 {
 		t.Errorf("unexpected rehydrated digest: %+v", digests)
 	}
 

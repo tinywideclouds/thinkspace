@@ -92,12 +92,19 @@ export interface AttentionFocus {
   dormantLenses: string[];
 }
 
+export enum ContextStage {
+  UNSPECIFIED = 0,
+  MANAGER = 1,
+  WORKER = 2,
+}
+
 export interface PreviewContext {
   spaceId: string;
   chatId: string;
   previewId?: string;
+  stage: ContextStage;
   managerSystemPrompt: string;
-  stickyDigests: string[];
+  longTermMemory: string[];
   recentHistory: string[];
   fileContexts: FileContextMetaData[];
   focus: AttentionFocus;
