@@ -176,6 +176,17 @@ func MarshalRequestTransition(targetThinkState string, reasoning string) ([]byte
 	return protoMarshaler.Marshal(event)
 }
 
+func marshalContextStage(stage session.ContextStage) pb.ContextStage {
+	switch stage {
+	case session.ContextStageManager:
+		return pb.ContextStage_CONTEXT_STAGE_MANAGER
+	case session.ContextStageWorker:
+		return pb.ContextStage_CONTEXT_STAGE_WORKER
+	default:
+		return pb.ContextStage_CONTEXT_STAGE_UNSPECIFIED
+	}
+}
+
 func MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
 	var fileContexts []*pb.FileContextMetaData
 	for _, fc := range ctxData.FileContexts {
@@ -198,6 +209,7 @@ func MarshalPreviewContext(ctxData session.TurnContext) ([]byte, error) {
 				SpaceId:             ctxData.SpaceID,
 				ChatId:              ctxData.ChatID,
 				PreviewId:           ctxData.PreviewID,
+				Stage:               marshalContextStage(ctxData.Stage),
 				ManagerSystemPrompt: ctxData.ManagerSystemPrompt,
 				LongTermMemory:      ctxData.LongTermMemory,
 				RecentHistory:       ctxData.RecentHistory,

@@ -43,10 +43,10 @@ func NewConnectionManager(ctx context.Context, conn *websocket.Conn, chunkChan c
 		ctx:            ctx,
 		conn:           conn,
 		logger:         logger,
-		strategyChan:   make(chan strategySelection),
-		reviewChan:     make(chan reviewSelection),
-		approveChan:    make(chan session.ContextApprovalDecision),
-		transitionChan: make(chan bool),
+		strategyChan:   make(chan strategySelection, 1),
+		reviewChan:     make(chan reviewSelection, 1),
+		approveChan:    make(chan session.ContextApprovalDecision, 1),
+		transitionChan: make(chan bool, 1),
 		chunkChan:      chunkChan,
 	}
 }
@@ -82,6 +82,10 @@ func (cm *ConnectionManager) ConfirmTransition(targetThinkState string, reasonin
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request transition", "error", err)
 		return false
 	}
+	select {
+	case <-cm.transitionChan:
+	default:
+	}
 	cm.SendBytes(data)
 
 	select {
@@ -97,6 +101,10 @@ func (cm *ConnectionManager) ReviewContext(ctxData session.TurnContext) session.
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling preview context for review", "error", err)
 		return session.ContextApprovalDecision{Approved: false}
+	}
+	select {
+	case <-cm.approveChan:
+	default:
 	}
 	cm.SendBytes(data)
 
@@ -114,6 +122,10 @@ func (cm *ConnectionManager) ChooseNextStep() (flows.FlowStrategy, bool) {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request strategy", "error", err)
 		return flows.StrategySkip, false
 	}
+	select {
+	case <-cm.strategyChan:
+	default:
+	}
 	cm.SendBytes(data)
 
 	select {
@@ -129,6 +141,10 @@ func (cm *ConnectionManager) ReviewCandidate(branch string) (bool, string) {
 	if err != nil {
 		cm.logger.ErrorContext(cm.ctx, "failed marshaling request review", "error", err)
 		return false, "Failed to marshal review request"
+	}
+	select {
+	case <-cm.reviewChan:
+	default:
 	}
 	cm.SendBytes(data)
 

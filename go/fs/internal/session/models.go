@@ -5,7 +5,6 @@ import (
 
 	"uuid"
 
-	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/tools"
@@ -14,11 +13,20 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
+type ContextStage int
+
+const (
+	ContextStageUnspecified ContextStage = iota
+	ContextStageManager
+	ContextStageWorker
+)
+
 type TurnContext struct {
 	SpaceID             string
 	ChatID              string
 	ResponseID          uuid.UUID
 	PreviewID           string
+	Stage               ContextStage
 	ManagerSystemPrompt string
 	LongTermMemory      []string
 	RecentHistory       []string
@@ -51,7 +59,7 @@ type UserInterface interface {
 }
 
 type ContextReviewPolicy interface {
-	ShouldReview(settings workspace.SpaceSettings, responseID uuid.UUID, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus) bool
+	ShouldReview(policy workspace.ReviewPolicySettings, turnContext TurnContext) bool
 }
 
 // TurnEngine represents a polymorphic execution block orchestrated by the ChatSession.

@@ -12,6 +12,7 @@ import (
 
 	"uuid"
 
+	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/flows"
 	"github.com/tinywideclouds.com/thinkspace/internal/session/signals"
@@ -69,11 +70,12 @@ func NewSynthesizeEngine(
 	}
 }
 
-type refineBranchView struct {
+type synthesisReviewView struct {
 	CandidateID string
 	Passed      bool
 	Trace       string
 	Diff        string
+	Reasoning   string
 }
 
 func (e *SynthesizeEngine) loadFanOutConfig() (config.FanOutFlowConfig, error) {
@@ -188,97 +190,61 @@ func (e *SynthesizeEngine) Execute(
 			ID:        uuid.NewV7(),
 			Type:      "flow_status",
 			Timestamp: time.Now(),
-			Message:   fmt.Sprintf("Manager evaluating %d candidate(s) for synthesis...", len(candidates)),
+			Message:   fmt.Sprintf("Preparing %d candidate proposal(s) for synthesis...", len(candidates)),
 		})
 	}
 
-	// Stage 1: Render refine_prompt template with candidate diffs and verification traces
-	var branchViews []refineBranchView
-	for _, cand := range candidates {
-		diff := cand.Diff
-		if diff == "" && e.service != nil {
-			if readDiff, diffErr := e.service.ReadCandidate(ctx, chatSession, cand.ID); diffErr != nil {
-				if e.logger != nil {
-					e.logger.WarnContext(ctx, "failed reading candidate diff for synthesis", "candidate", cand.ID, "error", diffErr)
-				}
-				diff = cand.RawPayload
-			} else {
-				diff = readDiff
-			}
-		}
-		branchViews = append(branchViews, refineBranchView{
-			CandidateID: cand.BranchRef(),
-			Passed:      cand.Passed,
-			Trace:       cand.Trace,
-			Diff:        diff,
-		})
-	}
-
-	renderedRefinePrompt := sig.OriginalInstruction
-	if tmpl, parseErr := template.New("refine").Parse(sig.OriginalInstruction); parseErr == nil {
-		var buf bytes.Buffer
-		if execErr := tmpl.Execute(&buf, map[string]any{"Branches": branchViews}); execErr == nil {
-			renderedRefinePrompt = buf.String()
-		} else if e.logger != nil {
-			e.logger.WarnContext(ctx, "failed executing refine prompt template", "error", execErr)
-		}
-	} else if e.logger != nil {
-		e.logger.WarnContext(ctx, "failed parsing refine prompt template", "error", parseErr)
-	}
-
-	// Append refine evaluation prompt node onto the subgraph (linked from optionsNodeID)
-	synthPromptID := uuid.NewV7()
-	promptNode := thinkgraph.NewEvent(thinkgraph.EventPrompt, renderedRefinePrompt)
-	promptNode.ID = synthPromptID
-	promptNode.Metadata["agent_id"] = "manager"
-	promptNode.Edges = map[string]string{"parent_id": sig.ParentNodeID.String()}
-
-	if err := e.broadcaster.AppendAndStream(ctx, sig.FlowAddress, promptNode, ui); err != nil {
-		return nil, fmt.Errorf("appending synthesis evaluation prompt node: %w", err)
-	}
-
-	// Manager LLM evaluates the candidate diffs on the subgraph to produce the comparative evaluation
-	evalBundle := e.bundleAssembler.AssembleWorkerBundle(
-		ctx,
-		chatSession.ProjectID,
-		space,
-		space.Config().ManagerSystemPrompt(),
-		sig.OriginalContext,
-		renderedRefinePrompt,
-		nil,
-	)
-	evalBundle.Rules.FormattingConstraints = ""
-
-	evalMux := &streamMultiplexer{ui: ui, streamTextChunks: false}
-	evalModelID := uuid.NewV7()
-	managerModel := space.Config().Roles.Manager.Model
-
-	if _, evalErr := e.turnExecutor.Execute(ctx, sig.FlowAddress, evalModelID, synthPromptID, managerModel, false, space, evalBundle, tools.NewRegistry(), evalMux, emitter); evalErr != nil {
-		if failErr := scope.Fail(ctx, "Manager synthesis evaluation failed: "+evalErr.Error(), evalErr.Error(), nil, ui); failErr != nil && e.logger != nil {
-			e.logger.ErrorContext(ctx, "failed recording synthesis evaluation error", "error", failErr)
-		}
-		return nil, fmt.Errorf("executing manager synthesis evaluation: %w", evalErr)
-	}
-
-	mut := thinkgraph.MetadataMutation{Metadata: map[string]string{"agent_id": "manager"}}
-	mut.TargetID = evalModelID
-	mut.Type = thinkgraph.MutationMetadata
-	mut.Timestamp = time.Now().UTC()
-	if err := e.broadcaster.MutateAndStream(ctx, sig.FlowAddress, mut, evalModelID, ui); err != nil {
-		return nil, fmt.Errorf("mutating manager metadata on synthesis evaluation node: %w", err)
-	}
-
-	comparativeEval := strings.TrimSpace(evalMux.buffer.String())
-
-	// Stage 2: Execute the single synthesized candidate via SubAgentRunner.Run on the subgraph.
+	// Build domain-projected candidate blueprints (Go AST symbols & declarations for Go spaces,
+	// clean fenced files for prose/generic spaces) so the Synthesis Worker sees clean source.
 	var digestBuilder strings.Builder
 	if strings.TrimSpace(sig.OriginalContext) != "" {
 		digestBuilder.WriteString(strings.TrimSpace(sig.OriginalContext))
-		digestBuilder.WriteString("\n\n")
 	}
-	if comparativeEval != "" {
-		digestBuilder.WriteString("### Manager Comparative Evaluation\n")
-		digestBuilder.WriteString(comparativeEval)
+
+	if len(candidates) > 0 {
+		if digestBuilder.Len() > 0 {
+			digestBuilder.WriteString("\n\n")
+		}
+		digestBuilder.WriteString("### Candidate Proposals to Merge\n")
+		for _, cand := range candidates {
+			if cand.Diff == "" && e.service != nil {
+				if readDiff, diffErr := e.service.ReadCandidate(ctx, chatSession, cand.ID); diffErr == nil {
+					cand.Diff = readDiff
+				} else if e.logger != nil {
+					e.logger.WarnContext(ctx, "failed reading candidate diff for synthesis", "candidate", cand.ID, "error", diffErr)
+				}
+			}
+
+			statusBadge := "PASSED"
+			if !cand.Passed {
+				statusBadge = "VERIFICATION FAILED"
+			}
+			fmt.Fprintf(&digestBuilder, "\n### Candidate `%s` (`%s` — %s)\n", cand.AgentID, cand.BranchRef(), statusBadge)
+			if !cand.Passed && strings.TrimSpace(cand.Trace) != "" {
+				fmt.Fprintf(&digestBuilder, "Verification Trace:\n```\n%s\n```\n", strings.TrimSpace(cand.Trace))
+			}
+			digestBuilder.WriteString(ProjectCandidateForSpace(space, cand))
+			digestBuilder.WriteString("\n")
+		}
+	}
+
+	// Materialize any pre-existing base TargetFiles from the workbench without failing fast on new files.
+	var baseWorkbenchItems []cognition.WorkbenchItem
+	if e.service != nil && len(sig.TargetFiles) > 0 {
+		reader := e.service.WorkbenchReader(chatSession)
+		var existingBaseFiles []string
+		for _, target := range sig.TargetFiles {
+			if _, readErr := reader.ReadFile(ctx, target); readErr == nil {
+				existingBaseFiles = append(existingBaseFiles, target)
+			}
+		}
+		if len(existingBaseFiles) > 0 {
+			items, readErr := workspace.ReadFileContext(ctx, reader, existingBaseFiles)
+			if readErr != nil {
+				return nil, readErr
+			}
+			baseWorkbenchItems = items
+		}
 	}
 
 	flowName := ""
@@ -300,19 +266,61 @@ func (e *SynthesizeEngine) Execute(
 		ContextDigest: digestBuilder.String(),
 		Instruction:   synthesizePrompt,
 		RetryPrompt:   space.Config().Roles.Worker.RetryPrompt,
+		TargetFiles:   sig.TargetFiles,
 	}
 
-	var workerPolicy ContextReviewPolicy
-	var workerPolicySettings workspace.ReviewPolicySettings
-	if e.session != nil {
-		workerPolicy = e.session.WorkerReviewPolicy()
-		if e.session.workspaceManager != nil {
-			if st, stErr := e.session.workspaceManager.GetSpaceSettings(chatSession.ProjectID); stErr == nil {
-				workerPolicySettings = st.WorkerReviewPolicy
+	synthBundle := e.bundleAssembler.AssembleWorkerBundle(
+		ctx,
+		chatSession.ProjectID,
+		space,
+		flowContext.BaseAgentRules,
+		synthTask.ContextDigest,
+		synthTask.Instruction,
+		baseWorkbenchItems,
+	)
+
+	// Gate synthesis context BEFORE spawning the synthesis sandbox.
+	if ui != nil && e.session != nil && e.session.workspaceManager != nil {
+		if st, stErr := e.session.workspaceManager.GetSpaceSettings(chatSession.ProjectID); stErr == nil && st.WorkerReviewPolicy.Active {
+			policy := e.session.WorkerReviewPolicy()
+			reviewID := uuid.NewV7()
+			turnContext := ProjectTurnContext(chatSession.ProjectID, chatSession.ChatID, reviewID, ContextStageWorker, &synthBundle, thinkgraph.AttentionFocus{})
+			if policy.ShouldReview(st.WorkerReviewPolicy, turnContext) {
+				previewMarkdown := FormatBundlePreviewMarkdown("Sub-Agent Context Preview (synthesis)", &synthBundle)
+				if previewID, saveErr := e.service.SaveContextPreview(ctx, chatSession, previewMarkdown); saveErr != nil {
+					if e.logger != nil {
+						e.logger.WarnContext(ctx, "failed saving synthesis context preview", "error", saveErr)
+					}
+				} else {
+					turnContext.PreviewID = previewID
+				}
+
+				decision := ui.ReviewContext(turnContext)
+				if !decision.Approved {
+					if failErr := scope.Fail(ctx, "Synthesis aborted by user during context review.", "", nil, ui); failErr != nil && e.logger != nil {
+						e.logger.ErrorContext(ctx, "failed recording synthesis abort state", "error", failErr)
+					}
+					return &signals.SignalTerminal{}, nil
+				}
+
+				if decision.RetainedFilePaths != nil {
+					retainedPaths := make(map[string]bool, len(decision.RetainedFilePaths))
+					for _, p := range decision.RetainedFilePaths {
+						retainedPaths[p] = true
+					}
+					var prunedWorkbench []cognition.WorkbenchItem
+					for _, item := range synthBundle.Workbench {
+						if retainedPaths[item.Path] {
+							prunedWorkbench = append(prunedWorkbench, item)
+						}
+					}
+					synthBundle.Workbench = prunedWorkbench
+				}
 			}
 		}
 	}
 
+	// Execute the single-pass Synthesis Worker directly linked from optionsNodeID on the subgraph.
 	synthResult := e.runner.Run(ctx, SubAgentRunRequest{
 		ChatSession:          chatSession,
 		FlowAddress:          sig.FlowAddress,
@@ -321,10 +329,10 @@ func (e *SynthesizeEngine) Execute(
 		FlowContext:          flowContext,
 		Task:                 synthTask,
 		AgentIndex:           len(candidates) + 1,
-		ParentNodeID:         evalModelID,
+		ParentNodeID:         sig.ParentNodeID,
 		DeferResolutionEvent: true,
-		WorkerReviewPolicy:   workerPolicy,
-		WorkerPolicySettings: workerPolicySettings,
+		PrebuiltBundle:       &synthBundle,
+		SkipContextReview:    true,
 		UI:                   ui,
 		Emitter:              emitter,
 	})
@@ -385,15 +393,17 @@ func (e *SynthesizeEngine) Execute(
 		return &signals.SignalTerminal{}, nil
 	}
 
-	// Stage 3: Main Timeline Manager Review Turn
+	// Main Timeline Manager Review Turn (presents merge rationale + resulting diff on main before Accept/Reject)
+	mergeReasoning := extractSynthesisReasoning(synthResult.RawPayload)
 	renderedReviewPrompt := synthesisReviewPromptTmpl
 	if tmpl, parseErr := template.New("synthesis_review").Parse(synthesisReviewPromptTmpl); parseErr == nil {
 		var buf bytes.Buffer
-		reviewView := refineBranchView{
+		reviewView := synthesisReviewView{
 			CandidateID: synthResult.Candidate.BranchRef(),
 			Passed:      synthResult.Passed,
 			Trace:       synthResult.Trace,
 			Diff:        synthResult.Diff,
+			Reasoning:   mergeReasoning,
 		}
 		if execErr := tmpl.Execute(&buf, reviewView); execErr == nil {
 			renderedReviewPrompt = buf.String()
@@ -415,12 +425,13 @@ func (e *SynthesizeEngine) Execute(
 	)
 	reviewBundle.Rules.FormattingConstraints = ""
 
+	managerModel := space.Config().Roles.Manager.Model
 	reviewNodeID := uuid.NewV7()
 	if _, reviewErr := e.turnExecutor.Execute(ctx, chatSession, reviewNodeID, sig.ParentNodeID, managerModel, true, space, reviewBundle, tools.NewRegistry(), ui, emitter); reviewErr != nil {
 		return nil, fmt.Errorf("executing main timeline synthesis review: %w", reviewErr)
 	}
 
-	// Stage 4: User Review & Resolution of the 1 synthesized candidate
+	// User Review & Resolution of the synthesized candidate
 	candidateID := synthResult.CandidateID
 	verified := synthResult.Passed
 	verifyTrace := synthResult.Trace

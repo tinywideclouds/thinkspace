@@ -52,7 +52,7 @@ func TestServiceManager_LazyLoading(t *testing.T) {
 		t.Fatal("expected a valid service for 'golang'")
 	}
 
-	expectedRoot := filepath.Join(baseRoot, "golang", "workspace")
+	expectedRoot := filepath.Join(baseRoot, "golang", workspace.WorkbenchLocation)
 	if len(capturedRoots) != 1 || capturedRoots[0] != expectedRoot {
 		t.Errorf("factory did not receive correct repo root. Expected %s, got %v", expectedRoot, capturedRoots)
 	}

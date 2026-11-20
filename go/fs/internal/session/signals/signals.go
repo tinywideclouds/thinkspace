@@ -51,7 +51,7 @@ type SignalDispatchFlow struct {
 
 func (s *SignalDispatchFlow) IsTerminal() bool { return false }
 
-// SignalSynthesize indicates the FlowEngine has finished and wants the SynthesizeEngine to summarize the results.
+// SignalSynthesize indicates the FlowEngine has finished and wants the SynthesizeEngine to merge the candidate proposals.
 type SignalSynthesize struct {
 	OriginalInstruction string
 	OriginalContext     string
@@ -60,6 +60,7 @@ type SignalSynthesize struct {
 	FlowAddress         *thinkgraph.ChatAddress
 	ParentNodeID        uuid.UUID
 	AutoAccept          bool
+	TargetFiles         []string
 }
 
 func (s *SignalSynthesize) IsTerminal() bool { return false }

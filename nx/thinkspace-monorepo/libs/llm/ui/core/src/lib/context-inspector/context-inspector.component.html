@@ -3,7 +3,9 @@
   <!-- Header & Actions -->
   <div style="background: #e9ecef; padding: 12px 16px; border-bottom: 1px solid #ced4da; display: flex; justify-content: space-between; align-items: center;">
     <div style="display: flex; align-items: center; gap: 8px;">
-      <strong style="color: #212529; font-size: 14px;">🧠 JIT Context Preview</strong>
+      <strong style="color: #212529; font-size: 14px;">
+        {{ isWorkerStage() ? '🤖 Sub-Agent Context Preview' : '🧠 JIT Context Preview' }}
+      </strong>
       <span style="font-size: 11px; background: #fff; padding: 2px 6px; border-radius: 12px; border: 1px solid #dee2e6; color: #495057;">
         ~{{ totalFileTokens() }} File Tokens
       </span>
@@ -13,81 +15,116 @@
         📋 Copy Full Payload
       </button>
       <button (click)="reviewCancelled.emit()" style="background: #fff; border: 1px solid #ffa8a8; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #e03131;">
-        Cancel Prompt
+        {{ isWorkerStage() ? 'Abort Sub-Agents' : 'Cancel Prompt' }}
       </button>
       <button (click)="onApprove()" style="background: #339af0; border: 1px solid #228be6; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #fff;">
-        Approve & Send 🚀
+        {{ isWorkerStage() ? 'Approve & Run 🚀' : 'Approve & Send 🚀' }}
       </button>
     </div>
   </div>
 
   <div style="padding: 16px; display: flex; flex-direction: column; gap: 16px; max-height: 70vh; overflow-y: auto;">
 
-    <!-- Prompt (Non-removable; cancel above to abort sending) -->
-    @if (prompt()) {
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 12px; font-weight: bold; color: #1971c2; text-transform: uppercase;">
-            Prompt
-          </span>
-          <span style="font-size: 11px; color: #868e96;">
-            Required — click Cancel Prompt above to abort
-          </span>
+    <!-- Stage-Specific Primary Task / Prompt -->
+    @if (isWorkerStage()) {
+      @if (workerTasks().length > 0) {
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 12px; font-weight: bold; color: #1971c2; text-transform: uppercase;">
+            Sub-Agent Tasks ({{ workerTasks().length }})
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            @for (task of workerTasks(); track $index) {
+              <div style="background: #e7f5ff; border: 1px solid #a5d8ff; border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-size: 10px; font-weight: bold; font-family: monospace; color: #1864ab; text-transform: uppercase;">
+                  {{ task.agentId }}
+                </span>
+                <div style="font-size: 12px; color: #1864ab; white-space: pre-wrap;">{{ task.instruction }}</div>
+              </div>
+            }
+          </div>
         </div>
-        <div style="background: #e7f5ff; border: 1px solid #a5d8ff; border-radius: 6px; padding: 10px 12px; font-size: 12px; color: #1864ab; white-space: pre-wrap;">{{ prompt() }}</div>
-      </div>
+      }
+    } @else {
+      @if (prompt()) {
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 12px; font-weight: bold; color: #1971c2; text-transform: uppercase;">
+              Prompt
+            </span>
+            <span style="font-size: 11px; color: #868e96;">
+              Required — click Cancel Prompt above to abort
+            </span>
+          </div>
+          <div style="background: #e7f5ff; border: 1px solid #a5d8ff; border-radius: 6px; padding: 10px 12px; font-size: 12px; color: #1864ab; white-space: pre-wrap;">{{ prompt() }}</div>
+        </div>
+      }
     }
     
-    <!-- Manager System Prompt (Collapsible) -->
+    <!-- System Rules & Persona (Collapsible) -->
     <details style="background: #fff; border: 1px solid #dee2e6; border-radius: 4px; padding: 8px;">
       <summary style="cursor: pointer; font-size: 12px; font-weight: bold; color: #495057; text-transform: uppercase;">
-        Manager Rules & Persona
+        {{ isWorkerStage() ? 'Worker Rules & Patcher Schema' : 'Manager Rules & Persona' }}
       </summary>
       <pre style="margin-top: 8px; font-size: 11px; color: #868e96; white-space: pre-wrap; font-family: monospace;">{{ context().managerSystemPrompt }}</pre>
     </details>
 
-    <!-- Temporal Memory -->
-    <div style="display: flex; flex-direction: column; gap: 8px;">
-      <div style="font-size: 12px; font-weight: bold; color: #495057; text-transform: uppercase; border-bottom: 1px solid #dee2e6; padding-bottom: 4px;">
-        Temporal Memory
+    <!-- Context Digest (Worker) vs. Temporal Memory (Manager) -->
+    @if (isWorkerStage()) {
+      @if ((context().longTermMemory || []).length > 0) {
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 12px; font-weight: bold; color: #d9480f; text-transform: uppercase; border-bottom: 1px solid #dee2e6; padding-bottom: 4px;">
+            Context Digest
+          </div>
+          <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #495057;">
+            @for (digest of context().longTermMemory; track digest) {
+              <li style="white-space: pre-wrap;">{{ digest }}</li>
+            }
+          </ul>
+        </div>
+      }
+    } @else {
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="font-size: 12px; font-weight: bold; color: #495057; text-transform: uppercase; border-bottom: 1px solid #dee2e6; padding-bottom: 4px;">
+          Temporal Memory
+        </div>
+
+        @if ((context().longTermMemory || []).length > 0) {
+          <div style="font-size: 12px; font-weight: bold; color: #d9480f;">Long-Term Memory:</div>
+          <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #495057;">
+            @for (digest of context().longTermMemory; track digest) {
+              <li style="white-space: pre-wrap;">{{ digest }}</li>
+            }
+          </ul>
+        }
+
+        @if (historyEntries().length > 0) {
+          <div style="font-size: 12px; font-weight: bold; color: #1971c2; margin-top: 4px;">
+            Recent Trajectory (Sliding Window):
+            <span style="font-weight: normal; font-size: 11px; color: #868e96; margin-left: 4px;">
+              (Uncheck to omit from working memory)
+            </span>
+          </div>
+          <div style="background: #f1f3f5; border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 4px;">
+            @for (entry of historyEntries(); track entry.index) {
+              <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer; transition: opacity 0.2s;"
+                     [style.opacity]="retainedHistory().has(entry.index) ? '1' : '0.4'">
+                <input type="checkbox"
+                       [checked]="retainedHistory().has(entry.index)"
+                       (change)="toggleHistory(entry.index)"
+                       style="margin-top: 4px;" />
+                <div style="font-family: monospace; font-size: 11px; color: #495057; white-space: pre-wrap;">
+                  {{ entry.text }}
+                </div>
+              </label>
+            }
+          </div>
+        } @else {
+          <div style="font-size: 11px; color: #adb5bd; font-style: italic;">
+            No recent chat history.
+          </div>
+        }
       </div>
-
-      @if ((context().stickyDigests || []).length > 0) {
-        <div style="font-size: 12px; font-weight: bold; color: #d9480f;">Sticky Context:</div>
-        <ul style="margin: 0; padding-left: 20px; font-size: 12px; color: #495057;">
-          @for (digest of context().stickyDigests; track digest) {
-            <li>{{ digest }}</li>
-          }
-        </ul>
-      }
-
-      @if (historyEntries().length > 0) {
-        <div style="font-size: 12px; font-weight: bold; color: #1971c2; margin-top: 4px;">
-          Recent Trajectory (Sliding Window):
-          <span style="font-weight: normal; font-size: 11px; color: #868e96; margin-left: 4px;">
-            (Uncheck to omit from working memory)
-          </span>
-        </div>
-        <div style="background: #f1f3f5; border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 4px;">
-          @for (entry of historyEntries(); track entry.index) {
-            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer; transition: opacity 0.2s;"
-                   [style.opacity]="retainedHistory().has(entry.index) ? '1' : '0.4'">
-              <input type="checkbox"
-                     [checked]="retainedHistory().has(entry.index)"
-                     (change)="toggleHistory(entry.index)"
-                     style="margin-top: 4px;" />
-              <div style="font-family: monospace; font-size: 11px; color: #495057; white-space: pre-wrap;">
-                {{ entry.text }}
-              </div>
-            </label>
-          }
-        </div>
-      } @else {
-        <div style="font-size: 11px; color: #adb5bd; font-style: italic;">
-          No recent chat history.
-        </div>
-      }
-    </div>
+    }
 
     <!-- Spatial Reality (Files) -->
     <div style="display: flex; flex-direction: column; gap: 8px;">

@@ -84,10 +84,6 @@ func (m *mockSandbox) ExecuteCommand(ctx context.Context, command string, args .
 	return "", fmt.Errorf("unknown command: %s", cmdStr)
 }
 
-func (m *mockSandbox) ApplyDraft(ctx context.Context, message string) error { return nil }
-func (m *mockSandbox) DeliverForReview(ctx context.Context) error           { return nil }
-func (m *mockSandbox) TearDown(ctx context.Context) error                   { return nil }
-
 func setupGoThinkState(t *testing.T, verifyTimeout int) *golang.GoThinkState {
 	t.Helper()
 	config := spaces.ThinkStateConfig{

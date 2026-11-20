@@ -13,8 +13,8 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 )
 
-// ProjectTurnContext projects a domain ThinkBundle and attention focus into a presentation-layer TurnContext.
-func ProjectTurnContext(spaceID, chatID string, responseID uuid.UUID, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus) TurnContext {
+// ProjectTurnContext projects a domain ThinkBundle and attention focus into a TurnContext.
+func ProjectTurnContext(spaceID, chatID string, responseID uuid.UUID, stage ContextStage, bundle *cognition.ThinkBundle, focus thinkgraph.AttentionFocus) TurnContext {
 	var recentHistory []string
 	if bundle != nil {
 		for _, memory := range bundle.Trajectory.WorkingMemory {
@@ -48,6 +48,7 @@ func ProjectTurnContext(spaceID, chatID string, responseID uuid.UUID, bundle *co
 		SpaceID:       spaceID,
 		ChatID:        chatID,
 		ResponseID:    responseID,
+		Stage:         stage,
 		RecentHistory: recentHistory,
 		FileContexts:  fileContexts,
 		Focus:         focus,
@@ -132,9 +133,9 @@ func FormatBundlePreviewMarkdown(title string, bundle *cognition.ThinkBundle) st
 	}
 
 	if len(bundle.Trajectory.LongTermMemory) > 0 {
-		b.WriteString("## Long-Term Memory / Context Digests\n\n")
+		b.WriteString("## Long-Term Memory / Context Digest\n\n")
 		for i, item := range bundle.Trajectory.LongTermMemory {
-			fmt.Fprintf(&b, "### Digest %d\n\n%s\n\n", i+1, item)
+			fmt.Fprintf(&b, "### Item %d\n\n%s\n\n", i+1, item)
 		}
 	}
 

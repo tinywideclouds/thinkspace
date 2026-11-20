@@ -57,8 +57,8 @@ export class FlowStore {
              return newMap;
            });
         }
+        return;
       }
-      return;
     }
 
     if (event.payload?.type === 'agent') {

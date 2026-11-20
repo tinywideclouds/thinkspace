@@ -33,7 +33,7 @@ concept:
           agent_instructions_description: "An array of explicit instruction objects."
           context_digest_description: "A grounding summary of the overarching topic."
           instruction_description: "Explicit instructions for the sub-agents detailing exactly what to write."
-          target_files_description: "An array of EXISTING file paths to load into the sub-agent's context. Provide an empty array [] for new files."
+          target_files_description: "Optional array of existing file paths from the Mapbook Directory Tree whose full contents sub-agents need to read or update. Consider whether existing documents provide necessary context or conventions. Do not include brand-new files that do not exist yet."
         
         query_lens:
           description: "Query the workspace history for deep context on a specific conceptual tag."

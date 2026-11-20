@@ -9,38 +9,21 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-type mockWorkbenchSandbox struct {
+type mockFileReader struct {
 	files map[string][]byte
 }
 
-func (m *mockWorkbenchSandbox) ResolvePath(path string) string {
-	return path
-}
-
-func (m *mockWorkbenchSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
-	return nil
-}
-
-func (m *mockWorkbenchSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
+func (m *mockFileReader) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if data, ok := m.files[path]; ok {
 		return data, nil
 	}
 	return nil, errors.New("file not found")
 }
 
-func (m *mockWorkbenchSandbox) ExecuteCommand(ctx context.Context, cmd string, args ...string) (string, error) {
-	return "", nil
-}
-
-func (m *mockWorkbenchSandbox) ApplyDraft(ctx context.Context, msg string) error { return nil }
-func (m *mockWorkbenchSandbox) DeliverForReview(ctx context.Context) error       { return nil }
-func (m *mockWorkbenchSandbox) TearDown(ctx context.Context) error               { return nil }
-
-func TestWorkbench_Build(t *testing.T) {
+func TestReadFileContexts(t *testing.T) {
 	ctx := context.Background()
-	workbench := workspace.NewWorkbench()
 
-	sandbox := &mockWorkbenchSandbox{
+	reader := &mockFileReader{
 		files: map[string][]byte{
 			"src/main.go":  []byte("package main"),
 			"src/empty.go": []byte(""),
@@ -48,7 +31,7 @@ func TestWorkbench_Build(t *testing.T) {
 	}
 
 	t.Run("Empty Target Files", func(t *testing.T) {
-		res, err := workbench.Build(ctx, sandbox, []string{})
+		res, err := workspace.ReadFileContext(ctx, reader, []string{})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -58,7 +41,7 @@ func TestWorkbench_Build(t *testing.T) {
 	})
 
 	t.Run("Success", func(t *testing.T) {
-		res, err := workbench.Build(ctx, sandbox, []string{"src/main.go"})
+		res, err := workspace.ReadFileContext(ctx, reader, []string{"src/main.go"})
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -77,7 +60,7 @@ func TestWorkbench_Build(t *testing.T) {
 	})
 
 	t.Run("Allows Existing Empty File", func(t *testing.T) {
-		res, err := workbench.Build(ctx, sandbox, []string{"src/empty.go"})
+		res, err := workspace.ReadFileContext(ctx, reader, []string{"src/empty.go"})
 		if err != nil {
 			t.Fatalf("expected existing empty file to succeed, got: %v", err)
 		}
@@ -87,7 +70,7 @@ func TestWorkbench_Build(t *testing.T) {
 	})
 
 	t.Run("Fail Fast on Missing File", func(t *testing.T) {
-		_, err := workbench.Build(ctx, sandbox, []string{"src/missing.go"})
+		_, err := workspace.ReadFileContext(ctx, reader, []string{"src/missing.go"})
 		if err == nil {
 			t.Errorf("expected fail-fast error on missing file")
 		}

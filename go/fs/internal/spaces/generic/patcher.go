@@ -24,7 +24,7 @@ func (p *SearchReplacePatcher) SystemInstructions() string {
 	return p.instructions
 }
 
-func (p *SearchReplacePatcher) Apply(ctx context.Context, sandbox workspace.CandidateSandbox, llmOutput string) error {
+func (p *SearchReplacePatcher) Apply(ctx context.Context, fs workspace.FileWorkspace, llmOutput string) error {
 	// Match blocks formatted as:
 	// ### src/file.go
 	// <<<< SEARCH
@@ -66,7 +66,7 @@ func (p *SearchReplacePatcher) Apply(ctx context.Context, sandbox workspace.Cand
 
 		content, exists := fileModifications[filePath]
 		if !exists {
-			rawBytes, err := sandbox.ReadFile(ctx, filePath)
+			rawBytes, err := fs.ReadFile(ctx, filePath)
 			if err != nil {
 				return fmt.Errorf("cannot patch missing or unreadable file %s: %w", filePath, err)
 			}
@@ -82,7 +82,7 @@ func (p *SearchReplacePatcher) Apply(ctx context.Context, sandbox workspace.Cand
 	}
 
 	for _, filePath := range fileOrder {
-		if err := sandbox.WriteFile(ctx, filePath, []byte(fileModifications[filePath])); err != nil {
+		if err := fs.WriteFile(ctx, filePath, []byte(fileModifications[filePath])); err != nil {
 			return fmt.Errorf("writing patched file %s: %w", filePath, err)
 		}
 	}

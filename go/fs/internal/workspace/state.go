@@ -28,20 +28,34 @@ type ChatVersioner interface {
 	Reject(ctx context.Context, chatID string, candidateID string, reason string) error
 }
 
-// CandidateSandbox represents a short-lived, isolated workspace for an agent to draft changes.
-// It acts as a pure virtual environment, decoupling the domain from physical file paths.
-type CandidateSandbox interface {
-	// ResolvePath maps a sandbox-relative path (e.g., "src/main.go") to its physical location inside the sandbox.
+// FileReader provides read-only file access within a workspace or sandbox.
+type FileReader interface {
+	// ReadFile reads a file from the virtual workspace.
+	ReadFile(ctx context.Context, path string) ([]byte, error)
+}
+
+// FileWorkspace provides file read/write and path-resolution capabilities without exposing command execution or VCS lifecycle controls.
+type FileWorkspace interface {
+	FileReader
+
+	// ResolvePath maps a workspace-relative path (e.g., "src/main.go") to its physical location on disk.
 	ResolvePath(path string) string
 
-	// WriteFile writes a file to the sandbox's virtual workspace.
+	// WriteFile writes a file to the virtual workspace.
 	WriteFile(ctx context.Context, path string, data []byte) error
+}
 
-	// ReadFile reads a file from the sandbox's virtual workspace.
-	ReadFile(ctx context.Context, path string) ([]byte, error)
-
-	// ExecuteCommand runs a command (e.g., linter, compiler) securely within the sandbox's context.
+// CommandRunner executes external commands (e.g., compilers, test runners) within an isolated workspace.
+type CommandRunner interface {
+	// ExecuteCommand runs a command securely within the workspace's context.
 	ExecuteCommand(ctx context.Context, command string, args ...string) (string, error)
+}
+
+// CandidateSandbox represents a short-lived, isolated workspace for an agent to draft changes.
+// It composes FileWorkspace and CommandRunner with candidate VCS lifecycle operations.
+type CandidateSandbox interface {
+	FileWorkspace
+	CommandRunner
 
 	// ApplyDraft commits the current virtual state of the sandbox to its local isolated history.
 	ApplyDraft(ctx context.Context, message string) error

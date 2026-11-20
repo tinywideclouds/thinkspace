@@ -11,26 +11,26 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces/golang"
 )
 
-type mockPatcherSandbox struct {
+type mockPatcherWorkspace struct {
 	rootDir string
 	files   map[string][]byte
 }
 
-func newMockPatcherSandbox(rootDir string) *mockPatcherSandbox {
-	return &mockPatcherSandbox{
+func newMockPatcherWorkspace(rootDir string) *mockPatcherWorkspace {
+	return &mockPatcherWorkspace{
 		rootDir: rootDir,
 		files:   make(map[string][]byte),
 	}
 }
 
-func (m *mockPatcherSandbox) ResolvePath(path string) string {
+func (m *mockPatcherWorkspace) ResolvePath(path string) string {
 	if m.rootDir == "" {
 		return path
 	}
 	return filepath.Join(m.rootDir, filepath.FromSlash(path))
 }
 
-func (m *mockPatcherSandbox) WriteFile(ctx context.Context, path string, data []byte) error {
+func (m *mockPatcherWorkspace) WriteFile(ctx context.Context, path string, data []byte) error {
 	m.files[path] = data
 	if m.rootDir != "" {
 		full := m.ResolvePath(path)
@@ -42,7 +42,7 @@ func (m *mockPatcherSandbox) WriteFile(ctx context.Context, path string, data []
 	return nil
 }
 
-func (m *mockPatcherSandbox) ReadFile(ctx context.Context, path string) ([]byte, error) {
+func (m *mockPatcherWorkspace) ReadFile(ctx context.Context, path string) ([]byte, error) {
 	if data, ok := m.files[path]; ok {
 		return data, nil
 	}
@@ -52,22 +52,14 @@ func (m *mockPatcherSandbox) ReadFile(ctx context.Context, path string) ([]byte,
 	return nil, os.ErrNotExist
 }
 
-func (m *mockPatcherSandbox) ExecuteCommand(ctx context.Context, command string, args ...string) (string, error) {
-	return "", nil
-}
-
-func (m *mockPatcherSandbox) ApplyDraft(ctx context.Context, message string) error { return nil }
-func (m *mockPatcherSandbox) DeliverForReview(ctx context.Context) error           { return nil }
-func (m *mockPatcherSandbox) TearDown(ctx context.Context) error                   { return nil }
-
 func TestGoASTPatcher_InvalidJSON(t *testing.T) {
 	ctx := context.Background()
-	sandbox := newMockPatcherSandbox("")
+	ws := newMockPatcherWorkspace("")
 	patcher := golang.NewGoASTPatcher("mock instructions", true)
 
 	invalidPayload := `{"patches": [{"file": "main.go", `
 
-	err := patcher.Apply(ctx, sandbox, invalidPayload)
+	err := patcher.Apply(ctx, ws, invalidPayload)
 	if err == nil {
 		t.Fatalf("expected patcher to fail on fatally invalid json")
 	}
@@ -79,15 +71,15 @@ func TestGoASTPatcher_InvalidJSON(t *testing.T) {
 
 func TestGoASTPatcher_HealsBackslashSpaceAndMarkdownFences(t *testing.T) {
 	ctx := context.Background()
-	sandbox := newMockPatcherSandbox(t.TempDir())
+	ws := newMockPatcherWorkspace(t.TempDir())
 	patcher := golang.NewGoASTPatcher("mock instructions", false)
 
 	rawOutput := "```json\n{\"thought\":\"Applying fix\",\"patches\":[{\"file\":\"src/main.go\",\"action\":\"full_replace\",\"code\":\"package main\\n// hello\\ world\"}]}\n```"
-	if err := patcher.Apply(ctx, sandbox, rawOutput); err != nil {
+	if err := patcher.Apply(ctx, ws, rawOutput); err != nil {
 		t.Fatalf("expected patcher to heal backslash-space escape and markdown fences, got: %v", err)
 	}
 
-	got := string(sandbox.files["src/main.go"])
+	got := string(ws.files["src/main.go"])
 	if !strings.Contains(got, "// hello world") {
 		t.Errorf("expected healed Go source content, got:\n%s", got)
 	}
@@ -96,9 +88,9 @@ func TestGoASTPatcher_HealsBackslashSpaceAndMarkdownFences(t *testing.T) {
 func TestGoASTPatcher_FormatImports_AddsMissingImportsAndFormats(t *testing.T) {
 	ctx := context.Background()
 	sandboxRoot := t.TempDir()
-	sandbox := newMockPatcherSandbox(sandboxRoot)
+	ws := newMockPatcherWorkspace(sandboxRoot)
 
-	if err := sandbox.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n")); err != nil {
+	if err := ws.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n")); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -117,11 +109,11 @@ func TestGoASTPatcher_FormatImports_AddsMissingImportsAndFormats(t *testing.T) {
 		t.Fatalf("json.Marshal failed: %v", err)
 	}
 
-	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
+	if err := patcher.Apply(ctx, ws, string(payloadBytes)); err != nil {
 		t.Fatalf("unexpected patcher error: %v", err)
 	}
 
-	result := string(sandbox.files["src/main.go"])
+	result := string(ws.files["src/main.go"])
 	if !strings.Contains(result, `import "fmt"`) {
 		t.Errorf("expected goimports to inject missing \"fmt\" import, got:\n%s", result)
 	}
@@ -132,7 +124,7 @@ func TestGoASTPatcher_FormatImports_AddsMissingImportsAndFormats(t *testing.T) {
 
 func TestGoASTPatcher_FormatImports_DisabledLeavesSourceUntouched(t *testing.T) {
 	ctx := context.Background()
-	sandbox := newMockPatcherSandbox(t.TempDir())
+	ws := newMockPatcherWorkspace(t.TempDir())
 	patcher := golang.NewGoASTPatcher("mock instructions", false)
 
 	rawCode := "package main\nfunc main(){fmt.Println(\"hello\")}"
@@ -150,18 +142,18 @@ func TestGoASTPatcher_FormatImports_DisabledLeavesSourceUntouched(t *testing.T) 
 		t.Fatalf("json.Marshal failed: %v", err)
 	}
 
-	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
+	if err := patcher.Apply(ctx, ws, string(payloadBytes)); err != nil {
 		t.Fatalf("unexpected patcher error: %v", err)
 	}
 
-	if string(sandbox.files["src/main.go"]) != rawCode {
-		t.Errorf("expected raw code to remain untouched when formatImports is false, got:\n%s", string(sandbox.files["src/main.go"]))
+	if string(ws.files["src/main.go"]) != rawCode {
+		t.Errorf("expected raw code to remain untouched when formatImports is false, got:\n%s", string(ws.files["src/main.go"]))
 	}
 }
 
 func TestGoASTPatcher_FormatImports_SyntaxErrorFallsBackToRaw(t *testing.T) {
 	ctx := context.Background()
-	sandbox := newMockPatcherSandbox(t.TempDir())
+	ws := newMockPatcherWorkspace(t.TempDir())
 	patcher := golang.NewGoASTPatcher("mock instructions", true)
 
 	brokenCode := "package main\nfunc broken( {\n"
@@ -179,22 +171,22 @@ func TestGoASTPatcher_FormatImports_SyntaxErrorFallsBackToRaw(t *testing.T) {
 		t.Fatalf("json.Marshal failed: %v", err)
 	}
 
-	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
+	if err := patcher.Apply(ctx, ws, string(payloadBytes)); err != nil {
 		t.Fatalf("expected patcher to fall back gracefully on syntax error, got: %v", err)
 	}
 
-	if string(sandbox.files["src/main.go"]) != brokenCode {
-		t.Errorf("expected broken code to be written raw for compiler verification, got:\n%s", string(sandbox.files["src/main.go"]))
+	if string(ws.files["src/main.go"]) != brokenCode {
+		t.Errorf("expected broken code to be written raw for compiler verification, got:\n%s", string(ws.files["src/main.go"]))
 	}
 }
 
 func TestGoASTPatcher_ReplaceFunction_UpdatesImports(t *testing.T) {
 	ctx := context.Background()
-	sandbox := newMockPatcherSandbox(t.TempDir())
-	if err := sandbox.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n")); err != nil {
+	ws := newMockPatcherWorkspace(t.TempDir())
+	if err := ws.WriteFile(ctx, "src/go.mod", []byte("module testapp\n\ngo 1.24\n")); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
-	if err := sandbox.WriteFile(ctx, "src/main.go", []byte("package main\n\nimport \"strings\"\n\nfunc greet() string {\n\treturn strings.ToUpper(\"hi\")\n}\n")); err != nil {
+	if err := ws.WriteFile(ctx, "src/main.go", []byte("package main\n\nimport \"strings\"\n\nfunc greet() string {\n\treturn strings.ToUpper(\"hi\")\n}\n")); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -214,11 +206,11 @@ func TestGoASTPatcher_ReplaceFunction_UpdatesImports(t *testing.T) {
 		t.Fatalf("json.Marshal failed: %v", err)
 	}
 
-	if err := patcher.Apply(ctx, sandbox, string(payloadBytes)); err != nil {
+	if err := patcher.Apply(ctx, ws, string(payloadBytes)); err != nil {
 		t.Fatalf("unexpected patcher error: %v", err)
 	}
 
-	result := string(sandbox.files["src/main.go"])
+	result := string(ws.files["src/main.go"])
 	if !strings.Contains(result, `import "fmt"`) {
 		t.Errorf("expected \"fmt\" import to be added after replace_function, got:\n%s", result)
 	}
@@ -229,8 +221,8 @@ func TestGoASTPatcher_ReplaceFunction_UpdatesImports(t *testing.T) {
 
 func TestGoASTPatcher_AddCodeAndValidationErrors(t *testing.T) {
 	ctx := context.Background()
-	sandbox := newMockPatcherSandbox(t.TempDir())
-	if err := sandbox.WriteFile(ctx, "src/main.go", []byte("package main\n")); err != nil {
+	ws := newMockPatcherWorkspace(t.TempDir())
+	if err := ws.WriteFile(ctx, "src/main.go", []byte("package main\n")); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -242,11 +234,11 @@ func TestGoASTPatcher_AddCodeAndValidationErrors(t *testing.T) {
 			{"file": "src/main.go", "action": "add_code", "code": "func helper() {}"},
 		},
 	})
-	if err := patcher.Apply(ctx, sandbox, string(addPayload)); err != nil {
+	if err := patcher.Apply(ctx, ws, string(addPayload)); err != nil {
 		t.Fatalf("add_code failed: %v", err)
 	}
-	if !strings.Contains(string(sandbox.files["src/main.go"]), "func helper() {}") {
-		t.Errorf("expected helper() to be appended, got:\n%s", string(sandbox.files["src/main.go"]))
+	if !strings.Contains(string(ws.files["src/main.go"]), "func helper() {}") {
+		t.Errorf("expected helper() to be appended, got:\n%s", string(ws.files["src/main.go"]))
 	}
 
 	// Unsupported action must return an error instead of silently succeeding
@@ -255,7 +247,7 @@ func TestGoASTPatcher_AddCodeAndValidationErrors(t *testing.T) {
 			{"file": "src/main.go", "action": "delete_everything", "code": ""},
 		},
 	})
-	if err := patcher.Apply(ctx, sandbox, string(unknownActionPayload)); err == nil {
+	if err := patcher.Apply(ctx, ws, string(unknownActionPayload)); err == nil {
 		t.Errorf("expected error for unsupported patch action")
 	}
 
@@ -263,7 +255,7 @@ func TestGoASTPatcher_AddCodeAndValidationErrors(t *testing.T) {
 	traversalPayload, _ := json.Marshal(map[string]string{
 		"file": "../escape.go", "action": "full_replace", "code": "package main",
 	})
-	if err := patcher.Apply(ctx, sandbox, `{"patches":[`+string(traversalPayload)+`]}`); err == nil {
+	if err := patcher.Apply(ctx, ws, `{"patches":[`+string(traversalPayload)+`]}`); err == nil {
 		t.Errorf("expected error for path traversal in patch file")
 	}
 }

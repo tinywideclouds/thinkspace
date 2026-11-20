@@ -64,7 +64,7 @@ func main() {
 	dbPath := filepath.Join(baseRoot, ".graphdb")
 
 	if err := os.MkdirAll(repositoryRoot, 0755); err != nil {
-		logger.Error("Failed to create workspace directory", "error", err)
+		logger.Error("Failed to create thinkspace directory", "error", err)
 		os.Exit(1)
 	}
 	if err := os.MkdirAll(configurationsDirectory, 0755); err != nil {
@@ -113,7 +113,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("📂 Workspace root: %s\n", repositoryRoot)
+	fmt.Printf("📂 Thinkspace root: %s\n", repositoryRoot)
 	if *engineType == "exec" {
 		fmt.Println("⚙️  Engine: Git CLI (ExecEngine with Worktrees)")
 	} else {

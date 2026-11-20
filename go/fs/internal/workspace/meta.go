@@ -6,6 +6,8 @@ import (
 	"uuid"
 )
 
+const WorkbenchLocation = "workbench"
+
 // NodeChunk wraps a text chunk with its target graph node ID for UI multiplexing.
 type NodeChunk struct {
 	NodeID uuid.UUID

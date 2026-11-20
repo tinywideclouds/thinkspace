@@ -7,6 +7,7 @@ import (
 	"iter"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -52,6 +53,7 @@ func (client *weMockModelClient) GenerateContentStream(
 type weMockChatEngine struct {
 	mu           sync.Mutex
 	sandbox      *weMockSandbox
+	spawnCount   int
 	acceptCalled bool
 	rejectedIDs  []string
 	rejectReason string
@@ -83,6 +85,7 @@ func (m *weMockChatEngine) Reject(ctx context.Context, chatID string, candidateI
 func (m *weMockChatEngine) SpawnCandidateSandbox(ctx context.Context, chatID string, candidateID string) (workspace.CandidateSandbox, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.spawnCount++
 	m.sandbox = &weMockSandbox{candidateID: candidateID}
 	return m.sandbox, nil
 }
@@ -109,7 +112,7 @@ func (m *weMockSandbox) TearDown(ctx context.Context) error                   { 
 
 type weMockPatcher struct{}
 
-func (p *weMockPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSandbox, llmOutput string) error {
+func (p *weMockPatcher) Apply(ctx context.Context, fs workspace.FileWorkspace, llmOutput string) error {
 	return nil
 }
 func (p *weMockPatcher) SystemInstructions() string { return "" }
@@ -123,7 +126,7 @@ func (m *weMockThinkSpace) Initialize(ctx context.Context, directory string) err
 func (m *weMockThinkSpace) Config() spaces.ThinkStateConfig                        { return spaces.ThinkStateConfig{} }
 func (m *weMockThinkSpace) Patcher() workspace.Patcher                             { return &weMockPatcher{} }
 func (m *weMockThinkSpace) Verifier() spaces.Verifier                              { return m }
-func (m *weMockThinkSpace) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
+func (m *weMockThinkSpace) Verify(ctx context.Context, runner workspace.CommandRunner) error {
 	if m.verifyCalls < len(m.errsToReturn) {
 		err := m.errsToReturn[m.verifyCalls]
 		m.verifyCalls++
@@ -181,6 +184,17 @@ func (u *weMockUI) ConfirmTransition(targetThinkState string, reasoning string) 
 }
 func (u *weMockUI) GetChunkChannel() chan<- workspace.NodeChunk { return nil }
 
+func writeWorkbenchFile(t *testing.T, svc *workspace.Service, spaceID, relPath, content string) {
+	t.Helper()
+	full := filepath.Join(svc.WorkbenchDir(spaceID), filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+}
+
 func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -201,6 +215,7 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 	emitter := &weMockEmitter{}
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return engine }, graphDB, emitter)
 	service := svcManager.GetService("golang")
+	writeWorkbenchFile(t, service, "golang", "src/main.go", "package main\n")
 
 	chatSession := &thinkgraph.ChatAddress{
 		ChatID:    "chat-1",
@@ -270,6 +285,10 @@ func TestWorkerEngine_FanOutIntegration_TopologyAndEdges(t *testing.T) {
 
 	if synthSig.Flow == nil {
 		t.Fatalf("Expected SignalSynthesize to carry active FlowHandle for ownership handoff")
+	}
+
+	if len(synthSig.TargetFiles) != 1 || synthSig.TargetFiles[0] != "src/main.go" {
+		t.Errorf("Expected TargetFiles ['src/main.go'] to propagate into SignalSynthesize, got %v", synthSig.TargetFiles)
 	}
 
 	if len(engine.rejectedIDs) != 0 {
@@ -557,7 +576,7 @@ func TestWorkerEngine_FailedVerification_ReportsToMainAndAllowsAccept(t *testing
 	}
 }
 
-func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
+func TestWorkerEngine_FailFast_HallucinatedFile_BeforeSandboxCreation(t *testing.T) {
 	ctx := context.Background()
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	engine := &weMockChatEngine{}
@@ -618,13 +637,15 @@ func TestWorkerEngine_FailFast_HallucinatedFile(t *testing.T) {
 	if !strings.Contains(err.Error(), "fatal system errors") {
 		t.Errorf("expected fatal system error string, got: %v", err)
 	}
+	if engine.spawnCount != 0 {
+		t.Errorf("expected zero sandboxes to be spawned on pre-branch fail-fast, got %d", engine.spawnCount)
+	}
 }
 
 type workerReviewCapturingUI struct {
 	weMockUI
 	reviewCalls       []session.TurnContext
 	retainedFilePaths []string
-	capturedBundles   []cognition.ThinkBundle
 }
 
 func (u *workerReviewCapturingUI) ReviewContext(ctxData session.TurnContext) session.ContextApprovalDecision {
@@ -670,6 +691,8 @@ func TestWorkerEngine_BundledWorkerContextReviewAndFilePruning(t *testing.T) {
 
 	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return engine }, graphDB, nil)
 	service := svcManager.GetService("golang")
+	writeWorkbenchFile(t, service, "golang", "src/keep.go", "package main\nfunc keep() {}\n")
+	writeWorkbenchFile(t, service, "golang", "src/drop.go", "package main\nfunc drop() {}\n")
 
 	chatSession := &thinkgraph.ChatAddress{
 		ChatID:    "chat-worker-review",
@@ -683,7 +706,6 @@ func TestWorkerEngine_BundledWorkerContextReviewAndFilePruning(t *testing.T) {
 		t.Fatalf("InitializeChat failed: %v", err)
 	}
 
-	// Disable Manager review policy while enabling WorkerReviewPolicy with low threshold
 	if err := svcManager.UpdateSpaceSettings("golang", func(s *workspace.SpaceSettings) {
 		s.ReviewPolicy.Active = false
 		s.WorkerReviewPolicy.Active = true
@@ -730,9 +752,11 @@ func TestWorkerEngine_BundledWorkerContextReviewAndFilePruning(t *testing.T) {
 		t.Fatalf("WorkerEngine.Execute failed: %v", err)
 	}
 
-	// Both parallel agents must be bundled into a SINGLE ReviewContext call
 	if len(ui.reviewCalls) != 1 {
 		t.Fatalf("expected 1 bundled ReviewContext call for 2 parallel agents, got %d", len(ui.reviewCalls))
+	}
+	if ui.reviewCalls[0].Stage != session.ContextStageWorker {
+		t.Errorf("expected TurnContext.Stage to be ContextStageWorker, got %v", ui.reviewCalls[0].Stage)
 	}
 	if ui.reviewCalls[0].PreviewID == "" {
 		t.Errorf("expected PreviewID to be populated on bundled worker TurnContext")
@@ -741,7 +765,6 @@ func TestWorkerEngine_BundledWorkerContextReviewAndFilePruning(t *testing.T) {
 		t.Errorf("expected saved context preview %s to be readable from disk: %v", ui.reviewCalls[0].PreviewID, err)
 	}
 
-	// Verify unchecked file src/drop.go was pruned from all worker bundles before LLM execution
 	if len(recordingClient.capturedBundles) != 2 {
 		t.Fatalf("expected 2 worker LLM executions, got %d", len(recordingClient.capturedBundles))
 	}
@@ -749,5 +772,90 @@ func TestWorkerEngine_BundledWorkerContextReviewAndFilePruning(t *testing.T) {
 		if len(b.Workbench) != 1 || b.Workbench[0].Path != "src/keep.go" {
 			t.Errorf("worker %d expected only retained file 'src/keep.go', got %+v", i+1, b.Workbench)
 		}
+	}
+}
+
+func TestWorkerEngine_AbortContextReview_SpawnsZeroSandboxesAndNoFlowCard(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	engine := &weMockChatEngine{}
+	workspaceRoot := t.TempDir()
+
+	opts := badger.DefaultOptions("").WithInMemory(true).WithLogger(nil)
+	graphDB, err := db.NewBadgerGraph(opts)
+	if err != nil {
+		t.Fatalf("failed to init badger: %v", err)
+	}
+	defer graphDB.Close()
+
+	svcManager := workspace.NewServiceManager(logger, workspaceRoot, func(string) workspace.ChatVersioner { return engine }, graphDB, nil)
+	service := svcManager.GetService("golang")
+	writeWorkbenchFile(t, service, "golang", "src/main.go", "package main\n")
+
+	chatSession := &thinkgraph.ChatAddress{
+		ChatID:    "chat-worker-abort",
+		ProjectID: "golang",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+	if err := service.InitializeChat(ctx, chatSession); err != nil {
+		t.Fatalf("InitializeChat failed: %v", err)
+	}
+
+	if err := svcManager.UpdateSpaceSettings("golang", func(s *workspace.SpaceSettings) {
+		s.WorkerReviewPolicy.Active = true
+		s.WorkerReviewPolicy.MinTokens = 1
+	}); err != nil {
+		t.Fatalf("UpdateSpaceSettings failed: %v", err)
+	}
+
+	registry := config.NewRegistry()
+	mockSpace := &weMockThinkSpace{}
+	registry.RegisterThinkState("golang", mockSpace)
+	registry.RegisterConfig("golang", mockSpace.Config())
+	if err := svcManager.UpdateSpaceState("golang", func(s *workspace.SpaceState) { s.ThinkState = "golang" }); err != nil {
+		t.Fatalf("UpdateSpaceState failed: %v", err)
+	}
+	scaffoldChat(t, workspaceRoot, "golang", "chat-worker-abort")
+
+	turnExecutor := session.NewTurnExecutor(logger, &weMockModelClient{}, service)
+	fanOutFlow := flows.NewFanOutFlow(logger, flows.FanOutConfig{MaxSteps: 10})
+
+	sessionManager := session.NewManager(logger, registry, svcManager, &weMockModelClient{}, fanOutFlow, nil)
+	chatSupervisor, err := sessionManager.GetSession(ctx, "golang", "chat-worker-abort")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+
+	workerEngine := session.NewWorkerEngine(logger, chatSupervisor, registry, service, turnExecutor, service.Dispatcher(), fanOutFlow)
+	ui := &workerReviewCapturingUI{
+		weMockUI: weMockUI{reviewToReturn: false},
+	}
+
+	dispatchSignal := &signals.SignalDispatchFlow{
+		Intention: "Aborted sub-agent batch",
+		Tasks: []flows.SubAgentTask{
+			{AgentID: "agent-1", Instruction: "Draft", TargetFiles: []string{"src/main.go"}},
+		},
+	}
+
+	sig, err := workerEngine.Execute(ctx, chatSession, uuid.NewV7(), uuid.NewV7(), dispatchSignal, ui, nil)
+	if err != nil {
+		t.Fatalf("expected clean terminal signal on user abort, got error: %v", err)
+	}
+	if !sig.IsTerminal() {
+		t.Errorf("expected SignalTerminal on user abort, got %T", sig)
+	}
+	if engine.spawnCount != 0 {
+		t.Errorf("expected zero candidate sandboxes spawned when sub-agent preview was aborted, got %d", engine.spawnCount)
+	}
+	mainTimeline, err := service.Graph().GetSubGraphTimeline(ctx, chatSession, chatSession.GraphID)
+	if err != nil {
+		t.Fatalf("GetSubGraphTimeline failed: %v", err)
+	}
+	if len(mainTimeline) != 0 {
+		t.Errorf("expected zero Flow Cards on main timeline when sub-agent preview was aborted, got %d nodes", len(mainTimeline))
 	}
 }

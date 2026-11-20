@@ -1,13 +1,19 @@
-import { Injectable, signal } from '@angular/core';
-import { 
-  AttentionFocus, 
-  DigestMeta, 
-  FileContextMetaData, 
-  PreviewContext 
+import { Injectable, inject, signal } from '@angular/core';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import {
+  AttentionFocus,
+  DigestMeta,
+  FileContextMetaData,
+  PreviewContext
 } from '@org/llm-core-facade';
+import { ThinkspaceStateService } from './thinkspace-state.service';
 
 @Injectable({ providedIn: 'root' })
 export class CognitiveStore {
+  private httpClient = inject(HttpClient);
+  private thinkspace = inject(ThinkspaceStateService);
+
   public activeFocus = signal<AttentionFocus | null>(null);
   public activeDigests = signal<Record<string, DigestMeta>>({});
   public activeWorkbench = signal<FileContextMetaData[]>([]);
@@ -19,9 +25,27 @@ export class CognitiveStore {
 
   public autoApproveContext = signal<boolean>(false);
 
-  public copyFullContextPreview(previewId: string): void {
-    console.log(`[CognitiveStore] Copying full context preview for ${previewId}`);
-    navigator.clipboard.writeText(`Mock Full Context Payload for ${previewId}`);
+  public async copyFullContextPreview(previewId: string): Promise<void> {
+    const pending = this.pendingContextReview();
+    const spaceId = this.thinkspace.activeSpaceId() || pending?.spaceId;
+    const chatId = this.thinkspace.activeChatId() || pending?.chatId;
+
+    if (!previewId || !spaceId || !chatId) {
+      console.warn('[CognitiveStore] Missing previewId, spaceId, or chatId for preview fetch');
+      return;
+    }
+
+    const params = new HttpParams().set('space', spaceId);
+    const url = `/api/previews/${encodeURIComponent(chatId)}/${encodeURIComponent(previewId)}`;
+
+    try {
+      const markdown = await firstValueFrom(
+        this.httpClient.get(url, { params, responseType: 'text' })
+      );
+      await navigator.clipboard.writeText(markdown);
+    } catch (error) {
+      console.error(`[CognitiveStore] Failed to fetch context preview ${previewId}`, error);
+    }
   }
 
   public clearSession(): void {

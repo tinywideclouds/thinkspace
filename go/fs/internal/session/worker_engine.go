@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -19,6 +20,8 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
+
+var errSubAgentReviewAborted = errors.New("sub-agent execution aborted by user during context review")
 
 type WorkerEngine struct {
 	logger          *slog.Logger
@@ -144,6 +147,18 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 
 		switch directive.Action {
 		case flows.ActionSpawnAgents:
+			if len(directive.Tasks) == 0 {
+				return nil, fmt.Errorf("spawnAgents called with empty task list")
+			}
+
+			preparedBundles, prepErr := engine.prepareAndReviewWorkers(ctx, chatSession, flowID, space, flowContext, directive.Tasks, ui)
+			if prepErr != nil {
+				if errors.Is(prepErr, errSubAgentReviewAborted) {
+					return &signals.SignalTerminal{}, nil
+				}
+				return nil, fmt.Errorf("fatal system errors aborted execution: %w", prepErr)
+			}
+
 			ev := thinkgraph.NewEvent(flows.EventFlowLifecycle, flowContext.FlowSummary)
 			ev.ID = flowID
 			ev.Edges = map[string]string{"parent_id": turnID.String()}
@@ -163,7 +178,7 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 				return nil, fmt.Errorf("failed to initialize flow anchor in graph: %w", err)
 			}
 
-			candidates, returnedJoinID, records, err := engine.spawnAgents(ctx, chatSession, flowAddress, flowID, scope, space, flowContext, directive.Tasks, turnID, ui, emitter)
+			candidates, returnedJoinID, records, err := engine.spawnAgents(ctx, chatSession, flowAddress, scope, space, flowContext, directive.Tasks, preparedBundles, turnID, ui, emitter)
 			if err != nil {
 				return nil, err
 			}
@@ -199,12 +214,23 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 					ID:        uuid.NewV7(),
 					Type:      "flow_status",
 					Timestamp: time.Now(),
-					Message:   "Preparing candidate results for Manager synthesis...",
+					Message:   "Preparing candidate proposals for synthesis...",
 				})
 			}
 
 			if len(directive.Tasks) == 0 {
 				return nil, fmt.Errorf("synthesis requires a refine prompt instruction")
+			}
+
+			var allTargets []string
+			seenTargets := make(map[string]bool)
+			for _, t := range state.InitialTasks {
+				for _, f := range t.TargetFiles {
+					if !seenTargets[f] {
+						seenTargets[f] = true
+						allTargets = append(allTargets, f)
+					}
+				}
 			}
 
 			signal := &signals.SignalSynthesize{
@@ -214,6 +240,7 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 				FlowAddress:         flowAddress,
 				ParentNodeID:        optionsNodeID,
 				AutoAccept:          directive.AutoAccept,
+				TargetFiles:         allTargets,
 			}
 
 			if len(state.InitialTasks) > 0 {
@@ -290,11 +317,6 @@ func (engine *WorkerEngine) Execute(ctx context.Context, chatSession *thinkgraph
 	return nil, fmt.Errorf("flow '%s' exceeded its maximum execution limit of %d steps without resolving", engine.flow.Name(), maxSteps)
 }
 
-type preparedSubAgent struct {
-	sandbox workspace.CandidateSandbox
-	bundle  cognition.ThinkBundle
-}
-
 func (engine *WorkerEngine) prepareAndReviewWorkers(
 	ctx context.Context,
 	chatSession *thinkgraph.ChatAddress,
@@ -303,31 +325,17 @@ func (engine *WorkerEngine) prepareAndReviewWorkers(
 	flowContext flows.FlowContext,
 	tasks []flows.SubAgentTask,
 	ui UserInterface,
-) ([]preparedSubAgent, error) {
-	prepared := make([]preparedSubAgent, 0, len(tasks))
-	cleanupAll := func() {
-		for _, p := range prepared {
-			if p.sandbox != nil {
-				_ = p.sandbox.TearDown(ctx)
-			}
-		}
+) ([]cognition.ThinkBundle, error) {
+	if engine.service == nil {
+		return nil, fmt.Errorf("workspace service is nil")
 	}
 
-	wb := workspace.NewWorkbench()
+	reader := engine.service.WorkbenchReader(chatSession)
 	bundles := make([]cognition.ThinkBundle, 0, len(tasks))
 
 	for _, task := range tasks {
-		candidateID := fmt.Sprintf("%s-%s-%s", chatSession.ChatID, flowContext.FlowID, task.AgentID)
-		sandbox, err := engine.service.SpawnSandbox(ctx, chatSession.ChatID, candidateID)
-		if err != nil {
-			cleanupAll()
-			return nil, err
-		}
-
-		items, buildErr := wb.Build(ctx, sandbox, task.TargetFiles)
+		items, buildErr := workspace.ReadFileContext(ctx, reader, task.TargetFiles)
 		if buildErr != nil {
-			_ = sandbox.TearDown(ctx)
-			cleanupAll()
 			return nil, buildErr
 		}
 
@@ -340,27 +348,23 @@ func (engine *WorkerEngine) prepareAndReviewWorkers(
 			task.Instruction,
 			items,
 		)
-
-		prepared = append(prepared, preparedSubAgent{sandbox: sandbox, bundle: bundle})
 		bundles = append(bundles, bundle)
 	}
 
 	if ui == nil || engine.session == nil || engine.session.workspaceManager == nil {
-		return prepared, nil
+		return bundles, nil
 	}
 
 	settings, err := engine.session.workspaceManager.GetSpaceSettings(chatSession.ProjectID)
 	if err != nil {
-		cleanupAll()
 		return nil, fmt.Errorf("loading space settings for worker context review: %w", err)
 	}
 
 	policy := engine.session.WorkerReviewPolicy()
 	combinedBundle := BuildBundledWorkerThinkBundle(tasks, bundles)
-	policyWrapper := workspace.SpaceSettings{ReviewPolicy: settings.WorkerReviewPolicy}
+	turnContext := ProjectTurnContext(chatSession.ProjectID, chatSession.ChatID, flowID, ContextStageWorker, &combinedBundle, thinkgraph.AttentionFocus{})
 
-	if policy.ShouldReview(policyWrapper, flowID, &combinedBundle, thinkgraph.AttentionFocus{}) {
-		turnContext := ProjectTurnContext(chatSession.ProjectID, chatSession.ChatID, flowID, &combinedBundle, thinkgraph.AttentionFocus{})
+	if policy.ShouldReview(settings.WorkerReviewPolicy, turnContext) {
 		previewTitle := fmt.Sprintf("Sub-Agent Batch Context Preview (%d agent(s))", len(tasks))
 		previewMarkdown := FormatBundlePreviewMarkdown(previewTitle, &combinedBundle)
 		if previewID, saveErr := engine.service.SaveContextPreview(ctx, chatSession, previewMarkdown); saveErr != nil {
@@ -373,8 +377,7 @@ func (engine *WorkerEngine) prepareAndReviewWorkers(
 
 		decision := ui.ReviewContext(turnContext)
 		if !decision.Approved {
-			cleanupAll()
-			return nil, fmt.Errorf("sub-agent execution aborted by user during context review")
+			return nil, errSubAgentReviewAborted
 		}
 
 		if decision.RetainedFilePaths != nil {
@@ -382,38 +385,34 @@ func (engine *WorkerEngine) prepareAndReviewWorkers(
 			for _, p := range decision.RetainedFilePaths {
 				retainedPaths[p] = true
 			}
-			for i := range prepared {
+			for i := range bundles {
 				var prunedWorkbench []cognition.WorkbenchItem
-				for _, item := range prepared[i].bundle.Workbench {
+				for _, item := range bundles[i].Workbench {
 					if retainedPaths[item.Path] {
 						prunedWorkbench = append(prunedWorkbench, item)
 					}
 				}
-				prepared[i].bundle.Workbench = prunedWorkbench
+				bundles[i].Workbench = prunedWorkbench
 			}
 		}
 	}
 
-	return prepared, nil
+	return bundles, nil
 }
 
 func (engine *WorkerEngine) spawnAgents(
 	ctx context.Context,
 	chatSession *thinkgraph.ChatAddress,
 	flowAddress *thinkgraph.ChatAddress,
-	flowID uuid.UUID,
 	scope *FlowScope,
 	space spaces.ThinkState,
 	flowContext flows.FlowContext,
 	tasks []flows.SubAgentTask,
+	preparedBundles []cognition.ThinkBundle,
 	managerNodeID uuid.UUID,
 	ui UserInterface,
 	emitter telemetry.Emitter,
 ) ([]flows.Candidate, uuid.UUID, []flows.AgentRecord, error) {
-	if len(tasks) == 0 {
-		return nil, uuid.Nil(), nil, fmt.Errorf("spawnAgents called with empty task list")
-	}
-
 	if engine.logger != nil {
 		engine.logger.InfoContext(ctx, "WorkerEngine spawning agents", "flow_id", flowContext.FlowID, "manager_node_id_parent", managerNodeID, "task_count", len(tasks))
 	}
@@ -450,20 +449,11 @@ func (engine *WorkerEngine) spawnAgents(
 		return nil, uuid.Nil(), records, err
 	}
 
-	prepared, prepErr := engine.prepareAndReviewWorkers(ctx, chatSession, flowID, space, flowContext, tasks, ui)
-	if prepErr != nil {
-		if failErr := scope.Fail(ctx, "Flow aborted before sub-agent execution.", prepErr.Error(), records, ui); failErr != nil && engine.logger != nil {
-			engine.logger.ErrorContext(ctx, "failed recording flow abort state", "error", failErr)
-		}
-		return nil, uuid.Nil(), records, fmt.Errorf("fatal system errors aborted execution: %w", prepErr)
-	}
-
 	results := make(chan SubAgentResult, len(tasks))
 
 	for i, task := range tasks {
-		prep := prepared[i]
-		go func(agentIndex int, t flows.SubAgentTask, p preparedSubAgent) {
-			bundleCopy := p.bundle
+		bundleCopy := preparedBundles[i]
+		go func(agentIndex int, t flows.SubAgentTask, b cognition.ThinkBundle) {
 			results <- engine.runner.Run(ctx, SubAgentRunRequest{
 				ChatSession:       chatSession,
 				FlowAddress:       flowAddress,
@@ -473,13 +463,12 @@ func (engine *WorkerEngine) spawnAgents(
 				Task:              t,
 				AgentIndex:        agentIndex,
 				ParentNodeID:      managerNodeID,
-				PrebuiltSandbox:   p.sandbox,
-				PrebuiltBundle:    &bundleCopy,
+				PrebuiltBundle:    &b,
 				SkipContextReview: true,
 				UI:                ui,
 				Emitter:           emitter,
 			})
-		}(i+1, task, prep)
+		}(i+1, task, bundleCopy)
 	}
 
 	for i := 0; i < len(tasks); i++ {

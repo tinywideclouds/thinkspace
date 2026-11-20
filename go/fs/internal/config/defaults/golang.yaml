@@ -48,7 +48,7 @@ golang:
           agent_instructions_description: "An array of explicit instruction objects, exactly matching the agent_count. You MUST provide fundamentally different instructions for each agent to ensure diverse approaches."
           context_digest_description: "A brief, grounding summary of the overarching project goal and current architecture. Used to give the sub-agent context before executing its specific instruction."
           instruction_description: "Explicit instructions for the sub-agents detailing exactly what code to write, including architectural constraints or algorithms to use."
-          target_files_description: "An array of EXISTING file paths to load into the sub-agent's context for reference. ONLY include files that are already explicitly listed in the Mapbook Directory Tree. DO NOT include new files you intend to create. If scaffolding a new project or no existing context is needed, you MUST provide an empty array `[]`"
+          target_files_description: "Optional array of existing file paths from the Mapbook Directory Tree whose full contents sub-agents need to read or modify (such as `src/go.mod`, routers, entrypoints, or interfaces being integrated). Consider whether AST skeletons alone are sufficient or if full source context is needed. Do not include brand-new files that do not exist yet."
         
         query_lens:
           description: "Query the workspace history for deep context on a specific conceptual tag when it is missing from the recent trajectory."

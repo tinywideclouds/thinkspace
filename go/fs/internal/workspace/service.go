@@ -47,8 +47,8 @@ func (s *Service) WorkspaceRoot() string {
 	return s.workspaceRoot
 }
 
-func (s *Service) ProjectWorkspaceDir(projectID string) string {
-	return filepath.Join(s.workspaceRoot, projectID, "workspace")
+func (s *Service) WorkbenchDir(projectID string) string {
+	return filepath.Join(s.workspaceRoot, projectID, WorkbenchLocation)
 }
 
 func (s *Service) Graph() thinkgraph.GraphRepository {
@@ -506,4 +506,15 @@ func (s *Service) SaveLLMContextDump(ctx context.Context, c *thinkgraph.ChatAddr
 	}
 
 	return path, nil
+}
+
+// WorkspaceReader returns a contained FileReader backed by the pre-branched workspace on disk.
+func (s *Service) WorkbenchReader(c *thinkgraph.ChatAddress) FileReader {
+	if c == nil {
+		return &WorkbenchReader{}
+	}
+	return &WorkbenchReader{
+		projectDir: s.WorkbenchDir(c.ProjectID),
+		chatID:     c.ChatID,
+	}
 }

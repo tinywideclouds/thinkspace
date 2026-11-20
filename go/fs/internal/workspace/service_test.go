@@ -431,3 +431,48 @@ func TestService_NilDependencyGuards(t *testing.T) {
 		t.Errorf("expected error when dispatcher is nil")
 	}
 }
+
+func TestService_WorkbenchReader(t *testing.T) {
+	svc, _, workspaceRoot := setupServiceTest(t)
+	ctx := context.Background()
+
+	chat := &thinkgraph.ChatAddress{
+		ChatID:    "reader-chat",
+		ProjectID: "test-space",
+		SubGraph: thinkgraph.SubGraph{
+			Name:    "main",
+			GraphID: thinkgraph.NewGraphID(thinkgraph.PrefixChat),
+		},
+	}
+
+	sharedFile := filepath.Join(workspaceRoot, chat.ProjectID, "workbench", "src", "main.go")
+	if err := os.MkdirAll(filepath.Dir(sharedFile), 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(sharedFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	jailedFile := filepath.Join(workspaceRoot, chat.ProjectID, "workbench", "chats", chat.ChatID, "docs", "spec.md")
+	if err := os.MkdirAll(filepath.Dir(jailedFile), 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(jailedFile, []byte("# Spec\n"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	items, err := workspace.ReadFileContext(ctx, svc.WorkbenchReader(chat), []string{"src/main.go", "docs/spec.md"})
+	if err != nil {
+		t.Fatalf("ReadFileContexts with WorkbenchReader failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 workbench items, got %d", len(items))
+	}
+	if items[0].Content != "package main\n" || items[1].Content != "# Spec\n" {
+		t.Errorf("unexpected file contents: %+v", items)
+	}
+
+	if _, err := workspace.ReadFileContext(ctx, svc.WorkbenchReader(chat), []string{"../meta.json"}); err == nil {
+		t.Errorf("expected path traversal to be rejected")
+	}
+}

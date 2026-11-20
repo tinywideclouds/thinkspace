@@ -40,7 +40,7 @@ type PatchRequest struct {
 	Code   string `json:"code"`
 }
 
-func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSandbox, llmOutput string) error {
+func (p *GoASTPatcher) Apply(ctx context.Context, fs workspace.FileWorkspace, llmOutput string) error {
 	cleanedOutput := llmOutput
 	if healed, modified := llm.DefaultJSONHealer().Heal(llmOutput); modified {
 		cleanedOutput = healed
@@ -73,22 +73,22 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 
 		switch patch.Action {
 		case "full_replace":
-			if err := p.writeFile(ctx, sandbox, cleanPath, []byte(patch.Code)); err != nil {
+			if err := p.writeFile(ctx, fs, cleanPath, []byte(patch.Code)); err != nil {
 				return err
 			}
 
 		case "add_code":
-			src, err := sandbox.ReadFile(ctx, cleanPath)
+			src, err := fs.ReadFile(ctx, cleanPath)
 			if err != nil {
 				return fmt.Errorf("cannot patch missing file %s (use full_replace to create new files): %w", cleanPath, err)
 			}
 			combined := append(slices.Clone(src), []byte("\n\n"+patch.Code)...)
-			if err := p.writeFile(ctx, sandbox, cleanPath, combined); err != nil {
+			if err := p.writeFile(ctx, fs, cleanPath, combined); err != nil {
 				return err
 			}
 
 		case "replace_function":
-			src, err := sandbox.ReadFile(ctx, cleanPath)
+			src, err := fs.ReadFile(ctx, cleanPath)
 			if err != nil {
 				return fmt.Errorf("cannot patch missing file %s (use full_replace to create new files): %w", cleanPath, err)
 			}
@@ -96,7 +96,7 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 			if err != nil {
 				return fmt.Errorf("failed to apply AST patch to %s: %w", cleanPath, err)
 			}
-			if err := p.writeFile(ctx, sandbox, cleanPath, newSrc); err != nil {
+			if err := p.writeFile(ctx, fs, cleanPath, newSrc); err != nil {
 				return err
 			}
 
@@ -108,11 +108,11 @@ func (p *GoASTPatcher) Apply(ctx context.Context, sandbox workspace.CandidateSan
 	return nil
 }
 
-func (p *GoASTPatcher) writeFile(ctx context.Context, sandbox workspace.CandidateSandbox, cleanPath string, data []byte) error {
+func (p *GoASTPatcher) writeFile(ctx context.Context, fs workspace.FileWorkspace, cleanPath string, data []byte) error {
 	out := data
 	if p.formatImports && strings.HasSuffix(cleanPath, ".go") {
 		targetPath := cleanPath
-		if resolved := sandbox.ResolvePath(cleanPath); resolved != "" {
+		if resolved := fs.ResolvePath(cleanPath); resolved != "" {
 			targetPath = resolved
 		}
 
@@ -124,7 +124,7 @@ func (p *GoASTPatcher) writeFile(ctx context.Context, sandbox workspace.Candidat
 		}
 	}
 
-	return sandbox.WriteFile(ctx, cleanPath, out)
+	return fs.WriteFile(ctx, cleanPath, out)
 }
 
 func (p *GoASTPatcher) replaceFunctionAST(src []byte, funcName string, newCode string) ([]byte, error) {

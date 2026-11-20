@@ -7,24 +7,16 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/cognition"
 )
 
-// Workbench assembles the Just-In-Time file context requested by the Manager.
-type Workbench struct{}
-
-func NewWorkbench() *Workbench {
-	return &Workbench{}
-}
-
-// Build reads requested files from the agent's sandbox.
-// It fails fast and returns an error if the Manager hallucinated a file path.
-func (w *Workbench) Build(ctx context.Context, sandbox CandidateSandbox, targetFiles []string) ([]cognition.WorkbenchItem, error) {
+// ReadFileContext reads requested target files from a FileReader and estimates token counts.
+// It fails fast and returns an error if any requested file path does not exist or cannot be read.
+func ReadFileContext(ctx context.Context, reader FileReader, targetFiles []string) ([]cognition.WorkbenchItem, error) {
 	if len(targetFiles) == 0 {
 		return nil, nil
 	}
 
-	var items []cognition.WorkbenchItem
-
+	items := make([]cognition.WorkbenchItem, 0, len(targetFiles))
 	for _, filePath := range targetFiles {
-		content, err := sandbox.ReadFile(ctx, filePath)
+		content, err := reader.ReadFile(ctx, filePath)
 		if err != nil {
 			return nil, fmt.Errorf("fail-fast: requested target file '%s' does not exist or cannot be read: %w", filePath, err)
 		}

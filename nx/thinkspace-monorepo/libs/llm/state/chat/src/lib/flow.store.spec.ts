@@ -14,7 +14,7 @@ describe('FlowStore', () => {
     store = TestBed.inject(FlowStore);
   });
 
-  it('should process telemetry events and update flow states independently', () => {
+  it('should process telemetry events and update flow and agent states across channels', () => {
     store.processTelemetry({
       type: 'telemetry_event',
       channel: 'manager',
@@ -57,6 +57,31 @@ describe('FlowStore', () => {
       type: 'telemetry_event',
       channel: 'manager',
       id: '3',
+      eventType: 'flow_complete',
+      timestamp: Temporal.Now.instant(),
+      message: 'Flow pipeline completed',
+      summary: '',
+      payload: {
+        type: 'agent',
+        flowId: 'f1',
+        agentId: 'agent-1',
+        agentIndex: 1,
+        instruction: '',
+        attempt: 1,
+        trace: '',
+        candidateId: 'cand-1',
+        passed: true
+      }
+    });
+
+    const agentState = store.flowStates().get('f1')?.agents.get('agent-1');
+    expect(agentState?.status).toBe('completed');
+    expect(agentState?.passed).toBe(true);
+
+    store.processTelemetry({
+      type: 'telemetry_event',
+      channel: 'manager',
+      id: '4',
       eventType: 'flow_complete',
       timestamp: Temporal.Now.instant(),
       message: '',

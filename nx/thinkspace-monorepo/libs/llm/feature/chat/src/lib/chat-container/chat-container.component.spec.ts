@@ -13,6 +13,7 @@ import {
 } from '@org/llm-state-chat';
 import { 
   PreviewContext, 
+  ContextStage,
   FileContextMetaData, 
   AttentionFocus 
 } from '@org/llm-core-facade';
@@ -184,8 +185,9 @@ describe('ChatContainerComponent', () => {
       spaceId: 'space-1',
       chatId: 'chat-1',
       previewId: 'prev-123',
+      stage: ContextStage.MANAGER,
       managerSystemPrompt: 'System rules',
-      stickyDigests: [],
+      longTermMemory: [],
       recentHistory: ['[user] hello'],
       fileContexts: [{ path: 'src/main.go', level: 'injected', tokenCount: 120 }],
       focus: { primaryFocus: [], relatedContext: [], dormantLenses: [] }

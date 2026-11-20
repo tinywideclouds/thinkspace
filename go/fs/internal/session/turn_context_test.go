@@ -44,7 +44,7 @@ func TestProjectTurnContext(t *testing.T) {
 		},
 	}
 
-	turnContext := session.ProjectTurnContext(spaceID, chatID, responseID, bundle, focus)
+	turnContext := session.ProjectTurnContext(spaceID, chatID, responseID, session.ContextStageManager, bundle, focus)
 
 	if turnContext.SpaceID != spaceID {
 		t.Errorf("expected SpaceID %s, got %s", spaceID, turnContext.SpaceID)
@@ -55,11 +55,14 @@ func TestProjectTurnContext(t *testing.T) {
 	if turnContext.ResponseID != responseID {
 		t.Errorf("expected ResponseID %s, got %s", responseID, turnContext.ResponseID)
 	}
+	if turnContext.Stage != session.ContextStageManager {
+		t.Errorf("expected Stage ContextStageManager, got %v", turnContext.Stage)
+	}
 	if turnContext.ManagerSystemPrompt != "System instructions" {
 		t.Errorf("expected ManagerSystemPrompt 'System instructions', got %s", turnContext.ManagerSystemPrompt)
 	}
 	if len(turnContext.LongTermMemory) != 1 || turnContext.LongTermMemory[0] != "Sticky digest entry" {
-		t.Errorf("unexpected StickyDigests: %v", turnContext.LongTermMemory)
+		t.Errorf("unexpected LongTermMemory: %v", turnContext.LongTermMemory)
 	}
 	if len(turnContext.RecentHistory) != 3 {
 		t.Fatalf("expected 3 history entries (including catalyst), got %d", len(turnContext.RecentHistory))
@@ -71,7 +74,6 @@ func TestProjectTurnContext(t *testing.T) {
 		t.Errorf("unexpected Catalyst formatting: %v", turnContext.RecentHistory[2])
 	}
 
-	// Expect main.go (injected, 150t) + internal/handler/hello.go (skeleton, 0t) + go.mod (structural, 0t)
 	if len(turnContext.FileContexts) != 3 {
 		t.Fatalf("expected 3 deduplicated file contexts, got %d: %+v", len(turnContext.FileContexts), turnContext.FileContexts)
 	}

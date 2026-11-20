@@ -29,7 +29,7 @@ fanout:
     {{ end }}
 
   refine_prompt: |
-    The automated sub-agents have completed their proposals. Please evaluate the following candidate diffs. Write a detailed comparative summary. Based on your evaluation, your comparative analysis will be provided as background architectural guidance for a single, final sub-agent to synthesize the ultimate best version.
+    The automated sub-agents have completed their proposals. Please evaluate the following candidate proposals. Write a detailed comparative summary. Based on your evaluation, your comparative analysis will be provided as background architectural guidance for a single, final sub-agent to synthesize the ultimate best version.
 
     ### Candidate Branches
 
@@ -42,16 +42,19 @@ fanout:
     {{ .Trace }}
     </trace>
     {{ end }}
-    <diff>
-    {{ .Diff }}
-    </diff>
+    {{ .Projection }}
     {{ end }}
 
   synthesize_prompt: |
-    Synthesize a single, unified implementation combining the strongest architectural patterns from the candidate branches, strictly following the Manager's comparative evaluation in your background context.
+    Find the best architectural patterns and implementations across the candidate branches in your background context and merge them into a single, unified solution.
+    In your JSON `"thought"` field (or introductory prose before patch blocks), explicitly explain which patterns or components you adopted from each candidate branch and why.
 
   synthesis_review_prompt: |
-    The synthesis sub-agent has completed its unified proposal (`{{ .CandidateID }}`). Write a clear summary of the synthesized changes and verification status for the human user to review and approve.
+    The synthesis sub-agent has completed its unified proposal (`{{ .CandidateID }}`). Write a clear summary of the synthesized changes, the merge rationale, and verification status for the human user to review and approve.
+    {{ if .Reasoning }}
+    ### Synthesis Agent Merge Rationale
+    {{ .Reasoning }}
+    {{ end }}
     {{ if not .Passed }}
     ⚠️ **VERIFICATION FAILED**:
     <trace>

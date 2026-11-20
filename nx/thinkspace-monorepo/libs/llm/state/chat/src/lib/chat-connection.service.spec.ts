@@ -8,7 +8,7 @@ import { CognitiveStore } from './cognitive.store';
 import { ThinkspaceStateService } from './thinkspace-state.service';
 import { UiSettingsService } from './ui-settings.service';
 import { Subject } from 'rxjs';
-import { AppEvent, PreviewContext, AttentionFocus, DigestMeta, FileContextMetaData } from '@org/llm-core-facade';
+import { AppEvent, ContextStage, PreviewContext, AttentionFocus, DigestMeta, FileContextMetaData } from '@org/llm-core-facade';
 import { WSEvent, WSEventSchema } from '@org/llm-core-protos';
 import { fromJson, JsonValue } from '@bufbuild/protobuf';
 import { describe, beforeEach, afterEach, it, expect, vi, Mock } from 'vitest';
@@ -169,9 +169,10 @@ describe('ChatConnectionService', () => {
     }
   });
 
-  it('should route sync_history into GraphStore projection logic', () => {
+  it('should route sync_history into GraphStore projection logic and reset digests when empty', () => {
     const spyUpsert = vi.spyOn(graphStore, 'upsert');
     const spyReset = vi.spyOn(graphStore, 'resetProjection');
+    cognitiveMock.activeDigests.set({ 'stale-1': { id: 'stale-1', summary: 'Old', isSticky: true } });
     
     service.connect('ws://localhost:8080/ws');
 
@@ -193,6 +194,41 @@ describe('ChatConnectionService', () => {
     expect(spyUpsert).toHaveBeenCalled();
     expect(spyReset).toHaveBeenCalledWith({ spaceId: 'space-1', chatId: 'chat-1', projectionId: 'feature-A' }, ['1']);
     expect(timelineMock.setHistoryMetadata).toHaveBeenCalledWith('cursor-123', true, 'feature-A');
+    expect(cognitiveMock.activeDigests()).toEqual({});
+  });
+
+  it('should preserve activeFocus during worker preview_context and not clear flow logs on approval', () => {
+    const existingFocus: AttentionFocus = {
+      primaryFocus: ['auth', 'middleware'],
+      relatedContext: [],
+      dormantLenses: []
+    };
+    cognitiveMock.activeFocus.set(existingFocus);
+
+    service.connect('ws://localhost:8080/ws');
+
+    const workerPreview = fromJson(WSEventSchema, {
+      previewContext: {
+        spaceId: 'space-1',
+        chatId: 'chat-1',
+        previewId: 'prev-worker',
+        stage: 'CONTEXT_STAGE_WORKER',
+        managerSystemPrompt: 'Worker rules',
+        longTermMemory: ['Context digest'],
+        recentHistory: ['[catalyst] Build auth'],
+        fileContexts: [{ path: 'src/auth.go', level: 'injected', tokenCount: 120 }],
+        focus: { primaryFocus: [], relatedContext: [], dormantLenses: [] }
+      }
+    } as JsonValue);
+
+    wsSubject.next(workerPreview);
+
+    expect(cognitiveMock.activeFocus()).toEqual(existingFocus);
+    expect(cognitiveMock.pendingContextReview()?.stage).toBe(ContextStage.WORKER);
+
+    service.submitContextApproval(true, ['src/auth.go'], [0]);
+    expect(flowMock.resetTurn).not.toHaveBeenCalled();
+    expect(cognitiveMock.pendingContextReview()).toBeNull();
   });
 
   it('should format switchBranch correctly and clear the GraphStore', () => {

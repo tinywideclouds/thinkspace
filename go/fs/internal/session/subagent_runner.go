@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
@@ -56,6 +57,7 @@ type SubAgentResult struct {
 	Passed       bool
 	Trace        string
 	Diff         string
+	RawPayload   string
 	GenNodeID    uuid.UUID
 	LeafEventIDs []uuid.UUID
 }
@@ -91,6 +93,60 @@ func NewSubAgentRunner(
 		bundleAssembler: bundleAssembler,
 		broadcaster:     broadcaster,
 	}
+}
+
+func extractChangedFilesFromDiff(diff string) []string {
+	if strings.TrimSpace(diff) == "" {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var paths []string
+
+	for _, line := range strings.Split(diff, "\n") {
+		if !strings.HasPrefix(line, "+++ ") {
+			continue
+		}
+		raw := strings.TrimSpace(strings.TrimPrefix(line, "+++ "))
+		if raw == "" || raw == "/dev/null" {
+			continue
+		}
+		raw = strings.TrimPrefix(raw, "b/")
+		clean := filepath.ToSlash(filepath.Clean(raw))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			continue
+		}
+		if !seen[clean] {
+			seen[clean] = true
+			paths = append(paths, clean)
+		}
+	}
+	return paths
+}
+
+func (r *SubAgentRunner) captureCandidateFiles(ctx context.Context, sandbox workspace.FileReader, diff string, fallbackTargets []string) map[string]string {
+	if sandbox == nil {
+		return nil
+	}
+
+	paths := extractChangedFilesFromDiff(diff)
+	if len(paths) == 0 {
+		paths = fallbackTargets
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+
+	files := make(map[string]string, len(paths))
+	for _, p := range paths {
+		data, err := sandbox.ReadFile(ctx, p)
+		if err == nil {
+			files[p] = string(data)
+		}
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	return files
 }
 
 func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAgentResult {
@@ -136,8 +192,7 @@ func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAge
 	if req.PrebuiltBundle != nil {
 		bundle = *req.PrebuiltBundle
 	} else {
-		workbench := workspace.NewWorkbench()
-		workbenchItems, err := workbench.Build(ctx, sandbox, req.Task.TargetFiles)
+		workbenchItems, err := workspace.ReadFileContext(ctx, sandbox, req.Task.TargetFiles)
 		if err != nil {
 			return SubAgentResult{CandidateID: candidateID, Err: err}
 		}
@@ -159,9 +214,8 @@ func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAge
 			policy = NewTokenThresholdPolicy()
 		}
 		reviewID := uuid.NewV7()
-		policyWrapper := workspace.SpaceSettings{ReviewPolicy: req.WorkerPolicySettings}
-		if policy.ShouldReview(policyWrapper, reviewID, &bundle, thinkgraph.AttentionFocus{}) {
-			turnContext := ProjectTurnContext(req.ChatSession.ProjectID, req.ChatSession.ChatID, reviewID, &bundle, thinkgraph.AttentionFocus{})
+		turnContext := ProjectTurnContext(req.ChatSession.ProjectID, req.ChatSession.ChatID, reviewID, ContextStageWorker, &bundle, thinkgraph.AttentionFocus{})
+		if policy.ShouldReview(req.WorkerPolicySettings, turnContext) {
 			previewTitle := fmt.Sprintf("Sub-Agent Context Preview (%s)", req.Task.AgentID)
 			previewMarkdown := FormatBundlePreviewMarkdown(previewTitle, &bundle)
 			if previewID, err := r.service.SaveContextPreview(ctx, req.ChatSession, previewMarkdown); err != nil {
@@ -229,6 +283,7 @@ func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAge
 	}
 
 	var diff string
+	var files map[string]string
 	if patchApplied {
 		if err := sandbox.DeliverForReview(ctx); err != nil {
 			return SubAgentResult{CandidateID: candidateID, Err: err}
@@ -243,6 +298,8 @@ func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAge
 			diff = readDiff
 			record.StateDelta = diff
 		}
+
+		files = r.captureCandidateFiles(ctx, sandbox, diff, req.Task.TargetFiles)
 	}
 
 	if req.Emitter != nil {
@@ -302,6 +359,7 @@ func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAge
 		Passed:      passed,
 		Trace:       finalTrace,
 		Diff:        diff,
+		Files:       files,
 		RawPayload:  rawPayload,
 		Instruction: req.Task.Instruction,
 	}
@@ -317,6 +375,7 @@ func (r *SubAgentRunner) Run(ctx context.Context, req SubAgentRunRequest) SubAge
 		Passed:       passed,
 		Trace:        finalTrace,
 		Diff:         diff,
+		RawPayload:   rawPayload,
 		GenNodeID:    genNodeID,
 		Record:       record,
 		LeafEventIDs: []uuid.UUID{leafNodeID},

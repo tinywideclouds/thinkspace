@@ -12,7 +12,7 @@ func NewNoOpVerifier() *NoOpVerifier {
 	return &NoOpVerifier{}
 }
 
-func (v *NoOpVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
+func (v *NoOpVerifier) Verify(ctx context.Context, runner workspace.CommandRunner) error {
 	// Prose does not compile. Instantly pass verification.
 	return nil
 }

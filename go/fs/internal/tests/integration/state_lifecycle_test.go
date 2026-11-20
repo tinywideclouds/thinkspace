@@ -113,7 +113,7 @@ func (m *mockThinkState) Config() spaces.ThinkStateConfig {
 	return cfg
 }
 func (m *mockThinkState) Verifier() spaces.Verifier { return m }
-func (m *mockThinkState) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
+func (m *mockThinkState) Verify(ctx context.Context, runner workspace.CommandRunner) error {
 	return nil
 }
 func (m *mockThinkState) Mapbook() spaces.Mapbook { return m }
@@ -356,9 +356,6 @@ digest:
 					Text: `{"thought":"Sub-agent branch output","patches":[]}`,
 				},
 				{
-					Text: "Manager evaluation: Combine the best test patterns into a unified test suite.",
-				},
-				{
 					Text: `{"thought":"Golden Synthesis Patch","patches":[]}`,
 				},
 				{
@@ -433,14 +430,12 @@ digest:
 			t.Fatalf("GetSubGraphTimeline failed: %v", err)
 		}
 
-		hasRefinePrompt := false
 		hasSynthesizeTaskPrompt := false
 		hasSynthRes := false
 		for _, n := range flowTimeline {
-			if n.Type == thinkgraph.EventPrompt && n.Edges["parent_id"] == synthSig.ParentNodeID.String() {
-				hasRefinePrompt = true
-			}
-			if n.Type == thinkgraph.EventPrompt && n.Metadata["agent_id"] == "synthesis" {
+			if n.Type == thinkgraph.EventPrompt &&
+				n.Metadata["agent_id"] == "synthesis" &&
+				n.Edges["parent_id"] == synthSig.ParentNodeID.String() {
 				hasSynthesizeTaskPrompt = true
 			}
 			if n.Type == workspace.EventCandidateResolution && n.Metadata["agent_id"] == "synthesis" && strings.Contains(n.Content, "ACCEPTED") {
@@ -448,11 +443,8 @@ digest:
 			}
 		}
 
-		if !hasRefinePrompt {
-			t.Errorf("Expected Manager refine prompt node linked to ParentNodeID %s across boundary", synthSig.ParentNodeID.String())
-		}
 		if !hasSynthesizeTaskPrompt {
-			t.Errorf("Expected synthesis worker prompt node from YAML synthesize_prompt on flow subgraph")
+			t.Errorf("Expected synthesis worker prompt node linked to ParentNodeID %s on flow subgraph", synthSig.ParentNodeID.String())
 		}
 		if !hasSynthRes {
 			t.Errorf("Expected synthesis candidate resolution ACCEPTED node at the tail of the flow subgraph")

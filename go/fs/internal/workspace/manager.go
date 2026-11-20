@@ -80,14 +80,14 @@ func (manager *ServiceManager) GetService(spaceID string) *Service {
 	manager.mu.Unlock()
 
 	spaceRoot := filepath.Join(manager.baseRoot, spaceID)
-	workspaceDir := filepath.Join(spaceRoot, "workspace")
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil && manager.logger != nil {
-		manager.logger.Error("failed to create workspace directory", "space_id", spaceID, "error", err)
+	workbenchDir := filepath.Join(spaceRoot, WorkbenchLocation)
+	if err := os.MkdirAll(workbenchDir, 0755); err != nil && manager.logger != nil {
+		manager.logger.Error("failed to create workbench directory", "space_id", spaceID, "error", err)
 	}
 
 	var engine ChatVersioner
 	if manager.engineFactory != nil {
-		engine = manager.engineFactory(workspaceDir)
+		engine = manager.engineFactory(workbenchDir)
 	}
 
 	var dispatcher *thinkgraph.Dispatcher

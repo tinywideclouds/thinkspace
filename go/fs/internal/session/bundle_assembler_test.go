@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -63,7 +64,9 @@ func (m *baMockGraphRepo) GetNodes(ctx context.Context, c *thinkgraph.ChatAddres
 	return result, nil
 }
 
-type baMockThinkSpace struct{}
+type baMockThinkSpace struct {
+	lastMapbookRoot string
+}
 
 func (s *baMockThinkSpace) Config() spaces.ThinkStateConfig {
 	cfg := spaces.ThinkStateConfig{
@@ -76,8 +79,11 @@ func (s *baMockThinkSpace) Config() spaces.ThinkStateConfig {
 }
 func (s *baMockThinkSpace) Verifier() spaces.Verifier { return nil }
 func (s *baMockThinkSpace) Mapbook() spaces.Mapbook   { return s }
-func (s *baMockThinkSpace) GenerateLayers(ctx context.Context, workspaceRoot string) (map[spaces.MapbookLayer]string, error) {
-	return nil, nil
+func (s *baMockThinkSpace) GenerateLayers(ctx context.Context, root string) (map[spaces.MapbookLayer]string, error) {
+	s.lastMapbookRoot = root
+	return map[spaces.MapbookLayer]string{
+		spaces.LayerStructural: "├── src/go.mod",
+	}, nil
 }
 func (s *baMockThinkSpace) Patcher() workspace.Patcher                             { return nil }
 func (s *baMockThinkSpace) Initialize(ctx context.Context, directory string) error { return nil }
@@ -86,6 +92,42 @@ func (s *baMockThinkSpace) EnrichBundle(ctx context.Context, bundle *cognition.T
 }
 
 // --- Tests ---
+
+func TestBundleAssembler_ResolvesWorkbenchLocationForMapbook(t *testing.T) {
+	ctx := context.Background()
+	baseRoot := t.TempDir()
+	repo := &baMockGraphRepo{
+		nodes: []thinkgraph.Node{
+			{Event: thinkgraph.Event{ID: uuid.NewV7(), Type: thinkgraph.EventPrompt, Content: "Add auth", Timestamp: time.Now()}},
+		},
+	}
+
+	assembler := NewBundleAssembler(nil, repo, thinkgraph.NewContextProjecter(), config.NewRegistry(), baseRoot)
+	chatObj := &thinkgraph.ChatAddress{ChatID: "chat-1", ProjectID: "space-1"}
+	space := &baMockThinkSpace{}
+
+	expectedWorkbenchDir := filepath.Join(baseRoot, "space-1", workspace.WorkbenchLocation)
+
+	bundle, _, err := assembler.Assemble(ctx, chatObj, uuid.Nil(), uuid.Nil(), "golang", space)
+	if err != nil {
+		t.Fatalf("Assemble failed: %v", err)
+	}
+	if space.lastMapbookRoot != expectedWorkbenchDir {
+		t.Errorf("expected Assemble to generate Mapbook from %q, got %q", expectedWorkbenchDir, space.lastMapbookRoot)
+	}
+	if bundle.Mapbook.Maps[string(spaces.LayerStructural)] != "├── src/go.mod" {
+		t.Errorf("expected structural Mapbook layer to be populated, got %+v", bundle.Mapbook.Maps)
+	}
+
+	space.lastMapbookRoot = ""
+	workerBundle := assembler.AssembleWorkerBundle(ctx, "space-1", space, "rules", "digest", "instruction", nil)
+	if space.lastMapbookRoot != expectedWorkbenchDir {
+		t.Errorf("expected AssembleWorkerBundle to generate Mapbook from %q, got %q", expectedWorkbenchDir, space.lastMapbookRoot)
+	}
+	if workerBundle.Mapbook.Maps[string(spaces.LayerStructural)] != "├── src/go.mod" {
+		t.Errorf("expected worker structural Mapbook layer to be populated, got %+v", workerBundle.Mapbook.Maps)
+	}
+}
 
 func TestBundleAssembler_Assemble_CatalystResolution(t *testing.T) {
 	ctx := context.Background()

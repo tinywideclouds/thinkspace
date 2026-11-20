@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ContextInspectorComponent } from './context-inspector.component';
+import { ContextStage } from '@org/llm-core-facade';
 import { ComponentRef } from '@angular/core';
 import { vi, describe, beforeEach, it, expect } from 'vitest';
 
@@ -21,8 +22,9 @@ describe('ContextInspectorComponent', () => {
       spaceId: 'golang',
       chatId: 'chat-1',
       previewId: 'prev-123',
+      stage: ContextStage.MANAGER,
       managerSystemPrompt: 'Test Manager Rules',
-      stickyDigests: ['Sticky rule 1'],
+      longTermMemory: ['Sticky rule 1'],
       recentHistory: ['[prompt] user message', '[model] reply', '[catalyst] Build HTTP server'],
       fileContexts: [
         { path: 'src/main.go', level: 'injected', tokenCount: 150 },
@@ -30,6 +32,7 @@ describe('ContextInspectorComponent', () => {
         { path: 'internal/handler/hello.go', level: 'skeleton', tokenCount: 0 },
         { path: 'go.mod', level: 'structural', tokenCount: 0 },
       ],
+      focus: { primaryFocus: [], relatedContext: [], dormantLenses: [] },
     });
     fixture.detectChanges();
   });
@@ -43,8 +46,11 @@ describe('ContextInspectorComponent', () => {
     expect(component.totalFileTokens()).toBe(170);
   });
 
-  it('should render the catalyst as a non-removable Prompt block separate from history checkboxes', () => {
+  it('should render the catalyst as a non-removable Prompt block separate from history checkboxes on Manager stage', () => {
     const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.textContent).toContain('JIT Context Preview');
+    expect(compiled.textContent).toContain('Long-Term Memory:');
+    expect(compiled.textContent).toContain('Sticky rule 1');
     expect(compiled.textContent).toContain('Prompt');
     expect(compiled.textContent).toContain('Build HTTP server');
     expect(component.historyEntries().length).toBe(2);
@@ -96,5 +102,43 @@ describe('ContextInspectorComponent', () => {
     const buttons = fixture.nativeElement.querySelectorAll('button');
     buttons[0].click(); // Copy Full Payload button
     expect(emitSpy).toHaveBeenCalledWith('prev-123');
+  });
+
+  it('should render Sub-Agent Context Preview, Context Digest, and read-only Sub-Agent Tasks on Worker stage', () => {
+    componentRef.setInput('context', {
+      spaceId: 'golang',
+      chatId: 'chat-1',
+      previewId: 'prev-worker',
+      stage: ContextStage.WORKER,
+      managerSystemPrompt: 'Worker Patcher Rules',
+      longTermMemory: ['Shared architectural digest'],
+      recentHistory: ['[agent-1] Iterative implementation', '[catalyst] Recursive implementation'],
+      fileContexts: [
+        { path: 'src/main.go', level: 'injected', tokenCount: 150 },
+        { path: 'go.mod', level: 'structural', tokenCount: 0 },
+      ],
+      focus: { primaryFocus: [], relatedContext: [], dormantLenses: [] },
+    });
+    fixture.detectChanges();
+
+    const compiled = fixture.nativeElement as HTMLElement;
+    expect(compiled.textContent).toContain('Sub-Agent Context Preview');
+    expect(compiled.textContent).toContain('Worker Rules & Patcher Schema');
+    expect(compiled.textContent).toContain('Context Digest');
+    expect(compiled.textContent).toContain('Shared architectural digest');
+    expect(compiled.textContent).toContain('Sub-Agent Tasks (2)');
+    expect(compiled.textContent).toContain('Iterative implementation');
+    expect(compiled.textContent).toContain('Recursive implementation');
+    expect(compiled.textContent).toContain('Abort Sub-Agents');
+    expect(compiled.textContent).not.toContain('Recent Trajectory');
+
+    const emitSpy = vi.spyOn(component.approve, 'emit');
+    const buttons = compiled.querySelectorAll('button');
+    buttons[2].click(); // Approve & Run button
+
+    expect(emitSpy).toHaveBeenCalledWith({
+      retainedFilePaths: ['src/main.go'],
+      retainedHistoryIndices: [0, 1],
+    });
   });
 });

@@ -92,8 +92,9 @@ func TestMarshalPreviewContext(t *testing.T) {
 		SpaceID:             "golang",
 		ChatID:              "chat-123",
 		PreviewID:           "uuid-v7",
+		Stage:               session.ContextStageWorker,
 		ManagerSystemPrompt: "Test rules",
-		LongTermMemory:      []string{"Sticky memory"},
+		LongTermMemory:      []string{"Context digest"},
 		RecentHistory:       []string{"[prompt] Test"},
 		FileContexts: []session.FileContext{
 			{Path: "src/main.go", Level: "structural", TokenCount: 100},
@@ -121,8 +122,15 @@ func TestMarshalPreviewContext(t *testing.T) {
 	if previewContext["previewId"] != "uuid-v7" {
 		t.Errorf("expected previewId 'uuid-v7', got %v", previewContext["previewId"])
 	}
+	if previewContext["stage"] != "CONTEXT_STAGE_WORKER" {
+		t.Errorf("expected stage 'CONTEXT_STAGE_WORKER', got %v", previewContext["stage"])
+	}
 	if previewContext["managerSystemPrompt"] != "Test rules" {
 		t.Errorf("expected prompt 'Test rules', got %v", previewContext["managerSystemPrompt"])
+	}
+	ltm, ok := previewContext["longTermMemory"].([]any)
+	if !ok || len(ltm) != 1 || ltm[0] != "Context digest" {
+		t.Errorf("expected longTermMemory ['Context digest'], got %v", previewContext["longTermMemory"])
 	}
 }
 

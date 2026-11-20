@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { LinearFeedComponent } from './linear-feed.component';
 import { TimelineFacade, Turn } from '../timeline.facade';
 import { ChatConnectionService, ChatItem, FlowState, FlowExecutionChatItem } from '@org/llm-state-chat';
-import { PreviewContext } from '@org/llm-core-facade';
+import { PreviewContext, ContextStage } from '@org/llm-core-facade';
 import { signal, WritableSignal } from '@angular/core';
 import { describe, beforeEach, it, expect, vi, Mock } from 'vitest';
 
@@ -161,8 +161,9 @@ describe('LinearFeedComponent', () => {
     mockFacade.pendingContextReview.set({
       spaceId: 'golang',
       chatId: 'chat-1',
+      stage: ContextStage.MANAGER,
       managerSystemPrompt: 'System rules',
-      stickyDigests: [],
+      longTermMemory: [],
       recentHistory: ['[user] hello'],
       fileContexts: [],
       focus: { primaryFocus: [], relatedContext: [], dormantLenses: [] }

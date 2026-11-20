@@ -6,7 +6,13 @@ import { FlowStore } from './flow.store';
 import { CognitiveStore } from './cognitive.store';
 import { GraphStore } from './graph.store';
 import { UiSettingsService } from './ui-settings.service';
-import { LlmFacade, AppEvent, DelegationStrategy, GraphEvent } from '@org/llm-core-facade';
+import {
+  LlmFacade,
+  AppEvent,
+  ContextStage,
+  DelegationStrategy,
+  GraphEvent,
+} from '@org/llm-core-facade';
 import { ChatItem } from './chat.models';
 
 @Injectable({ providedIn: 'root' })
@@ -131,10 +137,9 @@ export class ChatConnectionService {
   }
 
   public submitContextApproval(approved: boolean, paths: string[] = [], indices: number[] = []): void {
-    this.flow.resetTurn();
     this.cognitive.pendingContextReview.set(null);
     if (!approved) {
-      this.flow.appendSystemLog('INFO', 'Turn aborted by user.');
+      this.flow.appendSystemLog('INFO', 'Context review cancelled by user.');
     }
     this.transport.send(LlmFacade.createApproveContext(approved, paths, indices));
   }
@@ -256,9 +261,7 @@ export class ChatConnectionService {
           if (this.timeline.isActiveView(event.coordinate)) {
             this.timeline.setHistoryMetadata(event.nextCursor, event.hasMore, event.coordinate.projectionId);
             this.cognitive.activeFocus.set(event.focus);
-            if (Object.keys(event.digests).length > 0) {
-              this.cognitive.activeDigests.set(event.digests);
-            }
+            this.cognitive.activeDigests.set(event.digests);
           }
         }
         this.timeline.isLoadingHistory.set(false);
@@ -281,17 +284,26 @@ export class ChatConnectionService {
         }
         break;
 
-      case 'preview_context':
-        this.cognitive.activeFocus.set(event.context.focus);
+      case 'preview_context': {
+        const hasFocus =
+          event.context.focus.primaryFocus.length > 0 ||
+          event.context.focus.relatedContext.length > 0 ||
+          event.context.focus.dormantLenses.length > 0;
+        if (event.context.stage !== ContextStage.WORKER || hasFocus) {
+          this.cognitive.activeFocus.set(event.context.focus);
+        }
         this.cognitive.activeWorkbench.set(event.context.fileContexts);
         if (this.cognitive.autoApproveContext()) {
-          const filePaths = event.context.fileContexts.map(f => f.path);
+          const filePaths = event.context.fileContexts
+            .filter(f => f.level === 'injected')
+            .map(f => f.path);
           const historyIndices = event.context.recentHistory.map((_, i) => i);
           this.submitContextApproval(true, filePaths, historyIndices);
         } else {
           this.cognitive.pendingContextReview.set(event.context);
         }
         break;
+      }
 
       case 'chat_stream':
         this.graphStore.nodes.update(map => {

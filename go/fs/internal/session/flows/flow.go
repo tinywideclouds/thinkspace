@@ -12,7 +12,7 @@ const (
 	StrategyRefine FlowStrategy = "refine"
 )
 
-// Candidate encapsulates the canonical identity and outcome of a candidate branch produced during a flow.
+// Candidate encapsulates the canonical identity, file snapshots, and outcome of a candidate branch produced during a flow.
 type Candidate struct {
 	ID          string    // Bare canonical ID (e.g., "<chatID>-flow-<uuid>-agent-1")
 	AgentID     string    // Logical role label (e.g., "agent-1", "synthesis")
@@ -20,6 +20,7 @@ type Candidate struct {
 	Passed      bool
 	Trace       string
 	Diff        string
+	Files       map[string]string // Relative file path -> full file content on this candidate branch
 	RawPayload  string
 	Instruction string
 }

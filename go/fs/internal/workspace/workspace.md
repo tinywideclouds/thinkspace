@@ -27,8 +27,8 @@ Handles stateless, multi-tenant operations requested by the REST API, caching la
 ### 2. `Service` (`service.go`)
 Orchestrates the active lifecycle of a single ThinkSpace: chat initialization, JIT graph synchronization, candidate sandbox spawning, candidate acceptance/rejection, context previews, and ledger/digest persistence through `thinkgraph.Dispatcher`.
 
-### 3. `ChatVersioner` & `CandidateSandbox` (`state.go`)
-Interfaces abstracting raw VCS manipulation (thread initialization, checkpoints, candidate worktree sandboxes, diff inspection, accept fast-forwards, and reject cleanup).
+### 3. `ChatVersioner` & Sandbox Capability Interfaces (`state.go`)
+`ChatVersioner` abstracts raw VCS manipulation (thread initialization, checkpoints, candidate worktree sandboxes, diff inspection, accept fast-forwards, and reject cleanup). Sandbox capabilities are decomposed into narrow interfaces (`FileReader`, `FileWorkspace`, `CommandRunner`) composed into `CandidateSandbox`.
 
 ### 4. `Patcher` & `Workbench` (`patcher.go`, `workbench.go`)
-`Patcher` applies structured LLM patch outputs inside a `CandidateSandbox`; `Workbench` reads requested target files into `cognition.WorkbenchItem` entries with fail-fast validation on missing paths.
+`Patcher` applies structured LLM patch outputs to a `FileWorkspace`; `Workbench` reads requested target files from a `FileReader` into `cognition.WorkbenchItem` entries with fail-fast validation on missing paths.

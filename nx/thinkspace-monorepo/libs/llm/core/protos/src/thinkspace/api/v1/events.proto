@@ -368,4 +368,5 @@ message WSEvent {
     InlineEdit inline_edit = 25;
     SwitchBranch switch_branch = 26;
   }
+
 }

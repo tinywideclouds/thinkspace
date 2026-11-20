@@ -11,7 +11,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// CIVerifier executes a YAML-defined list of commands inside the candidate sandbox.
+// CIVerifier executes a YAML-defined list of commands inside the candidate workspace.
 type CIVerifier struct {
 	toolchain spaces.ToolchainConfig
 	timeout   time.Duration
@@ -27,7 +27,7 @@ func NewCIVerifier(toolchain spaces.ToolchainConfig, timeout time.Duration) *CIV
 	}
 }
 
-func (v *CIVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error {
+func (v *CIVerifier) Verify(ctx context.Context, runner workspace.CommandRunner) error {
 	verifyCtx, cancel := context.WithTimeout(ctx, v.timeout)
 	defer cancel()
 
@@ -52,7 +52,7 @@ func (v *CIVerifier) Verify(ctx context.Context, sandbox workspace.CandidateSand
 			cmd := parts[0]
 			args := parts[1:]
 
-			output, err := sandbox.ExecuteCommand(verifyCtx, cmd, args...)
+			output, err := runner.ExecuteCommand(verifyCtx, cmd, args...)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(verifyCtx.Err(), context.DeadlineExceeded) {
 					trace.WriteString(fmt.Sprintf("[%s] %s: TIMEOUT\n%s\n\n", phaseName, cmdStr, output))

@@ -19,24 +19,22 @@ func TestTokenThresholdPolicy_ShouldReview(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		settings workspace.SpaceSettings
+		policy   workspace.ReviewPolicySettings
 		bundle   *cognition.ThinkBundle
 		expected bool
 	}{
 		{
 			name: "Review active, large persona excluded -> below threshold bypasses",
-			settings: workspace.SpaceSettings{
-				ReviewPolicy: workspace.ReviewPolicySettings{
-					Active:         true,
-					MinTokens:      200,
-					IncludePersona: false,
-				},
+			policy: workspace.ReviewPolicySettings{
+				Active:         true,
+				MinTokens:      200,
+				IncludePersona: false,
 			},
 			bundle: &cognition.ThinkBundle{
-				Rules: cognition.SystemRules{Persona: strings.Repeat("a", 2000)}, // ~500 tokens
+				Rules: cognition.SystemRules{Persona: strings.Repeat("a", 2000)},
 				Trajectory: cognition.Trajectory{
 					WorkingMemory: []cognition.TrajectoryEvent{
-						{Role: "user", Content: "hi"}, // ~1 token
+						{Role: "user", Content: "hi"},
 					},
 				},
 			},
@@ -44,15 +42,13 @@ func TestTokenThresholdPolicy_ShouldReview(t *testing.T) {
 		},
 		{
 			name: "Review active, large persona included -> exceeds threshold triggers review",
-			settings: workspace.SpaceSettings{
-				ReviewPolicy: workspace.ReviewPolicySettings{
-					Active:         true,
-					MinTokens:      200,
-					IncludePersona: true,
-				},
+			policy: workspace.ReviewPolicySettings{
+				Active:         true,
+				MinTokens:      200,
+				IncludePersona: true,
 			},
 			bundle: &cognition.ThinkBundle{
-				Rules: cognition.SystemRules{Persona: strings.Repeat("a", 2000)}, // ~500 tokens
+				Rules: cognition.SystemRules{Persona: strings.Repeat("a", 2000)},
 				Trajectory: cognition.Trajectory{
 					WorkingMemory: []cognition.TrajectoryEvent{
 						{Role: "user", Content: "hi"},
@@ -63,12 +59,10 @@ func TestTokenThresholdPolicy_ShouldReview(t *testing.T) {
 		},
 		{
 			name: "Disabled globally overrides high dynamic token count",
-			settings: workspace.SpaceSettings{
-				ReviewPolicy: workspace.ReviewPolicySettings{
-					Active:         false,
-					MinTokens:      10,
-					IncludePersona: false,
-				},
+			policy: workspace.ReviewPolicySettings{
+				Active:         false,
+				MinTokens:      10,
+				IncludePersona: false,
 			},
 			bundle: &cognition.ThinkBundle{
 				Workbench: []cognition.WorkbenchItem{
@@ -79,12 +73,10 @@ func TestTokenThresholdPolicy_ShouldReview(t *testing.T) {
 		},
 		{
 			name: "Review active, persona excluded, file tokens push over threshold",
-			settings: workspace.SpaceSettings{
-				ReviewPolicy: workspace.ReviewPolicySettings{
-					Active:         true,
-					MinTokens:      150,
-					IncludePersona: false,
-				},
+			policy: workspace.ReviewPolicySettings{
+				Active:         true,
+				MinTokens:      150,
+				IncludePersona: false,
 			},
 			bundle: &cognition.ThinkBundle{
 				Workbench: []cognition.WorkbenchItem{
@@ -97,7 +89,8 @@ func TestTokenThresholdPolicy_ShouldReview(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := policy.ShouldReview(tt.settings, responseID, tt.bundle, focus)
+			turnContext := session.ProjectTurnContext("space-1", "chat-1", responseID, session.ContextStageManager, tt.bundle, focus)
+			result := policy.ShouldReview(tt.policy, turnContext)
 			if result != tt.expected {
 				t.Errorf("expected ShouldReview to be %v, got %v", tt.expected, result)
 			}

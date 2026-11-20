@@ -16,6 +16,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/config"
 	"github.com/tinywideclouds.com/thinkspace/internal/spaces"
 	"github.com/tinywideclouds.com/thinkspace/internal/thinkgraph"
+	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
 const maxFallbackRecentDigests = 3
@@ -52,7 +53,7 @@ func NewBundleAssembler(
 // Assemble executes the graph traversal, tag-sensitive digest selection, and persona template injection.
 func (a *BundleAssembler) Assemble(
 	ctx context.Context,
-	chatObj *thinkgraph.ChatAddress,
+	chat *thinkgraph.ChatAddress,
 	digestionHorizon uuid.UUID,
 	catalystID uuid.UUID,
 	activeThinkState string,
@@ -70,17 +71,17 @@ func (a *BundleAssembler) Assemble(
 		focusDepth = thinkState.Config().Memory.FocusDepth
 	}
 
-	volatileEvents, primaryTags, relatedTags, err := a.gatherTimeline(ctx, chatObj, digestionHorizon, focusDepth)
+	volatileEvents, primaryTags, relatedTags, err := a.gatherTimeline(ctx, chat, digestionHorizon, focusDepth)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("gathering timeline: %w", err)
 	}
 
-	allDigests, err := a.graphRepo.GetDigests(ctx, chatObj)
+	allDigests, err := a.graphRepo.GetDigests(ctx, chat)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching digests: %w", err)
 	}
 
-	allSpaceContexts, err := a.graphRepo.GetSpaceContexts(ctx, chatObj)
+	allSpaceContexts, err := a.graphRepo.GetSpaceContexts(ctx, chat)
 	if err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching space contexts: %w", err)
 	}
@@ -104,7 +105,7 @@ func (a *BundleAssembler) Assemble(
 
 	var catalystNode *thinkgraph.Node
 	if catalystID != uuid.Nil() {
-		nodes, getErr := a.graphRepo.GetNodes(ctx, chatObj, []string{catalystID.String()})
+		nodes, getErr := a.graphRepo.GetNodes(ctx, chat, []string{catalystID.String()})
 		if getErr != nil {
 			return cognition.ThinkBundle{}, nil, fmt.Errorf("fetching catalyst node %s: %w", catalystID, getErr)
 		}
@@ -135,10 +136,10 @@ func (a *BundleAssembler) Assemble(
 		return cognition.ThinkBundle{}, graphData, nil
 	}
 
-	projectWorkspaceDir := filepath.Join(a.workspaceRoot, chatObj.ProjectID, "workspace")
+	workbench := filepath.Join(a.workspaceRoot, chat.ProjectID, workspace.WorkbenchLocation)
 	stringMaps := make(map[string]string)
 	if thinkState.Mapbook() != nil {
-		rawMapbook, mbErr := thinkState.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
+		rawMapbook, mbErr := thinkState.Mapbook().GenerateLayers(ctx, workbench)
 		if mbErr != nil {
 			return cognition.ThinkBundle{}, nil, fmt.Errorf("generating mapbook layers: %w", mbErr)
 		}
@@ -175,7 +176,7 @@ func (a *BundleAssembler) Assemble(
 		ActiveTags: focus.PrimaryFocus,
 	}
 
-	if err := thinkState.EnrichBundle(ctx, &bundle, focus, a.workspaceRoot); err != nil {
+	if err := thinkState.EnrichBundle(ctx, &bundle, focus, workbench); err != nil {
 		return cognition.ThinkBundle{}, nil, fmt.Errorf("enriching bundle: %w", err)
 	}
 
@@ -193,11 +194,11 @@ func (a *BundleAssembler) AssembleWorkerBundle(
 	instruction string,
 	workbenchItems []cognition.WorkbenchItem,
 ) cognition.ThinkBundle {
-	projectWorkspaceDir := filepath.Join(a.workspaceRoot, projectID, "workspace")
+	workbench := filepath.Join(a.workspaceRoot, projectID, workspace.WorkbenchLocation)
 	stringMaps := make(map[string]string)
 
 	if space != nil && space.Mapbook() != nil {
-		rawMapbook, err := space.Mapbook().GenerateLayers(ctx, projectWorkspaceDir)
+		rawMapbook, err := space.Mapbook().GenerateLayers(ctx, workbench)
 		if err != nil {
 			if a.logger != nil {
 				a.logger.WarnContext(ctx, "failed to generate mapbook layers", "error", err)

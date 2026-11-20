@@ -117,8 +117,9 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 		policy = NewTokenThresholdPolicy()
 	}
 
-	shouldReview := policy.ShouldReview(settings, turnID, &bundle, graphData.Focus)
-	if !e.contextReview(ctx, address, shouldReview, turnID, &bundle, graphData, ui) {
+	turnContext := ProjectTurnContext(e.session.SpaceID, e.session.ChatID, turnID, ContextStageManager, &bundle, graphData.Focus)
+	shouldReview := policy.ShouldReview(settings.ReviewPolicy, turnContext)
+	if !e.contextReview(ctx, address, shouldReview, turnContext, &bundle, ui) {
 		return &signals.SignalTerminal{}, nil
 	}
 
@@ -159,7 +160,7 @@ func (e *ChatEngine) runStandard(ctx context.Context, address *thinkgraph.ChatAd
 	return signal, err
 }
 
-func (e *ChatEngine) contextReview(ctx context.Context, address *thinkgraph.ChatAddress, shouldReview bool, responseID uuid.UUID, bundle *cognition.ThinkBundle, graphData *thinkgraph.GraphData, ui UserInterface) bool {
+func (e *ChatEngine) contextReview(ctx context.Context, address *thinkgraph.ChatAddress, shouldReview bool, turnContext TurnContext, bundle *cognition.ThinkBundle, ui UserInterface) bool {
 	if !shouldReview {
 		return true
 	}
@@ -167,7 +168,6 @@ func (e *ChatEngine) contextReview(ctx context.Context, address *thinkgraph.Chat
 		return false
 	}
 
-	turnContext := ProjectTurnContext(e.session.SpaceID, e.session.ChatID, responseID, bundle, graphData.Focus)
 	if e.workspaceService != nil && address != nil {
 		previewMarkdown := FormatBundlePreviewMarkdown("Manager Turn Context Preview", bundle)
 		if previewID, err := e.workspaceService.SaveContextPreview(ctx, address, previewMarkdown); err != nil {

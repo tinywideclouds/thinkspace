@@ -6,7 +6,7 @@ import (
 	"github.com/tinywideclouds.com/thinkspace/internal/workspace"
 )
 
-// Verifier defines the contract for evaluating a candidate sandbox's code.
+// Verifier defines the contract for evaluating a candidate workspace's code.
 type Verifier interface {
-	Verify(ctx context.Context, sandbox workspace.CandidateSandbox) error
+	Verify(ctx context.Context, runner workspace.CommandRunner) error
 }

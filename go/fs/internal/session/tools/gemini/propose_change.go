@@ -15,7 +15,7 @@ func CompileProposeChange(tool *tools.ProposeChangeTool, config spaces.ThinkStat
 	agentInstructions := "An array of explicit instruction objects, exactly matching the agent_count."
 	contextDigest := "Contextual background explaining why this work is needed."
 	instruction := "Clear instructions detailing what changes or work to execute."
-	targetFiles := "Existing files that the worker must consult or edit."
+	targetFiles := "Optional list of existing file paths from the Mapbook whose full contents the worker should read before making changes."
 
 	if config.Roles.Manager.Tools.ProposeChange.Description != "" {
 		description = config.Roles.Manager.Tools.ProposeChange.Description
